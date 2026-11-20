@@ -16250,9 +16250,10 @@ export class ChatManager extends LocalEngineRuntime {
       workspaceWritable,
       ...(layeredPrefixCacheEnabled ? { layeredPrefixCache: true } : {}),
       // Any bound connector mirrors untrusted external content (email, events,
-      // issues) into the corpus — turn on the provenance-framing block so the
-      // model treats it as data, not commands.
-      ...(project?.connectors?.length ? { untrustedContentPresent: true } : {}),
+      // issues) into the corpus, and a GitHub link opens pull requests anyone
+      // can write — turn on the provenance-framing block so the model treats
+      // it as data, not commands.
+      ...(project?.connectors?.length || project?.github ? { untrustedContentPresent: true } : {}),
       ...(appSubject ? { appSubject } : {}),
       ...(craftbookFocus ? { craftbookFocus: true } : {}),
       ...(factualWriting.on

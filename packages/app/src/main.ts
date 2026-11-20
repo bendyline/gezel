@@ -61,6 +61,7 @@ import {
   isExactApprovedPath,
   isExternalRendererNetworkRequest,
   isPreviewDocumentUrl,
+  isTrustedAppDocumentUrl,
   normalizedDocumentUrl,
   previewExternalServicesForFrame,
 } from './electron-boundaries.js';
@@ -85,6 +86,7 @@ import { redirectAsarToUnpacked } from './supervisor/extract-bundle.js';
 import { type Connection, autostartDefinition, connectOrStart } from './supervisor/index.js';
 import { updateActiveTraySessions, waitForTrayActivityRetry } from './tray-activity.js';
 import { type EngagementMode, TrayController } from './tray.js';
+import { createTrustedIpc } from './trusted-ipc.js';
 import { parseMacUninstallSelection, scheduleMacUninstall } from './uninstaller/macos.js';
 import { type UpdaterPermission, resolveUpdaterPermission } from './updater-policy.js';
 import {
@@ -811,12 +813,14 @@ async function createWindow(): Promise<void> {
     return { action: 'deny' };
   });
 
-  // Pin the renderer to the daemon origin. A top-level navigation (an
-  // injected link, window.location, or form submit) would otherwise load
-  // an attacker origin INTO the window that holds the preload bridge and
-  // the bearer token. Same-origin navigations pass; the splash file://
-  // handoff passes; everything else is cancelled and, if it's a safe
-  // external scheme, opened in the user's browser instead.
+  // Pin the renderer to the app itself. A top-level navigation (an injected
+  // link, window.location, or form submit) would otherwise load another
+  // document INTO the window that holds the preload bridge and the bearer
+  // token: an attacker origin, or one of the daemon's own non-app documents,
+  // such as a model-written `/preview/` page. The app's routes pass; the
+  // splash file:// handoff passes; another daemon document is cancelled
+  // outright; anything else is cancelled and, if it's a safe external scheme,
+  // opened in the user's browser instead.
   const allowedSplashPath = splashPath();
   const allowedSplashUrl = allowedSplashPath ? pathToFileURL(allowedSplashPath).href : null;
   mainWindow.webContents.on('will-navigate', (event, url) => {
@@ -828,8 +832,16 @@ async function createWindow(): Promise<void> {
     // navigation and permits only the splash file, so the pre-connection
     // window is locked down rather than open.
     const allowedOrigin = connection?.state === 'ready' ? safeOrigin(connection.baseUrl) : null;
-    if (isAllowedTopLevelNavigation(url, allowedOrigin, allowedSplashUrl)) return;
+    if (isTrustedAppDocumentUrl(url, allowedOrigin ? [allowedOrigin] : [], allowedSplashUrl)) {
+      return;
+    }
     event.preventDefault();
+    // Not handed to the system browser either: there a preview link would
+    // still open a capability URL a model chose.
+    if (allowedOrigin && safeOrigin(url) === allowedOrigin) {
+      console.warn('[app] refused to open a daemon page that is not the app in the main window');
+      return;
+    }
     if (isSafeExternalUrl(url)) void shell.openExternal(url);
   });
 
@@ -1240,11 +1252,60 @@ async function showConnectionError(
   }
 }
 
+/**
+ * The last two daemon origins the app page was served from. A restart can
+ * come back on a new port, and the page keeps calling IPC from the old one
+ * until the supervisor reloads it.
+ */
+const recentAppOrigins: string[] = [];
+
+function appPageOrigins(): string[] {
+  const current = connection?.state === 'ready' ? safeOrigin(connection.baseUrl) : null;
+  if (current && recentAppOrigins[0] !== current) {
+    recentAppOrigins.unshift(current);
+    recentAppOrigins.length = Math.min(recentAppOrigins.length, 2);
+  }
+  return [...recentAppOrigins];
+}
+
+let startupFileUrlCache: string | null | undefined;
+function startupFileUrl(): string | null {
+  if (startupFileUrlCache === undefined) {
+    const file = splashPath();
+    startupFileUrlCache = file ? pathToFileURL(file).href : null;
+  }
+  return startupFileUrlCache;
+}
+
+/**
+ * True when an IPC message came from Gezel's own page: the main window's main
+ * frame, showing the app or the startup splash. A model-written `/preview/`
+ * page is refused even if it somehow became the main frame
+ * (`isTrustedAppDocumentUrl`); preview iframes never run the preload.
+ */
+function isAppPageSender(event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): boolean {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) {
+    return false;
+  }
+  const frame = event.senderFrame;
+  if (!frame || frame !== event.sender.mainFrame) return false;
+  let url: string;
+  try {
+    url = frame.url;
+  } catch {
+    return false;
+  }
+  return isTrustedAppDocumentUrl(url, appPageOrigins(), startupFileUrl());
+}
+
+/** Every IPC channel registers through this; see trusted-ipc.ts. */
+const appIpc = createTrustedIpc(ipcMain, isAppPageSender);
+
 // Preload hits this synchronously on every page load to get the current
 // token/baseUrl/fallbackReason. Synchronous so the renderer can build its
 // API client before any other code runs — keeps the app.ts "api" singleton
 // simple and avoids a first-render flicker.
-ipcMain.on('gezel:current-connection', (event) => {
+appIpc.on('gezel:current-connection', (event) => {
   event.returnValue = rendererConnectionSnapshot(connection);
 });
 
@@ -1262,15 +1323,15 @@ function isStartupFrame(event: Electron.IpcMainEvent): boolean {
     file ? pathToFileURL(file).href : null,
   );
 }
-ipcMain.on('gezel:startup-home:read', (event) => {
+appIpc.on('gezel:startup-home:read', (event) => {
   event.returnValue = isStartupFrame(event)
     ? { active: startupHome.active, snapshot: startupHome.snapshot, state: startupHome.state }
     : null;
 });
-ipcMain.on('gezel:startup-home:save', (event, state: unknown) => {
+appIpc.on('gezel:startup-home:save', (event, state: unknown) => {
   event.returnValue = isStartupFrame(event) && startupHome.save(state);
 });
-ipcMain.on('gezel:startup-home:finish', (event, draft: unknown) => {
+appIpc.on('gezel:startup-home:finish', (event, draft: unknown) => {
   event.returnValue =
     isStartupFrame(event) && typeof draft === 'string' && startupHome.finish(draft);
 });
@@ -1278,8 +1339,8 @@ ipcMain.on('gezel:startup-home:finish', (event, draft: unknown) => {
 // Update IPC. `gezel:update-state` is pushed on every transition; this pull
 // covers a renderer that mounted (or reloaded after a supervisor restart)
 // while an update was already staged.
-ipcMain.handle('gezel:update:state', () => updateState);
-ipcMain.handle('gezel:update:install', async () => {
+appIpc.handle('gezel:update:state', () => updateState);
+appIpc.handle('gezel:update:install', async () => {
   const delivery = appUpdateDeliveryPolicy(process.platform, {
     store: storeBuild.channel !== null,
   });
@@ -1334,7 +1395,7 @@ ipcMain.handle('gezel:update:install', async () => {
   });
   return { ok: false as const, error: result.error };
 });
-ipcMain.handle('gezel:update:restart', () => {
+appIpc.handle('gezel:update:restart', () => {
   if (updateState?.kind !== 'installed') {
     return { ok: false as const, error: 'No installed update is waiting for a restart.' };
   }
@@ -1360,7 +1421,7 @@ function startAtLoginDeps() {
 
 // Start at login. Packaged only: in dev the login item would point at the
 // development Electron binary.
-ipcMain.handle('gezel:start-at-login:get', () => {
+appIpc.handle('gezel:start-at-login:get', () => {
   if (!app.isPackaged) return { supported: false as const, enabled: false };
   try {
     return { supported: true as const, enabled: getStartAtLogin(startAtLoginDeps()) };
@@ -1368,7 +1429,7 @@ ipcMain.handle('gezel:start-at-login:get', () => {
     return { supported: false as const, enabled: false };
   }
 });
-ipcMain.handle('gezel:start-at-login:set', async (_event, enabled: unknown) => {
+appIpc.handle('gezel:start-at-login:set', async (_event, enabled: unknown) => {
   if (!app.isPackaged || typeof enabled !== 'boolean') {
     return { supported: false as const, enabled: false };
   }
@@ -1379,14 +1440,14 @@ ipcMain.handle('gezel:start-at-login:set', async (_event, enabled: unknown) => {
 // Autostart IPC — the UI's Service section toggles this on/off. Platform-
 // level unit writes happen in `./autostart/<platform>.ts`; we just resolve
 // the bundled runtime and the gezeld entry path from here.
-ipcMain.handle('gezel:autostart:status', async () => {
+appIpc.handle('gezel:autostart:status', async () => {
   try {
     return { ok: true as const, installed: await autostart.isInstalled() };
   } catch (err) {
     return { ok: false as const, error: (err as Error).message };
   }
 });
-ipcMain.handle('gezel:autostart:install', async () => {
+appIpc.handle('gezel:autostart:install', async () => {
   try {
     // The same definition the supervisor's launch-time handover checks the
     // unit against, so enabling autostart never registers a tree that the
@@ -1402,7 +1463,7 @@ ipcMain.handle('gezel:autostart:install', async () => {
     return { ok: false as const, error: (err as Error).message };
   }
 });
-ipcMain.handle('gezel:autostart:uninstall', async () => {
+appIpc.handle('gezel:autostart:uninstall', async () => {
   try {
     await autostart.uninstall();
     return { ok: true as const };
@@ -1411,7 +1472,7 @@ ipcMain.handle('gezel:autostart:uninstall', async () => {
   }
 });
 
-registerOfficeIntegrationIpc(ipcMain, () => apiClient?.officeIntegrations ?? null);
+registerOfficeIntegrationIpc(appIpc, () => apiClient?.officeIntegrations ?? null);
 const scheduleOfficeIntegrationVerify = createOfficeVerifyScheduler(
   () => apiClient?.officeIntegrations ?? null,
 );
@@ -1420,7 +1481,7 @@ const scheduleOfficeIntegrationVerify = createOfficeVerifyScheduler(
 // storage, so moving the .app to Trash is not a complete uninstall. The
 // renderer may choose only documented data scopes; this boundary resolves the
 // signed bundled script and performs the administrator-authenticated handoff.
-ipcMain.handle('gezel:uninstall:start', async (_event, payload: unknown) => {
+appIpc.handle('gezel:uninstall:start', async (_event, payload: unknown) => {
   if (macUninstallInFlight) {
     return { ok: false as const, error: 'Gezel is already preparing to uninstall.' };
   }
@@ -1455,7 +1516,7 @@ ipcMain.handle('gezel:uninstall:start', async (_event, payload: unknown) => {
 // supervisor, which routes embedded vs. spawned restart correctly.
 // `connection.onRestart` already handles the renderer reload after the
 // service comes back up.
-ipcMain.handle('gezel:restart-service', async (_event, reason?: string) => {
+appIpc.handle('gezel:restart-service', async (_event, reason?: string) => {
   if (!connection) return { ok: false as const, error: 'no active connection' };
   try {
     await connection.restart(reason ?? 'user-requested');
@@ -1466,7 +1527,7 @@ ipcMain.handle('gezel:restart-service', async (_event, reason?: string) => {
 });
 
 // Native folder picker, exposed to the renderer via preload.cjs.
-ipcMain.handle(
+appIpc.handle(
   'dialog:selectDirectory',
   async (event, opts?: { title?: string; defaultPath?: string }): Promise<string | null> => {
     const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
@@ -1510,7 +1571,7 @@ async function fetchReferenceBlob(request: DesktopReferenceFileRequest): Promise
   return apiClient.fetchDocumentBlob(request.path);
 }
 
-ipcMain.handle(
+appIpc.handle(
   'gezel:save-reference-copy',
   async (
     event,
@@ -1555,7 +1616,7 @@ ipcMain.handle(
  * pushing tens of gigabytes through the renderer to save a file is the
  * fragile way to do it — and the daemon already has the content open.
  */
-ipcMain.handle(
+appIpc.handle(
   'gezel:backup:choose-save-path',
   async (event, defaultName: unknown): Promise<{ path?: string }> => {
     const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
@@ -1571,7 +1632,7 @@ ipcMain.handle(
   },
 );
 
-ipcMain.handle('gezel:backup:choose-open-path', async (event): Promise<{ path?: string }> => {
+appIpc.handle('gezel:backup:choose-open-path', async (event): Promise<{ path?: string }> => {
   const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
   const picked = await dialog.showOpenDialog(win as Electron.BrowserWindow, {
     title: 'Open Gezel backup',
@@ -1585,7 +1646,7 @@ ipcMain.handle('gezel:backup:choose-open-path', async (event): Promise<{ path?: 
 // Knowledge catalog install: the renderer only asks where the .gezk lives;
 // the daemon reads, verifies, and extracts it — the archive never travels
 // through the renderer (the backup-file pattern).
-ipcMain.handle('gezel:knowledge:choose-archive', async (event): Promise<{ path?: string }> => {
+appIpc.handle('gezel:knowledge:choose-archive', async (event): Promise<{ path?: string }> => {
   const win = BrowserWindow.fromWebContents(event.sender) ?? undefined;
   const picked = await dialog.showOpenDialog(win as Electron.BrowserWindow, {
     title: 'Install knowledge catalog',
@@ -1596,7 +1657,7 @@ ipcMain.handle('gezel:knowledge:choose-archive', async (event): Promise<{ path?:
   return { path: picked.filePaths[0] };
 });
 
-ipcMain.handle(
+appIpc.handle(
   'gezel:show-reference-in-folder',
   async (_event, value: unknown): Promise<{ ok: true } | { ok: false; error: string }> => {
     const request = parseDesktopReferenceFileRequest(value);
@@ -1618,7 +1679,7 @@ ipcMain.handle(
 // Portable model bundles: Electron streams the service response into a partial
 // file instead of materializing the multi-GB model in the renderer. Opaque
 // open-file ids keep renderer code away from arbitrary local paths.
-ipcMain.handle(
+appIpc.handle(
   'gezel:export-model-bundle',
   async (
     event,
@@ -1769,7 +1830,7 @@ ipcMain.handle(
   },
 );
 
-ipcMain.handle(
+appIpc.handle(
   'gezel:cancel-model-bundle-export',
   (event, exportId?: string): { ok: true } | { ok: false; error: string } => {
     if (!exportId || !/^[a-zA-Z0-9-]{1,80}$/.test(exportId)) {
@@ -1781,7 +1842,7 @@ ipcMain.handle(
   },
 );
 
-ipcMain.handle(
+appIpc.handle(
   'gezel:skip-model-bundle-export-verification',
   (event, exportId?: string): { ok: true } | { ok: false; error: string } => {
     if (!exportId || !/^[a-zA-Z0-9-]{1,80}$/.test(exportId)) {
@@ -1796,7 +1857,7 @@ ipcMain.handle(
   },
 );
 
-ipcMain.handle(
+appIpc.handle(
   'gezel:scan-opened-model-bundle',
   async (
     event,
@@ -1853,7 +1914,7 @@ ipcMain.handle(
   },
 );
 
-ipcMain.handle(
+appIpc.handle(
   'gezel:cancel-model-bundle-import',
   async (event, scanId?: string): Promise<{ ok: true } | { ok: false; error: string }> => {
     if (!scanId || !/^[0-9a-f-]{36}$/i.test(scanId)) {
@@ -1888,7 +1949,7 @@ const oauthSessions = new Map<
   }
 >();
 
-ipcMain.handle(
+appIpc.handle(
   'mail:oauth-listen',
   async (
     _event,
@@ -2006,7 +2067,7 @@ ipcMain.handle(
   },
 );
 
-ipcMain.handle(
+appIpc.handle(
   'mail:oauth-await',
   async (
     _event,
@@ -2039,7 +2100,7 @@ ipcMain.handle(
 // A provider that refuses before its consent screen (an app in testing that
 // does not list the account, a blocked organization) never redirects back,
 // so without this the renderer would wait out the whole timeout.
-ipcMain.handle('mail:oauth-cancel', (_event, args: { requestId: string }): { ok: true } => {
+appIpc.handle('mail:oauth-cancel', (_event, args: { requestId: string }): { ok: true } => {
   const session = oauthSessions.get(args?.requestId);
   if (session) {
     oauthSessions.delete(args.requestId);
@@ -2061,7 +2122,7 @@ ipcMain.handle('mail:oauth-cancel', (_event, args: { requestId: string }): { ok:
  * mode is on. Resolves the path from the already-decided GEZEL_HOME
  * so the UI doesn't need to know it.
  */
-ipcMain.handle('gezel:open-logs-folder', async (): Promise<string> => {
+appIpc.handle('gezel:open-logs-folder', async (): Promise<string> => {
   const home = process.env.GEZEL_HOME || join(homedir(), '.gezel');
   const logsDir = join(home, 'logs');
   try {
@@ -2077,7 +2138,7 @@ ipcMain.handle('gezel:open-logs-folder', async (): Promise<string> => {
  * Returns an empty string on success, an error message otherwise
  * (matches Electron's `shell.openPath` semantics).
  */
-ipcMain.handle('gezel:open-path', async (_event, target: string): Promise<string> => {
+appIpc.handle('gezel:open-path', async (_event, target: string): Promise<string> => {
   if (typeof target !== 'string' || target.length === 0 || target.length > 4096) {
     return 'invalid path';
   }
@@ -2096,7 +2157,7 @@ ipcMain.handle('gezel:open-path', async (_event, target: string): Promise<string
   }
 });
 
-registerAmbientDisplayIpc(ipcMain, () => apiClient);
+registerAmbientDisplayIpc(appIpc, () => apiClient);
 
 /**
  * Theme sync: hand the user's Light/Dark/System choice to Chromium itself.
@@ -2113,7 +2174,7 @@ registerAmbientDisplayIpc(ipcMain, () => apiClient);
  *
  * `system` is Electron's default and hands control back to the OS.
  */
-ipcMain.on('gezel:set-native-theme', (_event, pref?: string) => {
+appIpc.on('gezel:set-native-theme', (_event, pref?: string) => {
   if (pref === 'system' || pref === 'light' || pref === 'dark') {
     nativeTheme.themeSource = pref;
     titlebarThemeKnown = true;
@@ -2148,7 +2209,7 @@ nativeTheme.on('updated', applyTitlebarTheme);
 // and create/destroy the tray when `showSystemTray` flips. This handler
 // only mutates tray state — it never echoes back to the renderer, so
 // there's no IPC loop with `gezel:tray:mode-set`.
-ipcMain.on(
+appIpc.on(
   'gezel:tray:sync-config',
   (
     _event,
@@ -2179,7 +2240,7 @@ ipcMain.on(
 // Raise an OS notification on the renderer's behalf (e.g. "Gezel needs
 // your input" when the window is backgrounded). Returns whether the
 // platform could show it.
-ipcMain.handle(
+appIpc.handle(
   'gezel:notify',
   (_event, opts: { title: string; body?: string; view?: string }): boolean => notify(opts),
 );
@@ -2193,7 +2254,7 @@ ipcMain.handle(
 // box grabs the running app's pixels regardless of the origin wall.
 // `rect` is in CSS/DIP pixels (matching getBoundingClientRect); omit it
 // to capture the whole page.
-ipcMain.handle(
+appIpc.handle(
   'gezel:capture-page-region',
   async (
     event,
@@ -3148,6 +3209,22 @@ app.whenReady().then(async () => {
   const requestSplashUrl = requestSplashPath ? pathToFileURL(requestSplashPath).href : null;
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
     const allowedOrigin = connection?.state === 'ready' ? safeOrigin(connection.baseUrl) : null;
+    const appOrigins = allowedOrigin ? [allowedOrigin] : [];
+
+    // The main frame only ever holds the app. `will-navigate` misses
+    // redirects and navigations it is not told about; this sees every
+    // top-level request, so a daemon page that is not the app (a preview, the
+    // Office pane) can never become the document the preload serves.
+    if (
+      details.resourceType === 'mainFrame' &&
+      allowedOrigin !== null &&
+      safeOrigin(details.url) === allowedOrigin &&
+      !isTrustedAppDocumentUrl(details.url, appOrigins, requestSplashUrl)
+    ) {
+      callback({ cancel: true });
+      return;
+    }
+
     const allowExternalServices = previewExternalServicesForFrame(
       details.frame,
       allowedOrigin,
@@ -3156,13 +3233,13 @@ app.whenReady().then(async () => {
 
     // A disposed WebFrameMain is not safely inspectable. Deny every preview or
     // subresource-shaped request. The one useful exception is a top-level
-    // navigation that independently passes the same exact daemon/splash
-    // allowlist enforced by `will-navigate`; this keeps startup functional
-    // when Chromium disposes the old main frame during the handoff.
+    // navigation that independently passes the same app/splash allowlist
+    // enforced by `will-navigate`; this keeps startup functional when
+    // Chromium disposes the old main frame during the handoff.
     if (allowExternalServices === PREVIEW_FRAME_INDETERMINATE) {
       const allowedTopLevelRequest =
         details.resourceType === 'mainFrame' &&
-        isAllowedTopLevelNavigation(details.url, allowedOrigin, requestSplashUrl);
+        isTrustedAppDocumentUrl(details.url, appOrigins, requestSplashUrl);
       callback(allowedTopLevelRequest ? {} : { cancel: true });
       return;
     }

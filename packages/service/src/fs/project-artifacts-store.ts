@@ -1,6 +1,6 @@
 import type { Stats } from 'node:fs';
 import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises';
-import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import type { ProjectFileEntry } from '@bendyline/gezel';
 import {
   CONNECTOR_BOOKKEEPING_FILE_NAMES,
@@ -10,11 +10,14 @@ import {
   isReservedShadowArtifactPath,
   isReservedTabularArtifactPath,
   isTaskInputArtifactPath,
+  looksLikeWindowsShortName,
+  touchesReservedDiffpackArtifactPath,
   touchesTaskInputArtifactPath,
 } from '@bendyline/gezel';
 import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import {
   assertNoTemplatePlaceholderPath,
+  realpathNearest,
   safeJoin,
 } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import {
@@ -25,6 +28,7 @@ import {
   PROJECT_TABULAR_DIR_NAME,
   projectArtifactsDir,
 } from '@bendyline/gezel/paths';
+import { HttpStatusError } from '@bendyline/gezel/runtime';
 import { mimeTypeForFilename } from './media-types.js';
 import { resolveOwnedMutationPath } from './mutation-path-refusal.js';
 import {
@@ -88,48 +92,83 @@ export interface ProjectArtifactsStoreOptions {
   touchProject: (projectId: string) => Promise<void>;
 }
 
-export class ConnectorCorpusWriteDeniedError extends Error {
-  readonly code = 'connector-corpus-readonly' as const;
+/**
+ * A change refused because of which reserved part of the drawer its path
+ * names. An `HttpStatusError`, so a route that does not list the specific
+ * class still answers 403 with the sentence: the diffpack and tabular
+ * refusals reached gezels as a bare `internal_error`.
+ */
+export class ArtifactPathDeniedError extends HttpStatusError {
+  readonly code: string;
+  constructor(message: string, code: string) {
+    super(message, 403, { code });
+    this.name = 'ArtifactPathDeniedError';
+    this.code = code;
+  }
+}
+
+export class ConnectorCorpusWriteDeniedError extends ArtifactPathDeniedError {
+  override readonly code = 'connector-corpus-readonly' as const;
   constructor() {
     super(
       'The artifacts/data directory contains read-only connector mirrors. Editing or deleting a synced record can cause permanent data loss because its cursor has already advanced.',
+      'connector-corpus-readonly',
     );
     this.name = 'ConnectorCorpusWriteDeniedError';
   }
 }
 
 /**
- * The drafted tree and the sealed diffs of a diffpack are machine-owned: the
- * draft store writes `after/`, the sealer writes `files/`, and both go
- * straight to disk. A `write_artifact` landing here would let a model forge a
- * change set it never drafted — the one thing the review surface has to be
- * able to trust. `notes.md` beside them stays writable.
+ * The drafted tree, the sealed diffs and the proposed deletions and moves of
+ * a diffpack are machine-owned: the draft store and the sealer write them
+ * straight to disk. A `write_artifact` (or a rename, or a delete) landing
+ * here would let a model forge or drop a change it never drafted — the one
+ * thing the review surface has to be able to trust. `notes.md` stays writable.
  */
-export class DiffpackPathWriteDeniedError extends Error {
-  readonly code = 'diffpack-readonly' as const;
+export class DiffpackPathWriteDeniedError extends ArtifactPathDeniedError {
+  override readonly code = 'diffpack-readonly' as const;
   constructor() {
     super(
-      "A change proposal's after/ and files/ folders are written by the runtime, not by tools. Use the workspace edit tools while drafting; write your explanation to the pack's notes.md.",
+      "A change proposal's files are written by the runtime, not by tools. Use the workspace edit tools while drafting; write your explanation to the pack's notes.md.",
+      'diffpack-readonly',
     );
     this.name = 'DiffpackPathWriteDeniedError';
   }
 }
 
-export class ShadowPathWriteDeniedError extends Error {
-  readonly code = 'shadow-readonly' as const;
+/**
+ * A gezel named a path segment shaped like a Windows short name. On a volume
+ * that keeps them, `DIFFPA~1` opens `diffpacks`, so the name proves nothing
+ * about where the write lands.
+ */
+export class ArtifactShortNamePathDeniedError extends ArtifactPathDeniedError {
+  override readonly code = 'short-name' as const;
+  constructor(segment: string) {
+    super(
+      `"${segment}" reads as a Windows short name for another file or folder. Use the full name.`,
+      'short-name',
+    );
+    this.name = 'ArtifactShortNamePathDeniedError';
+  }
+}
+
+export class ShadowPathWriteDeniedError extends ArtifactPathDeniedError {
+  override readonly code = 'shadow-readonly' as const;
   constructor() {
     super(
       'artifacts/shadow/ is the derived shadow-file cache (converted documents, descriptions, transcripts), regenerated automatically by indexing. Write your file elsewhere in artifacts.',
+      'shadow-readonly',
     );
     this.name = 'ShadowPathWriteDeniedError';
   }
 }
 
-export class TabularPathWriteDeniedError extends Error {
-  readonly code = 'tabular-readonly' as const;
+export class TabularPathWriteDeniedError extends ArtifactPathDeniedError {
+  override readonly code = 'tabular-readonly' as const;
   constructor() {
     super(
       'artifacts/tabular/ holds tables derived from workspace spreadsheets and data files, rebuilt automatically whenever the source file changes. Anything written there would be overwritten. Write your file elsewhere in artifacts.',
+      'tabular-readonly',
     );
     this.name = 'TabularPathWriteDeniedError';
   }
@@ -144,11 +183,12 @@ export class TabularPathWriteDeniedError extends Error {
  * itself writes `message_files/` through the ordinary artifact routes, so an
  * unconditional denial would block the user's own uploads.
  */
-export class PromptDraftPathWriteDeniedError extends Error {
-  readonly code = 'prompt-drafts-readonly' as const;
+export class PromptDraftPathWriteDeniedError extends ArtifactPathDeniedError {
+  override readonly code = 'prompt-drafts-readonly' as const;
   constructor() {
     super(
       "artifacts/prompts/ holds the user's chat prompt drafts. You can read them, but only the person writing one may change it. Write your file elsewhere in artifacts.",
+      'prompt-drafts-readonly',
     );
     this.name = 'PromptDraftPathWriteDeniedError';
   }
@@ -160,11 +200,12 @@ export class PromptDraftPathWriteDeniedError extends Error {
  * that edits its input can make any gate pass. Gezel-conditional, like the
  * prompt-draft guard: the person who supplied the files may still change them.
  */
-export class TaskInputPathWriteDeniedError extends Error {
-  readonly code = 'task-inputs-readonly' as const;
+export class TaskInputPathWriteDeniedError extends ArtifactPathDeniedError {
+  override readonly code = 'task-inputs-readonly' as const;
   constructor() {
     super(
       "This folder holds the task's input files, which are read-only to gezels. Read them where they are and write your results elsewhere in the task folder.",
+      'task-inputs-readonly',
     );
     this.name = 'TaskInputPathWriteDeniedError';
   }
@@ -505,22 +546,7 @@ export class ProjectArtifactsStore {
     const cleaned = normalizeArtifactPath(filePath);
     if (!cleaned) throw new Error('empty artifact path');
     assertNoTemplatePlaceholderPath(cleaned);
-    if (opts?.initiatedByGezel && isProtectedConnectorCorpusPath(cleaned)) {
-      throw new ConnectorCorpusWriteDeniedError();
-    }
-    // Unconditional (unlike the gezel-only corpus guard): the shadow cache's
-    // only legitimate writer is the indexer's converter, which bypasses this
-    // store entirely, so every write arriving here is a mistake.
-    if (isReservedShadowArtifactPath(cleaned)) throw new ShadowPathWriteDeniedError();
-    if (isReservedTabularArtifactPath(cleaned)) throw new TabularPathWriteDeniedError();
-    if (isReservedDiffpackArtifactPath(cleaned)) throw new DiffpackPathWriteDeniedError();
-    if (opts?.initiatedByGezel && isReservedPromptDraftArtifactPath(cleaned)) {
-      throw new PromptDraftPathWriteDeniedError();
-    }
-    if (opts?.initiatedByGezel && isTaskInputArtifactPath(cleaned)) {
-      throw new TaskInputPathWriteDeniedError();
-    }
-    const full = await resolveArtifactMutationPath(base, cleaned);
+    const full = await guardArtifactMutation(base, cleaned, 'write', opts?.initiatedByGezel);
     await mkdir(dirname(full), { recursive: true });
     await writeFileAtomic(full, content);
     await this.touchProject(id);
@@ -537,20 +563,8 @@ export class ProjectArtifactsStore {
     if (!cleaned) throw new Error('empty artifact path');
     assertNoTemplatePlaceholderPath(cleaned);
     // The binary path is how a camera's keyframes or a mirrored file would be
-    // overwritten; it owes the corpus the same read-only rule as text.
-    if (options?.initiatedByGezel && isProtectedConnectorCorpusPath(cleaned)) {
-      throw new ConnectorCorpusWriteDeniedError();
-    }
-    if (isReservedShadowArtifactPath(cleaned)) throw new ShadowPathWriteDeniedError();
-    if (isReservedTabularArtifactPath(cleaned)) throw new TabularPathWriteDeniedError();
-    if (isReservedDiffpackArtifactPath(cleaned)) throw new DiffpackPathWriteDeniedError();
-    if (options?.initiatedByGezel && isReservedPromptDraftArtifactPath(cleaned)) {
-      throw new PromptDraftPathWriteDeniedError();
-    }
-    if (options?.initiatedByGezel && isTaskInputArtifactPath(cleaned)) {
-      throw new TaskInputPathWriteDeniedError();
-    }
-    const full = await resolveArtifactMutationPath(base, cleaned);
+    // overwritten; it owes every reserved subtree the same rules as text.
+    const full = await guardArtifactMutation(base, cleaned, 'write', options?.initiatedByGezel);
     await mkdir(dirname(full), { recursive: true });
     await writeFileAtomic(full, data, { noReplace: options?.createOnly });
     await this.touchProject(id);
@@ -567,17 +581,7 @@ export class ProjectArtifactsStore {
     if (!cleaned || namesArtifactsRoot(base, cleaned, null)) {
       throw new ArtifactRootDeniedError('deleted');
     }
-    // A deleted record is never fetched again — the cursor is past it.
-    if (opts?.initiatedByGezel && isProtectedConnectorCorpusPath(cleaned)) {
-      throw new ConnectorCorpusWriteDeniedError();
-    }
-    if (opts?.initiatedByGezel && isReservedPromptDraftArtifactPath(cleaned)) {
-      throw new PromptDraftPathWriteDeniedError();
-    }
-    if (opts?.initiatedByGezel && touchesTaskInputArtifactPath(cleaned)) {
-      throw new TaskInputPathWriteDeniedError();
-    }
-    const full = await resolveArtifactMutationPath(base, cleaned);
+    const full = await guardArtifactMutation(base, cleaned, 'delete', opts?.initiatedByGezel);
     if (namesArtifactsRoot(base, cleaned, full)) throw new ArtifactRootDeniedError('deleted');
     await rm(full, { recursive: true, force: true });
     await this.touchProject(id);
@@ -592,16 +596,7 @@ export class ProjectArtifactsStore {
     const cleaned = normalizeArtifactPath(folderPath);
     if (!cleaned) throw new Error('empty artifact path');
     assertNoTemplatePlaceholderPath(cleaned);
-    if (isReservedShadowArtifactPath(cleaned)) throw new ShadowPathWriteDeniedError();
-    if (isReservedTabularArtifactPath(cleaned)) throw new TabularPathWriteDeniedError();
-    if (isReservedDiffpackArtifactPath(cleaned)) throw new DiffpackPathWriteDeniedError();
-    if (opts?.initiatedByGezel && isReservedPromptDraftArtifactPath(cleaned)) {
-      throw new PromptDraftPathWriteDeniedError();
-    }
-    if (opts?.initiatedByGezel && isTaskInputArtifactPath(cleaned)) {
-      throw new TaskInputPathWriteDeniedError();
-    }
-    const full = await resolveArtifactMutationPath(base, cleaned);
+    const full = await guardArtifactMutation(base, cleaned, 'mkdir', opts?.initiatedByGezel);
     await mkdir(full, { recursive: true });
     await this.touchProject(id);
     return cleaned;
@@ -611,6 +606,8 @@ export class ProjectArtifactsStore {
    * Move/rename within the artifacts drawer. Same refusals as the documents
    * library — the drawer root, a folder into its own subtree, and overwriting
    * an existing path — so a rename can never silently destroy an artifact.
+   * Both ends answer to the same reserved-subtree rules as a write and a
+   * delete: a rename is a delete at one path and a write at the other.
    */
   async renameProjectArtifactPath(
     id: string,
@@ -624,26 +621,8 @@ export class ProjectArtifactsStore {
     if (!from || namesArtifactsRoot(base, from, null)) throw new ArtifactRootDeniedError('renamed');
     if (!to || namesArtifactsRoot(base, to, null)) throw new ArtifactRootDeniedError('replaced');
     assertNoTemplatePlaceholderPath(to);
-    if (isReservedShadowArtifactPath(from) || isReservedShadowArtifactPath(to)) {
-      throw new ShadowPathWriteDeniedError();
-    }
-    if (isReservedTabularArtifactPath(from) || isReservedTabularArtifactPath(to)) {
-      throw new TabularPathWriteDeniedError();
-    }
-    if (
-      opts?.initiatedByGezel &&
-      (isReservedPromptDraftArtifactPath(from) || isReservedPromptDraftArtifactPath(to))
-    ) {
-      throw new PromptDraftPathWriteDeniedError();
-    }
-    if (
-      opts?.initiatedByGezel &&
-      (touchesTaskInputArtifactPath(from) || isTaskInputArtifactPath(to))
-    ) {
-      throw new TaskInputPathWriteDeniedError();
-    }
-    const fromFull = await resolveArtifactMutationPath(base, from);
-    const toFull = await resolveArtifactMutationPath(base, to);
+    const fromFull = await guardArtifactMutation(base, from, 'move-from', opts?.initiatedByGezel);
+    const toFull = await guardArtifactMutation(base, to, 'move-to', opts?.initiatedByGezel);
     if (namesArtifactsRoot(base, from, fromFull)) throw new ArtifactRootDeniedError('renamed');
     if (namesArtifactsRoot(base, to, toFull)) throw new ArtifactRootDeniedError('replaced');
     if (fromFull === toFull) return { fromPath: from, toPath: to };
@@ -670,6 +649,92 @@ export class ProjectArtifactsStore {
 
 function resolveArtifactMutationPath(base: string, cleaned: string): Promise<string> {
   return resolveOwnedMutationPath(base, cleaned, "this project's artifacts");
+}
+
+/** A change to one artifacts path; a rename is a `move-from` and a `move-to`. */
+type ArtifactMutation = 'write' | 'mkdir' | 'delete' | 'move-from' | 'move-to';
+
+/**
+ * The refusal for changing `path`, or null. One table for every mutation, so
+ * a reserved subtree cannot be guarded on writes and missed on renames: the
+ * rename route had no diffpack or connector-corpus rule, so a gezel could
+ * move a forged `files/` folder into a sealed proposal.
+ */
+function artifactMutationDenial(
+  path: string,
+  mutation: ArtifactMutation,
+  byGezel: boolean,
+): Error | null {
+  // Moving or deleting a folder carries its tree away; moving one in puts its
+  // tree there. Writes and mkdirs only create what they name.
+  const carriesTree = mutation === 'delete' || mutation === 'move-from' || mutation === 'move-to';
+  // A deleted or moved record is never fetched again — the cursor is past it.
+  if (byGezel && isProtectedConnectorCorpusPath(path)) return new ConnectorCorpusWriteDeniedError();
+  // Unconditional (unlike the gezel-only rules): the derived caches' only
+  // writers bypass this store, so a change arriving here is a mistake.
+  // Deleting a cache is harmless; it is rebuilt.
+  if (mutation !== 'delete') {
+    if (isReservedShadowArtifactPath(path)) return new ShadowPathWriteDeniedError();
+    if (isReservedTabularArtifactPath(path)) return new TabularPathWriteDeniedError();
+  }
+  const diffpack = carriesTree
+    ? touchesReservedDiffpackArtifactPath(path)
+    : isReservedDiffpackArtifactPath(path);
+  // The person may delete a proposal from the drawer; nobody edits one.
+  if (diffpack && (mutation !== 'delete' || byGezel)) return new DiffpackPathWriteDeniedError();
+  if (byGezel && isReservedPromptDraftArtifactPath(path)) {
+    return new PromptDraftPathWriteDeniedError();
+  }
+  const taskInput = carriesTree
+    ? touchesTaskInputArtifactPath(path)
+    : isTaskInputArtifactPath(path);
+  if (byGezel && taskInput) return new TaskInputPathWriteDeniedError();
+  return null;
+}
+
+/**
+ * Refuse a mutation of `cleaned` by every reserved-subtree rule, then resolve
+ * it. The rules run on the name given and again on the name the filesystem
+ * knows: on an NTFS volume that keeps 8.3 short names (the system drive, and
+ * so `~/.gezel`, by default) `DIFFPA~1/12/files/01.diff` opens
+ * `diffpacks/12/files/01.diff` while every predicate saw a folder called
+ * `DIFFPA~1`, and `_META~1.JSO` reached a corpus's `_meta.json`. Native
+ * `realpath` answers with the long names, and judges a link inside the drawer
+ * by where it lands. A gezel's short-name-shaped segment is refused outright,
+ * for volumes where `realpath` keeps the spelling it was given.
+ */
+async function guardArtifactMutation(
+  base: string,
+  cleaned: string,
+  mutation: ArtifactMutation,
+  initiatedByGezel = false,
+): Promise<string> {
+  if (initiatedByGezel) {
+    const alias = cleaned.split(/[\\/]+/).find(looksLikeWindowsShortName);
+    if (alias) throw new ArtifactShortNamePathDeniedError(alias);
+  }
+  const named = artifactMutationDenial(cleaned, mutation, initiatedByGezel);
+  if (named) throw named;
+  const full = await resolveArtifactMutationPath(base, cleaned);
+  const onDisk = await onDiskArtifactPath(base, full);
+  if (onDisk !== null && onDisk !== cleaned) {
+    const real = artifactMutationDenial(onDisk, mutation, initiatedByGezel);
+    if (real) throw real;
+  }
+  return full;
+}
+
+/**
+ * The artifacts-relative path of `full` as the filesystem spells it — long
+ * names, real case, links followed — or null when it does not resolve inside
+ * the drawer. A path that does not exist yet keeps its missing tail as given.
+ */
+async function onDiskArtifactPath(base: string, full: string): Promise<string | null> {
+  const [realBase, realTarget] = await Promise.all([realpathNearest(base), realpathNearest(full)]);
+  if (!realBase || !realTarget) return null;
+  const rel = relative(realBase, realTarget);
+  if (rel === '' || isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) return null;
+  return rel.split(sep).join('/');
 }
 
 async function pathExists(full: string): Promise<boolean> {
@@ -752,10 +817,30 @@ export function gezelArtifactWriteDenial(path: string): string | null {
     return 'shadow/ holds document copies only gezel makes';
   if (isReservedTabularArtifactPath(cleaned)) return 'tabular/ holds tables only gezel derives';
   if (isReservedDiffpackArtifactPath(cleaned)) {
-    return "a change proposal's after/ and files/ folders are written only by the proposal itself";
+    return "a change proposal's files are written only by the proposal itself";
   }
   if (isReservedPromptDraftArtifactPath(cleaned)) return "prompts/ holds the person's own drafts";
   if (isTaskInputArtifactPath(cleaned))
     return "a task's inputs/ folder is the source it works from";
   return null;
+}
+
+/**
+ * {@link gezelArtifactWriteDenial} for a path under the drawer at `base`,
+ * judged as the filesystem resolves it too: a Windows short name
+ * (`DIFFPA~1`) or a link must not stand in for a reserved folder.
+ */
+export async function gezelArtifactWriteDenialAt(
+  base: string,
+  path: string,
+): Promise<string | null> {
+  const cleaned = normalizeArtifactPath(path);
+  const alias = cleaned.split(/[\\/]+/).find(looksLikeWindowsShortName);
+  if (alias) return `"${alias}" reads as a Windows short name for another file or folder`;
+  const named = gezelArtifactWriteDenial(cleaned);
+  if (named) return named;
+  const full = safeJoin(base, cleaned);
+  if (!full) return null;
+  const onDisk = await onDiskArtifactPath(base, full);
+  return onDisk !== null && onDisk !== cleaned ? gezelArtifactWriteDenial(onDisk) : null;
 }

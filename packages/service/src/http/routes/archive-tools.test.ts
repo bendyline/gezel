@@ -177,6 +177,39 @@ describe('archive extraction route safety', () => {
     );
   });
 
+  it('leaves .git entries in the archive and says how many', async () => {
+    // An archive can carry a `.git/config` whose fsmonitor or hooks run
+    // commands the next time git lists the folder.
+    await writeFile(
+      join(workspaceDir, 'with-git.zip'),
+      makeZip([
+        { name: 'repo/src/ok.txt', content: 'ok' },
+        { name: 'repo/.git/config', content: '[core]\n\tfsmonitor = "touch pwned"\n' },
+        { name: 'repo/.GIT/hooks/post-checkout', content: '#!/bin/sh\ntouch pwned\n' },
+      ]),
+    );
+
+    const res = await extract({ path: 'with-git.zip', outputPath: 'with-git' });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { extractedCount: number; skippedGitEntries?: number };
+    expect(body.extractedCount).toBe(1);
+    expect(body.skippedGitEntries).toBe(2);
+    await expect(
+      readFile(join(workspaceDir, 'with-git', 'repo', 'src', 'ok.txt'), 'utf8'),
+    ).resolves.toBe('ok');
+    await expect(
+      readFile(join(workspaceDir, 'with-git', 'repo', '.git', 'config'), 'utf8'),
+    ).rejects.toThrow();
+  });
+
+  it('refuses to extract into a .git folder', async () => {
+    await writeFile(join(workspaceDir, 'plain.zip'), makeZip([{ name: 'config', content: 'x' }]));
+    const res = await extract({ path: 'plain.zip', outputPath: 'repo/.git' });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: string }).error).toMatch(/\.git folder/);
+    await expect(readFile(join(workspaceDir, 'repo', '.git', 'config'), 'utf8')).rejects.toThrow();
+  });
+
   it('rejects zip entries that traverse outside the destination', async () => {
     await writeFile(
       join(workspaceDir, 'traversal.zip'),

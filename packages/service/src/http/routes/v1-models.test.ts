@@ -342,7 +342,7 @@ describe('GET /v1/models catalog metadata', () => {
     expect(providers).toContain('openai');
   });
 
-  it('lists them once chosen: as the provider, by a gezel, or through their own settings', async () => {
+  it('lists Ollama once chosen by a gezel, and an agent CLI never, chosen or not', async () => {
     const ctx = modelContext();
     const providers: string[] = [];
     ctx.store.readConfig = vi.fn(async () => ({
@@ -358,7 +358,10 @@ describe('GET /v1/models catalog metadata', () => {
     });
 
     expect((await v1ModelsRoutes(ctx).request('http://localhost/')).status).toBe(200);
-    expect(providers).toEqual(expect.arrayContaining(['anthropic-cli', 'codex-cli', 'ollama']));
+    expect(providers).toContain('ollama');
+    // The chat routes refuse them: they run their own tools on this computer.
+    expect(providers).not.toContain('anthropic-cli');
+    expect(providers).not.toContain('codex-cli');
   });
 });
 

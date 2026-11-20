@@ -22,7 +22,7 @@ import type {
   PortableScriptDefinition,
   ScriptExecutionResult,
 } from '@bendyline/gezel-script-runtime';
-import { projectScriptFile, userScriptFile } from '@bendyline/gezel/paths';
+import { projectScriptFile, projectStorageScope, userScriptFile } from '@bendyline/gezel/paths';
 import type { Store } from '../fs/store.js';
 import { type buildDispatcher, scriptRunActsForGezel } from './dispatcher.js';
 import { parseScriptMeta } from './meta.js';
@@ -83,7 +83,12 @@ export class NodeScriptHost {
     }
     const meta = parseScriptMeta(source, inline ? `<craftbook>/${name}.ts` : `${scope}/${name}.ts`);
     const trust = await computeScriptTrust(
-      { catalog: this.catalog, readTask: this.store.readTask.bind(this.store) },
+      {
+        catalog: this.catalog,
+        readTask: this.store.readTask.bind(this.store),
+        isMachineShared: (projectId) =>
+          projectStorageScope(this.store.homePath, projectId) === 'machine-shared',
+      },
       {
         scope,
         source,
@@ -141,6 +146,14 @@ export class NodeScriptHost {
         initiatedByGezel: scriptRunActsForGezel(context.trigger),
         ...(context.trigger.kind === 'chat'
           ? { gezelId: context.trigger.gezelId, sessionId: context.trigger.sessionId }
+          : {}),
+        ...(context.trigger.kind === 'connector'
+          ? {
+              connector: {
+                typeId: context.trigger.typeId,
+                bindingId: context.trigger.bindingId,
+              },
+            }
           : {}),
       },
       method,

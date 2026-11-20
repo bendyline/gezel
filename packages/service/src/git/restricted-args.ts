@@ -1,5 +1,5 @@
-import { devNull } from 'node:os';
 import type { RunGitRequest } from '@bendyline/gezel';
+import { REPOSITORY_CONFIG_OVERRIDES, forcedDiffFlags } from './config-overrides.js';
 
 /**
  * Argument policy for the model-facing `run_git` tool (`POST
@@ -20,10 +20,11 @@ import type { RunGitRequest } from '@bendyline/gezel';
  *     work tree or when a path points outside it, so a positional argument
  *     may never be absolute or contain a `..` segment. Revision ranges
  *     (`main..feature`) never have a `..` path segment, so they pass.
- *   - Repository config is workspace content a gezel may be able to write.
- *     {@link restrictedGitArgv} therefore disables fsmonitor and hooks for
- *     every run, and external diff drivers and textconv filters for the diff
- *     family. Clean/smudge filters declared in that config still apply.
+ *   - Repository config is content Gezel cannot vouch for, so
+ *     {@link restrictedGitArgv} applies the same overrides as every other git
+ *     the service runs (`config-overrides.ts`): no fsmonitor or hooks, and no
+ *     external diff or textconv for the diff family. Clean/smudge filters
+ *     still apply; gezels cannot write `.git` to declare one.
  *
  * Usage: build the argv with {@link restrictedGitArgv} and spawn `git` with
  * it and {@link restrictedGitEnv}; never splice model arguments into a git
@@ -390,7 +391,6 @@ const SPECS: Record<RestrictedGitSubcommand, readonly OptionSpec[]> = {
   ],
 };
 
-const DIFF_FAMILY: ReadonlySet<RestrictedGitSubcommand> = new Set(['log', 'show', 'diff']);
 const ATTACHED_VALUE = /^[0-9a-z%/.]*$/i;
 const MAX_ARG_LENGTH = 4096;
 
@@ -406,22 +406,8 @@ export function restrictedGitArgv(
   if (!specs) return { error: `git ${subcommand} is not allowed` };
   const checked = checkArgs(subcommand, specs, args);
   if (checked) return { error: checked };
-  const forced =
-    subcommand === 'blame'
-      ? ['--no-textconv']
-      : DIFF_FAMILY.has(subcommand)
-        ? ['--no-ext-diff', '--no-textconv']
-        : [];
   return {
-    argv: [
-      '-c',
-      'core.fsmonitor=false',
-      '-c',
-      `core.hooksPath=${devNull}`,
-      subcommand,
-      ...forced,
-      ...args,
-    ],
+    argv: [...REPOSITORY_CONFIG_OVERRIDES, subcommand, ...forcedDiffFlags(subcommand), ...args],
   };
 }
 

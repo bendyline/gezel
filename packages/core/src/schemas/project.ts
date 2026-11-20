@@ -618,6 +618,25 @@ export function projectAllowsAmbientWork(project: {
 }
 
 /**
+ * True when this daemon may START work on the project with nobody asking:
+ * boot-time resumption, cron ticks, nudges, stuck-step re-drives, the night
+ * shift. Narrower than {@link projectAllowsAmbientWork}, which also gates the
+ * continuation of a run someone started.
+ *
+ * A machine-shared project never qualifies. Every local account can write its
+ * definition and its task files, so an active task found there may have been
+ * planted by another account; running it here would run it with this
+ * account's credentials, providers and folders. Work in a shared project
+ * starts only when someone using this account starts it.
+ */
+export function projectAllowsUnattendedWork(project: {
+  status?: 'active' | 'readonly' | 'inactive' | 'stable';
+  storageScope?: 'user' | 'machine-shared';
+}): boolean {
+  return project.storageScope !== 'machine-shared' && projectAllowsAmbientWork(project);
+}
+
+/**
  * True when a project's device connectors (cameras) may run and its lookouts
  * may act. Deliberately wider than {@link projectAllowsAmbientWork}: the task
  * lifecycle sets `stable` on its own once the last task finishes, and a

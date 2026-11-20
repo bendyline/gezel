@@ -11,12 +11,19 @@ interface ConnectorActionToolDependencies {
   unwrapApiError(error: unknown): string;
 }
 
+const HELD_FOR_APPROVAL = 'held-for-approval';
+
+/** A commit no one was attending; `queued-night-shift` is what earlier daemons answered. */
+function isHeldForApproval(status: unknown): boolean {
+  return status === HELD_FOR_APPROVAL || status === 'queued-night-shift';
+}
+
 // ── email (projects with a mail-type connector binding) ──────────────────
 // Reading email is done by reading the synced markdown files like any other
 // file. These three tools are the WRITE path over the connector action
 // surface: drafting stages a `send` action under the mail binding's corpus,
 // and send_email commits it through the daemon-enforced recipient-allowlist
-// consent scope (deny-by-default; night shift defers to the outbox).
+// consent scope (deny-by-default; an unattended commit holds in the outbox).
 // Registered only when the chat manager set GEZEL_MAIL_ENABLED (i.e. the
 // project has a mail-type connector binding).
 async function connectorActionApi(
@@ -202,7 +209,7 @@ export function registerEmailTools(dependencies: ConnectorActionToolDependencies
 
   server.tool(
     'send_email',
-    'Transmit a drafted/queued email. The daemon enforces the recipient allowlist on the mail connector (sending to a non-allowlisted address is refused) and will NOT send during night shift (the message is staged for daytime approval instead).',
+    "Transmit a drafted/queued email. The daemon enforces the recipient allowlist on the mail connector (sending to a non-allowlisted address is refused). It sends only while the user is directing this conversation; otherwise (a scheduled task, night shift, another gezel's request) the message is held in the outbox for the user to approve.",
     { draftId: z.string().describe('The draft id to send') },
     async ({ draftId }) => {
       try {
@@ -218,14 +225,14 @@ export function registerEmailTools(dependencies: ConnectorActionToolDependencies
             : undefined;
           return errorResult(message, { ...(hint ? { hint } : {}) });
         }
-        if (data.status === 'queued-night-shift') {
+        if (isHeldForApproval(data.status)) {
           const relPath = typeof data.relPath === 'string' ? data.relPath : undefined;
-          const summary = `Night shift is active — not sending unattended. The message is staged in the outbox${relPath ? ` (${relPath})` : ''} and will require explicit approval.`;
+          const summary = `Not sent: the user isn't directing this conversation, so the message is held in the outbox${relPath ? ` (${relPath})` : ''} until they approve it in the project's Connections.`;
           return okResult(
             ActionToolOutputSchema,
             {
               summary,
-              status: 'queued-night-shift',
+              status: HELD_FOR_APPROVAL,
               draftId,
               ...(relPath ? { relPath } : {}),
             },
@@ -256,7 +263,7 @@ export function registerEmailTools(dependencies: ConnectorActionToolDependencies
 // These three tools are the WRITE path over the connector action surface:
 // drafting stages a `publish` action under the social binding's corpus, and
 // publish_post commits it through the daemon-enforced social-publish consent
-// scope (deny-by-default; night shift defers to the outbox). Registered only
+// scope (deny-by-default; an unattended commit holds in the outbox). Registered only
 // when the chat manager set GEZEL_SOCIAL_ENABLED (i.e. the project has a
 // social-type connector binding).
 const SOCIAL_TYPE_PREFIXES = ['bluesky-', 'x-', 'instagram-', 'linkedin-'];
@@ -287,7 +294,7 @@ export function registerSocialTools(dependencies: ConnectorActionToolDependencie
 
   server.tool(
     'draft_post',
-    "Compose a social post draft and save it for review. This does NOT publish — it stages a publish action under the social connector's corpus. Use queue_post to stage it for approval and publish_post to publish. Works with any connected social account: Bluesky, X, and LinkedIn publish directly once the user enables publishing on the connection; Instagram additionally requires a publicly hosted https image URL (Meta's servers fetch the media). Every publish clears the user's consent gate.",
+    "Compose a social post draft and save it for review. This does NOT publish — it stages a publish action under the social connector's corpus. Use queue_post to stage it for approval and publish_post to publish. Works with any connected social account: Bluesky, X, and LinkedIn publish directly once the user enables publishing on the connection; Instagram additionally requires a publicly hosted https image URL (Meta's servers fetch the media). A post published while the user isn't directing this conversation is held for their approval.",
     {
       text: z.string().describe('The post text (Bluesky limit: 300 characters)'),
       replyToUri: z
@@ -382,7 +389,7 @@ export function registerSocialTools(dependencies: ConnectorActionToolDependencie
 
   server.tool(
     'publish_post',
-    'Publish a drafted/queued social post. The daemon enforces per-binding publish consent (publishing must be enabled on the connector, and each publish clears the social-publish consent scope) and will NOT publish during night shift (the post is staged for daytime approval instead).',
+    "Publish a drafted/queued social post. The user allows publishing once per connection, not per post, so the daemon checks that publishing is on for this connection. It publishes only while the user is directing this conversation; otherwise (a scheduled task, night shift, another gezel's request) the post is held in the outbox for the user to approve.",
     { draftId: z.string().describe('The draft id to publish') },
     async ({ draftId }) => {
       try {
@@ -398,14 +405,14 @@ export function registerSocialTools(dependencies: ConnectorActionToolDependencie
             : undefined;
           return errorResult(message, { ...(hint ? { hint } : {}) });
         }
-        if (data.status === 'queued-night-shift') {
+        if (isHeldForApproval(data.status)) {
           const relPath = typeof data.relPath === 'string' ? data.relPath : undefined;
-          const summary = `Night shift is active — not publishing unattended. The post is staged in the outbox${relPath ? ` (${relPath})` : ''} and will require explicit approval.`;
+          const summary = `Not published: the user isn't directing this conversation, so the post is held in the outbox${relPath ? ` (${relPath})` : ''} until they approve it in the project's Connections.`;
           return okResult(
             ActionToolOutputSchema,
             {
               summary,
-              status: 'queued-night-shift',
+              status: HELD_FOR_APPROVAL,
               draftId,
               ...(relPath ? { relPath } : {}),
             },

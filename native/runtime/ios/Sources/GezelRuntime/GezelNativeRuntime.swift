@@ -190,10 +190,13 @@ public final class GezelNativeRuntime: @unchecked Sendable {
     private var appleTask: Task<Void, Never>?
     /// Native tool calls parked until the app's tool loop completes them.
     private var pendingToolCalls: [String: CheckedContinuation<NativeToolReply, Error>] = [:]
-    /// Awake-time start of the model's current stretch of generation. Time the
-    /// app spends executing a tool is not the model's and is not charged.
+    /// Awake-time start of the model's current stretch without new text: reset
+    /// by each delta and each completed tool call. Time the app spends executing
+    /// a tool is not the model's and is not charged.
     private var modelSegmentStart: TimeInterval = 0
     private var activeFailure: MobileInferenceError?
+    /// The Apple watchdog ended the active request because the model stalled.
+    private var activeStalled = false
     private var releasing = false
     private var releaseScheduled = false
     private var releaseWaiters: [NativeCall] = []
@@ -676,7 +679,7 @@ public final class GezelNativeRuntime: @unchecked Sendable {
         operationLock.lock()
         guard !backgrounded else { operationLock.unlock(); call.reject("Reopen the app to start a conversation", "BACKGROUND"); return }
         guard activeId == nil, !modelMutation, !releasing, !backgrounded else { operationLock.unlock(); call.reject("Another conversation is running", "BUSY"); return }
-        activeId = requestId; cancelled = false; activeFailure = nil
+        activeId = requestId; cancelled = false; activeFailure = nil; activeStalled = false
         if providerId == "apple-foundation-models" {
             appleTask = Task {
                 await self.runAppleGeneration(call, requestId: requestId, turns: turns, maxTokens: maxTokens, contextSize: contextSize, tools: tools)
@@ -729,7 +732,7 @@ public final class GezelNativeRuntime: @unchecked Sendable {
         operationLock.lock()
         guard !backgrounded else { operationLock.unlock(); call.reject("Reopen the app to start a conversation", "BACKGROUND"); return }
         guard activeId == nil, !modelMutation, !releasing else { operationLock.unlock(); call.reject("Another conversation is running", "BUSY"); return }
-        activeId = requestId; cancelled = false; activeFailure = nil
+        activeId = requestId; cancelled = false; activeFailure = nil; activeStalled = false
         operationLock.unlock()
         inferenceQueue.async {
             self.runChat(call, requestId: requestId, modelId: modelId, contextSize: contextSize, body: body, config: config)
@@ -842,7 +845,7 @@ public final class GezelNativeRuntime: @unchecked Sendable {
         operationLock.lock()
         guard !backgrounded else { operationLock.unlock(); call.reject("Reopen the app to read photos", "BACKGROUND"); return }
         guard activeId == nil, !modelMutation, !releasing else { operationLock.unlock(); call.reject("Another conversation is running", "BUSY"); return }
-        activeId = requestId; cancelled = false; activeFailure = nil
+        activeId = requestId; cancelled = false; activeFailure = nil; activeStalled = false
         operationLock.unlock()
         inferenceQueue.async {
             self.runDescribe(call, requestId: requestId, modelId: modelId, projectorId: projectorId, image: image,
@@ -1202,18 +1205,24 @@ public final class GezelNativeRuntime: @unchecked Sendable {
         }
     }
 
-    private func failActive(_ id: String, error: MobileInferenceError) {
+    /// Ends the active request as stalled; its generation decides what that means.
+    private func stallActive(_ id: String) {
         operationLock.lock()
         guard activeId == id else { operationLock.unlock(); return }
-        activeFailure = error
+        activeStalled = true
         operationLock.unlock()
         cancelActive(id)
+    }
+
+    private func wasStalled(_ id: String) -> Bool {
+        operationLock.lock(); defer { operationLock.unlock() }
+        return activeId == id && activeStalled
     }
 
     private func finishGeneration(_ call: NativeCall, terminal: Result<[String: Any], Error>) {
         operationLock.lock()
         let result: Result<[String: Any], Error> = activeFailure.map { .failure($0) } ?? terminal
-        activeId = nil; activeNativeId = 0; appleTask = nil; activeFailure = nil
+        activeId = nil; activeNativeId = 0; appleTask = nil; activeFailure = nil; activeStalled = false
         let parked = Array(pendingToolCalls.values); pendingToolCalls.removeAll()
         let waiting = cancelWaiters
         cancelWaiters.removeAll()
@@ -1232,18 +1241,21 @@ public final class GezelNativeRuntime: @unchecked Sendable {
     private func runAppleGeneration(_ call: NativeCall, requestId: String, turns: [MobileChatTurn], maxTokens: Int, contextSize: Int, tools: [[String: Any]]) async {
         var text = ""
         beginModelSegment()
-        // A minute of the model's own time between tool results. Polling, rather
-        // than one armed timer, lets a completed tool call restart the minute.
-        let timeout = Task {
+        // The SDK ends the reply at maxTokens, so only a stall needs a limit: a
+        // minute of the model's own time with no new text. A flat minute for the
+        // whole reply cut healthy iPad drafts off mid-sentence and discarded
+        // them as errors. Polling, rather than one armed timer, lets each delta
+        // and each completed tool call restart the minute.
+        let watchdog = Task {
             while !Task.isCancelled {
                 do { try await Task.sleep(nanoseconds: 1_000_000_000) } catch { return }
-                if self.modelSegmentSeconds() > 60 {
-                    self.failActive(requestId, error: MobileInferenceError(code: "TIMEOUT", message: "Apple on-device AI exceeded the one-minute response limit."))
+                if self.modelSegmentSeconds() > Self.appleStallSeconds {
+                    self.stallActive(requestId)
                     return
                 }
             }
         }
-        defer { timeout.cancel() }
+        defer { watchdog.cancel() }
         let terminal: Result<[String: Any], Error>
         do {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -1266,6 +1278,7 @@ public final class GezelNativeRuntime: @unchecked Sendable {
             ) { delta in
                 if self.isCancelled(requestId) { throw CancellationError() }
                 text.append(delta)
+                self.beginModelSegment()
                 if !generating {
                     generating = true
                     self.notifyPhase(requestId, "generating")
@@ -1276,12 +1289,23 @@ public final class GezelNativeRuntime: @unchecked Sendable {
             }
             terminal = .success(["text": text, "stopReason": reason])
         } catch {
-            terminal = isCancelled(requestId) || error is CancellationError
-                ? .success(["text": text, "stopReason": "cancelled"])
-                : .failure(error)
+            if wasStalled(requestId) {
+                // Text that streamed before the stall is a reply cut short, as
+                // the llama deadline reports it, not a failure to throw away.
+                terminal = text.isEmpty
+                    ? .failure(MobileInferenceError(code: "TIMEOUT", message: "Apple on-device AI stopped responding. Try again."))
+                    : .success(["text": text, "stopReason": "length"])
+            } else {
+                terminal = isCancelled(requestId) || error is CancellationError
+                    ? .success(["text": text, "stopReason": "cancelled"])
+                    : .failure(error)
+            }
         }
         finishGeneration(call, terminal: terminal)
     }
+
+    /// Model time with no new text after which an Apple reply is treated as stalled.
+    private static let appleStallSeconds: TimeInterval = 60
 
     private func runGeneration(_ call: NativeCall, requestId: String, modelId: String, turns: [MobileChatTurn], maxTokens: Int, contextSize: Int, sampling: LlamaSampling) {
         let stream = NativeChatStream(plugin: self, requestId: requestId)

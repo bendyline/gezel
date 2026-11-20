@@ -138,7 +138,7 @@ describe('save-draft through the connector outbox', () => {
     expect(w.http.unrouted).toEqual([]);
   });
 
-  it('night shift still files drafts (nothing leaves the account) but holds sends', async () => {
+  it('an unattended run still files drafts (nothing leaves the account) but holds sends', async () => {
     world = await gmailWorld({ allowedRecipients: ['bob@example.com'] });
     const w = world;
     const project = { id: 'p1', connectors: [w.binding] } as unknown as ProjectDetail;
@@ -147,7 +147,6 @@ describe('save-draft through the connector outbox', () => {
       secrets: w.env.secrets,
       catalog: { get: async () => ({ manifest: GMAIL_MANIFEST }) } as never,
       fetch: w.http.fetch,
-      isNightShiftActive: () => true,
     });
     const draft = await actions.draft(project, {
       bindingId: w.binding.id,
@@ -161,7 +160,7 @@ describe('save-draft through the connector outbox', () => {
       action: 'send',
       input: { to: ['bob@example.com'], subject: 'x', body: 'y' },
     });
-    expect((await actions.commit(project, send.draftId)).status).toBe('queued-night-shift');
+    expect((await actions.commit(project, send.draftId)).status).toBe('held-for-approval');
     expect(w.gmail.sent).toHaveLength(0);
   });
 });

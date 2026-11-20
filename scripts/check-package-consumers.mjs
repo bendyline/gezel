@@ -128,6 +128,9 @@ const IMPORTABLE = [
   '@bendyline/gezel-plugin-sdk',
   '@bendyline/gezel-catalog',
   '@bendyline/gezel-knowledge',
+  '@bendyline/gezel-knowledge/browser',
+  '@bendyline/gezel-retrieval',
+  '@bendyline/gezel-retrieval/sqlite-wasm',
   '@bendyline/gezel-mcp',
   '@bendyline/gezel-capacitor',
 ];

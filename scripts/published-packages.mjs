@@ -43,6 +43,7 @@ export const PUBLISHED_PACKAGES = [
   { dir: 'knowledge', typed: true },
   { dir: 'mcp', typed: true },
   { dir: 'inference', typed: true },
+  { dir: 'retrieval', typed: true },
   // Carries the pinned native release's mobile SDKs, which its `prepack` stages
   // through scripts/stage-capacitor-native.mjs. They are never committed.
   { dir: 'capacitor', typed: true },

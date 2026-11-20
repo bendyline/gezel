@@ -132,6 +132,7 @@ const APP_DIR = fileURLToPath(new URL('../../../app', import.meta.url));
 const BROWSER_CACHES = [
   join(homedir(), 'Library/Caches/ms-playwright'),
   join(homedir(), '.cache/ms-playwright'),
+  join(process.env.LOCALAPPDATA ?? join(homedir(), 'AppData/Local'), 'ms-playwright'),
 ];
 const browsersPath = BROWSER_CACHES.find((p) => existsSync(p));
 const canRunReal = existsSync(join(APP_DIR, 'node_modules')) && browsersPath !== undefined;
@@ -171,5 +172,60 @@ describe.skipIf(!canRunReal)('runPageCheck (real chromium)', () => {
     } finally {
       server.close();
     }
+  }, 60_000);
+});
+
+describe.skipIf(!canRunReal)('runPageCheck containment (real chromium)', () => {
+  /** A page on one server that tries every way out to another. */
+  async function attempt(allowExternalNetwork: boolean) {
+    const hits: string[] = [];
+    const collector = createServer((req, res) => {
+      hits.push(req.url ?? '');
+      res.writeHead(200, { 'content-type': 'image/gif' });
+      res.end();
+    });
+    await new Promise<void>((resolve) => collector.listen(0, '127.0.0.1', resolve));
+    const collectorPort = (collector.address() as { port: number }).port;
+    const out = `http://127.0.0.1:${collectorPort}`;
+    const page = `<!DOCTYPE html><html><head>
+<meta http-equiv="refresh" content="0.4;url=${out}/refresh">
+</head><body><img src="${out}/img"><script>
+fetch('${out}/fetch', { mode: 'no-cors' }).catch(() => {});
+navigator.sendBeacon('${out}/beacon', 'x');
+new Image().src = '${out}/image';
+</script></body></html>`;
+    const server = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end(page);
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    try {
+      const outcome = await runPageCheck({
+        installPath: APP_DIR,
+        browsersPath: browsersPath!,
+        url: `http://127.0.0.1:${port}/index.html`,
+        settleMs: 1_200,
+        timeoutMs: 45_000,
+        allowExternalNetwork,
+      });
+      return { outcome, hits };
+    } finally {
+      server.close();
+      collector.close();
+    }
+  }
+
+  // The preview's CSP does not cover a meta refresh, and this browser had
+  // nothing else between a model-written page and the network.
+  it('lets a page reach nothing beyond its own origin', async () => {
+    const { outcome, hits } = await attempt(false);
+    expect(outcome.ran).toBe(true);
+    expect(hits).toEqual([]);
+  }, 60_000);
+
+  it('leaves the page alone where the security level allows web services', async () => {
+    const { hits } = await attempt(true);
+    expect(hits.length).toBeGreaterThan(0);
   }, 60_000);
 });

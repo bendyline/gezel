@@ -1,10 +1,12 @@
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
 import { compactCorpus } from './compactor.js';
-import { DuckRunner } from './duck.js';
+import { DuckQueryError, DuckRunner, sqlLiteral } from './duck.js';
+import { tableRelDir } from './layout.js';
 import {
   DEFAULT_ROW_LIMIT,
   MAX_ROW_LIMIT,
@@ -308,6 +310,47 @@ describe.runIf(hasRealDuckdb())('runQuery (real engine)', () => {
         sql: 'WITH c AS (SELECT 1 AS v) INSERT INTO requests SELECT v FROM c',
       }),
     ).rejects.toBeInstanceOf(SqlRejectedError);
+  });
+
+  // DuckDB's parser reads nested comments and `$$` strings; the CLI's line
+  // reader does not. This statement is one SELECT to the parser, but spliced
+  // into the script raw, the CLI ended it at the `;` and ran the next line on
+  // its own. Measured against the pinned engine before the fix.
+  const cliSplitting = (nextLine: string) =>
+    `SELECT 1 AS one /* /* */ $$ ' $$ ;\n${nextLine}\n' */`;
+
+  it('runs a statement the CLI would split as the single SELECT the parser saw', async () => {
+    await seed(10, { days: 1 });
+    // `.output` creates its file the moment it runs. Forward slashes, because
+    // the CLI reads backslashes in a command argument as escapes.
+    const marker = join(artifacts, 'cli-command-ran.txt').replaceAll('\\', '/');
+    const result = await runQuery({ store: makeStore(), duck }, PROJECT, {
+      sql: cliSplitting(`.output ${marker}`),
+    });
+    expect(result.rows).toEqual([{ one: 1 }]);
+    expect(existsSync(marker)).toBe(false);
+  });
+
+  it('never lets the CLI run a statement the guard did not see', async () => {
+    await seed(10, { days: 1 });
+    // Inside a directory the prelude allows, where an ATTACH can write.
+    const target = join(artifacts, ...tableRelDir('data/traffic', 'requests').split('/'), 'x.db');
+    const result = await runQuery({ store: makeStore(), duck }, PROJECT, {
+      sql: cliSplitting(`ATTACH '${sqlLiteral(target)}' AS w;`),
+    });
+    expect(result.rows).toEqual([{ one: 1 }]);
+    expect(existsSync(target)).toBe(false);
+  });
+
+  it('reports an engine error in terms of the SQL the model wrote', async () => {
+    await seed(10, { days: 1 });
+    const err = await runQuery({ store: makeStore(), duck }, PROJECT, {
+      sql: 'SELECT no_such_column FROM requests',
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(DuckQueryError);
+    expect((err as DuckQueryError).engineMessage).toMatch(/no_such_column/);
+    expect((err as DuckQueryError).engineMessage).not.toMatch(/from_base64/);
+    expect((err as DuckQueryError).message).not.toMatch(/from_base64/);
   });
 
   it('refuses the wrapper injection before assembling anything around it', async () => {

@@ -12768,7 +12768,11 @@ server.tool(
             type: 'text' as const,
             text: `Extracted ${res.extractedCount} ${res.format} entr${
               res.extractedCount === 1 ? 'y' : 'ies'
-            } into ${res.destination}`,
+            } into ${res.destination}${
+              res.skippedGitEntries
+                ? `. Left ${res.skippedGitEntries} inside .git folders in the archive: Gezel does not write git's own files.`
+                : ''
+            }`,
           },
         ],
       };

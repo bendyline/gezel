@@ -1,4 +1,5 @@
 import type { PreviewLogEntry } from '@bendyline/gezel';
+import { redactPathSecrets } from '@bendyline/gezel-inference/internal/perf/redact-path';
 
 /**
  * In-memory, daemon-lifetime buffer of runtime errors the preview iframe's
@@ -29,7 +30,15 @@ export class PreviewLogBuffer {
   record(projectId: string, entries: PreviewLogEntry[]): void {
     if (entries.length === 0) return;
     const existing = this.perProject.get(projectId) ?? [];
-    for (const entry of entries) {
+    for (const raw of entries) {
+      // A previewed page writes these entries itself, and they reach the
+      // model's next turn: a page can print its own preview URL here. The
+      // capability is the page's whole authorization, so it never goes on.
+      const entry = {
+        ...raw,
+        path: redactPathSecrets(raw.path),
+        message: redactPathSecrets(raw.message),
+      };
       // Collapse exact repeats (a console.error inside a loop) — the model
       // needs the distinct failure, not four hundred copies of it.
       const dup = existing.some(

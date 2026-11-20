@@ -130,6 +130,7 @@ export {
   windowsDetachedSpawnOptions,
   windowsHeadlessSpawnOptions,
 } from './console-detach.js';
+export { DISABLE_DEBUG_SIGNAL_FLAG, debugSignalLockArgs } from './debug-signal.js';
 export type { FileFingerprint } from './file-fingerprint.js';
 export { fileFingerprint, sameFileFingerprint } from './file-fingerprint.js';
 export type { LockIdentity } from './lock-identity.js';

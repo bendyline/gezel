@@ -1385,6 +1385,10 @@ function applySecurityPolicyGates(
   if (!policy.allowModelGit) {
     for (const name of GITHUB_REMOTE_TOOLS) next.delete(name);
     next.delete('run_git');
+    // Clones reach the network; their routes refuse them here as well and
+    // send any host but the known git hosts through allowExternalServices.
+    next.delete('fetch_repo');
+    next.delete('fetch_diff');
   }
   return next;
 }

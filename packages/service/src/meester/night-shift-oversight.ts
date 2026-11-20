@@ -6,7 +6,7 @@ import {
   createLogger,
   isSharedLibraryProject,
   nightShiftDayKey,
-  projectAllowsAmbientWork,
+  projectAllowsUnattendedWork,
   projectNightWorkEnabled,
 } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
@@ -68,7 +68,7 @@ export function nightShiftReviewScope(projects: Project[]): string[] {
   return projects
     .filter(
       (project) =>
-        projectAllowsAmbientWork(project) &&
+        projectAllowsUnattendedWork(project) &&
         projectNightWorkEnabled(project) &&
         !isSharedLibraryProject(project),
     )

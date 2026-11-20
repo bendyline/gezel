@@ -229,6 +229,20 @@ describe('capacitor bundled assets', () => {
     expect(existsSync(resolve(capacitor.dist, 'sqlite3.wasm'))).toBe(true);
   });
 
+  // The entry runs in a WebView. One inference module importing knowledge's
+  // root entry instead of `/browser` bundled node:sqlite and CommonJS yaml into
+  // it, and importing the package threw `Dynamic require of "process"`
+  // (2026-11-20 npm rehearsal).
+  it('keeps Node-only modules out of the WebView entry', () => {
+    const source = readFileSync(resolve(capacitor.dist, 'index.js'), 'utf8');
+    const nodeOnly = [
+      ...source.matchAll(/\bfrom\s+["'](node:[^"']+|module)["']/g),
+      ...source.matchAll(/\b__require\(\s*["']([^"']+)["']/g),
+      ...source.matchAll(/["'](node:sqlite)["']/g),
+    ].map((match) => match[1]);
+    expect([...new Set(nodeOnly)]).toEqual([]);
+  });
+
   it('stages license texts for what its bundles compile in', () => {
     expect(existsSync(resolve(capacitor.dist, 'licenses/npm/manifest.json'))).toBe(true);
   });

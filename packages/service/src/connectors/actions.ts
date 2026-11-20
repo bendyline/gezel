@@ -5,12 +5,12 @@
  * drafted. Committing — which calls `adapter.runAction` (the live write) —
  * must clear the action's consent scope through the daemon-enforced registry
  * (`connectors/consent.ts`); no scope, no registered enforcer, or a failing
- * enforcer all deny. During night shift, commit defers: the action stages to
- * `_outbox/` for daytime approval (the morning-briefing model).
+ * enforcer all deny. A commit no one is attending holds: the action stages to
+ * `_outbox/` for the person to approve (see `commit`).
  *
  *   <artifacts>/<binding corpusDir>/_actions/
  *     _drafts/<id>.md   (drafted by the agent — the review surface)
- *     _outbox/<id>.md   (staged: queued for daytime approval)
+ *     _outbox/<id>.md   (staged: held for the person's approval)
  *     _sent/<id>.md     (committed: receipt)
  */
 
@@ -37,10 +37,10 @@ const log = createLogger('connectors');
 
 /**
  * Consent scopes whose commit reaches nobody but the account owner — a draft
- * saved into their own mailbox. Night-shift deferral exists so nothing is sent
- * to other people unattended; holding these until morning would only mean an
- * overnight "draft my replies" run leaves the Drafts folder empty when the
- * person sits down to review it.
+ * saved into their own mailbox. The hold exists so nothing is sent to other
+ * people unattended; holding these would only mean an overnight "draft my
+ * replies" run leaves the Drafts folder empty when the person sits down to
+ * review it.
  */
 const NON_TRANSMITTING_SCOPES: ReadonlySet<string> = new Set(['mailbox-draft']);
 
@@ -89,8 +89,13 @@ export interface PendingAction {
   error?: string;
 }
 
+/**
+ * `held-for-approval`: no one was attending, so the action waits in
+ * `_outbox/` for the person. Earlier builds answered `queued-night-shift`
+ * for the same outcome, so readers accept both.
+ */
 export interface CommitResult {
-  status: 'committed' | 'queued-night-shift';
+  status: 'committed' | 'held-for-approval';
   result?: unknown;
   relPath: string;
 }
@@ -101,7 +106,6 @@ export interface ConnectorActionManagerOptions {
   catalog: CatalogService;
   contentIndex?: ContentIndex;
   scriptRunner?: import('../scripts/runner.js').ScriptRunner;
-  isNightShiftActive?: () => boolean;
   /** Shared with ConnectorManager so commits can't race syncs. */
   locks?: KeyedLock;
   /** HTTP transport for the committing adapter; tests inject the simulator. */
@@ -200,7 +204,7 @@ export class ConnectorActionManager {
     return { pending };
   }
 
-  /** Stage a draft to `_outbox/` (no network; consent still gates the commit). */
+  /** Stage a draft to `_outbox/` (no network; the commit still clears its consent scope). */
   async queue(project: ProjectDetail, draftId: string): Promise<{ relPath: string }> {
     return this.locks.run(project.id, async () => {
       const found = await this.find(project, draftId);
@@ -221,19 +225,30 @@ export class ConnectorActionManager {
   /**
    * Commit an action — the live write. Deny-by-default twice over: the
    * action's consent scope must clear its registered enforcer (unknown scope
-   * = deny), and during night shift the commit defers to `_outbox/` for
-   * daytime approval instead of transmitting.
-   */
-  /**
+   * = deny), and a commit no one is attending holds in `_outbox/` for the
+   * person to approve instead of transmitting.
+   *
+   * A consent scope such as `social-publish` is a standing permission on the
+   * connection, not a question asked per post, so the hold is what keeps an
+   * unattended run (a schedule, the night shift, a nudge, another gezel's
+   * request) from posting in the person's name. It used to key on the night
+   * shift alone, and a daytime scheduled task published at once.
+   *
    * `standingRecipients` is a lookout's own recipient list: a send whose every
-   * recipient the person typed on that lookout transmits even during the
-   * night shift (a 3 a.m. alert is no use at breakfast). The consent scope
-   * still runs; this only waives the deferral, and only for those addresses.
+   * recipient the person typed on that lookout transmits unattended (a 3 a.m.
+   * alert is no use at breakfast). The consent scope still runs; this only
+   * waives the hold, and only for those addresses.
    */
   async commit(
     requested: ProjectDetail,
     draftId: string,
     opts: {
+      /**
+       * The person asked for this commit just now: they pressed Approve, or
+       * the gezel's running turn answers a message they typed. Anything else
+       * holds.
+       */
+      attended?: boolean;
       standingRecipients?: readonly string[];
       /**
        * A gezel's session asked for this commit (`send_email`), not the
@@ -299,7 +314,7 @@ export class ConnectorActionManager {
       const committedInput = verdict.input !== undefined ? verdict.input : input;
 
       if (
-        this.opts.isNightShiftActive?.() &&
+        opts.attended !== true &&
         !NON_TRANSMITTING_SCOPES.has(declared.consentScope ?? '') &&
         !coveredByStandingRecipients(found.data, committedInput, opts.standingRecipients)
       ) {
@@ -315,7 +330,8 @@ export class ConnectorActionManager {
           withFrontmatter({ ...found.data, status: 'queued' }, found.body),
         );
         if (found.abs !== abs) await rm(found.abs, { force: true });
-        return { status: 'queued-night-shift', relPath: rel };
+        log.info(`[connectors] held ${action} on ${binding.id} for approval: no one attending`);
+        return { status: 'held-for-approval', relPath: rel };
       }
 
       const adapter = await createConnectorAdapter(type, binding, {

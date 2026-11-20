@@ -368,7 +368,9 @@ function wikiPageUrl(config: GitHubWikiConfig, path: string): string {
 
 /** Register the GitHub wiki native adapter. */
 export function registerGitHubWikiAdapters(): void {
-  registerNativeAdapter('github-wiki', async (binding, deps) =>
-    Promise.resolve(new GitHubWikiAdapter(binding, deps)),
+  registerNativeAdapter(
+    'github-wiki',
+    async (binding, deps) => Promise.resolve(new GitHubWikiAdapter(binding, deps)),
+    { destinationKeys: ['host'] },
   );
 }

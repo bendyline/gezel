@@ -132,6 +132,7 @@ export function DiffpackReviewView({ projectId }: { projectId: string }) {
   );
   const canApply =
     selected !== null &&
+    (selected.altered?.length ?? 0) === 0 &&
     (selected.status === 'ready' ||
       selected.status === 'partially-applied' ||
       (selected.status === 'failed' && Boolean(selected.sealedAt))) &&
@@ -221,8 +222,13 @@ export function DiffpackReviewView({ projectId }: { projectId: string }) {
                 ? ` · ${pack.origin.issueRefs.join(', ')}`
                 : ''}
             </span>
-            {(pack.drifted.length > 0 || pack.overlaps.length > 0) && (
+            {(pack.drifted.length > 0 ||
+              pack.overlaps.length > 0 ||
+              (pack.altered?.length ?? 0) > 0) && (
               <span className="dp-list-flags">
+                {(pack.altered?.length ?? 0) > 0 && (
+                  <span className="dp-flag dp-flag-drift">Changed after sealing</span>
+                )}
                 {pack.drifted.length > 0 && (
                   <span className="dp-flag dp-flag-drift">Out of date</span>
                 )}
@@ -253,6 +259,13 @@ export function DiffpackReviewView({ projectId }: { projectId: string }) {
               </p>
             </div>
 
+            {(selected.altered?.length ?? 0) > 0 && (
+              <output className="dp-notice">
+                The diff for {selected.altered?.join(', ')} was changed after this proposal was
+                sealed, so it is not what the gezel drafted. Gezel won't apply or export it; dismiss
+                the proposal.
+              </output>
+            )}
             {selected.drifted.length > 0 && (
               <output className="dp-notice">
                 {selected.drifted.join(', ')} changed since this was written, so the proposal may no

@@ -515,9 +515,13 @@ agent:
 - **Deny-by-default allowlist.** Sending is permitted only to addresses/domains the user
   explicitly allowlisted on the project. No allowlist → nothing transmits. The generalized
   form: every action declares a consent scope, and the daemon — not the model — enforces it.
-- **Night-shift deferral.** `send_email` refuses to transmit during night shift; the message
-  stays staged for daytime approval. This **is** the morning-briefing model: the night shift
-  drafts and queues, the user reviews the outbox and commits in the morning. The
+- **An unattended commit holds.** A commit transmits only when the person asked for it just
+  now: they pressed Approve, or the gezel committing is running a turn the person started
+  (`isUserDirectedTurn`). Anything else (a scheduled task by day, the night shift, a nudge,
+  another gezel's request) stages to `_outbox/` and answers `held-for-approval`. This **is** the
+  morning-briefing model: unattended work drafts and queues, the user reviews the outbox and
+  commits. It used to key on the night shift alone, so a daytime scheduled task published at
+  once; a lookout's own recipients and mailbox drafts are the only exceptions. The
   [HistoryManager](../packages/service/src/history/manager.ts) audit log and the keurmeester
   intervention layer are the substrate for that review view.
 
@@ -627,7 +631,9 @@ they do not add a parallel one:
 - Write actions are deny-by-default and daemon-enforced; the model cannot widen its own
   allowlist. Note the consent is **channel-level, not per-write**: once a recipient domain is
   allowlisted or `allowPublish` is on, `send_email` / `publish_post` transmit without a further
-  human click. That is real outbound agency, so those tools stay in `EXTERNAL_SERVICE_TOOLS`
+  human click during a turn the person started, and hold for approval otherwise. Copy must say
+  so: a manifest that promises consent for each post describes a check that does not exist.
+  That is real outbound agency, so those tools stay in `EXTERNAL_SERVICE_TOOLS`
   and remain stripped below `free` — connectors being permitted at `lockdown` does not put
   them back.
 - **Autonomous third-party execution.** An `mcp` / `script` connector means gezel runs

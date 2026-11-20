@@ -7,6 +7,7 @@ import {
   orderInstalledChatModels,
   pickAccessoryModels,
   rankChatModels,
+  shouldOfferNativeToolkit,
 } from './bootstrap.js';
 
 const GB = 1024 ** 3;
@@ -96,6 +97,19 @@ describe('nativeToolkitTitle', () => {
     );
     expect(nativeToolkitTitle(['uv'], 'mlx')).toContain('to run chat models');
     expect(nativeToolkitTitle(['llama-server'], 'mlx')).toContain('optional');
+  });
+});
+
+describe('shouldOfferNativeToolkit', () => {
+  it('offers the toolkit only when the engine chat runs on is missing', () => {
+    expect(shouldOfferNativeToolkit(NATIVE_TOOLKIT, 'llama-cpp')).toBe(true);
+    expect(shouldOfferNativeToolkit(['llama-server'], 'llama-cpp')).toBe(true);
+    expect(shouldOfferNativeToolkit(['sd-server', 'whisper-server', 'uv'], 'llama-cpp')).toBe(
+      false,
+    );
+    expect(shouldOfferNativeToolkit(['uv'], 'mlx')).toBe(true);
+    expect(shouldOfferNativeToolkit(['llama-server', 'sd-server'], 'mlx')).toBe(false);
+    expect(shouldOfferNativeToolkit([], 'llama-cpp')).toBe(false);
   });
 });
 

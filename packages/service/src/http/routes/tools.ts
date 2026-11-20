@@ -87,6 +87,8 @@ import {
 } from '@bendyline/gezel';
 import {
   PathSafetyError,
+  assertNotGitControlPath,
+  isGitControlTarget,
   resolveInside,
   safeJoin,
 } from '@bendyline/gezel-inference/internal/fs/safe-paths';
@@ -1587,12 +1589,14 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     const format = detectArchiveFormat(archivePath);
     if (!format) return c.json({ error: 'unsupported archive type' }, 400);
     try {
+      await assertNotGitControlPath(baseDir, body.outputPath);
       await mkdir(outPath, { recursive: true });
-      const count = await extractArchive(archivePath, format, outPath);
+      const { extracted, skippedGit } = await extractArchive(archivePath, format, outPath);
       const response: ArchiveExtractResponse = {
         format,
-        extractedCount: count,
+        extractedCount: extracted,
         destination: relative(baseDir, outPath).split(sep).join('/'),
+        ...(skippedGit > 0 ? { skippedGitEntries: skippedGit } : {}),
       };
       return c.json(response);
     } catch (err) {
@@ -1816,18 +1820,27 @@ async function listArchive(
   return { format, entries, truncated };
 }
 
+interface ExtractCounts {
+  extracted: number;
+  /**
+   * Entries left behind because they land in a `.git` folder: an archive is
+   * as able as a gezel to carry a `.git/config` whose settings run commands.
+   */
+  skippedGit: number;
+}
+
 async function extractArchive(
   path: string,
   format: 'zip' | 'tar' | 'tar.gz',
   destination: string,
-): Promise<number> {
+): Promise<ExtractCounts> {
   if (format === 'zip') {
     return extractZipArchive(path, destination);
   }
   return extractTarArchive(path, format, destination);
 }
 
-async function extractZipArchive(path: string, destination: string): Promise<number> {
+async function extractZipArchive(path: string, destination: string): Promise<ExtractCounts> {
   const bytes = await fsReadFile(path);
   const guard = guardZipArchive(bytes, ARCHIVE_LIMITS);
   if (!guard.ok) throw new ArchiveValidationError(guard.reason ?? 'unsafe archive');
@@ -1835,10 +1848,15 @@ async function extractZipArchive(path: string, destination: string): Promise<num
   const AdmZip = (await import('adm-zip')).default;
   const zip = new AdmZip(bytes);
   let count = 0;
+  let skippedGit = 0;
   for (const entry of zip.getEntries()) {
     const rel = archiveEntryRelativePath(entry.entryName);
     if (rel === null) continue;
     assertZipEntryType(entry);
+    if (await isGitControlTarget(destination, rel)) {
+      skippedGit += 1;
+      continue;
+    }
     assertArchiveEntryBudget({
       count: count + 1,
       entrySize: entry.header.size,
@@ -1855,18 +1873,19 @@ async function extractZipArchive(path: string, destination: string): Promise<num
     }
     count += 1;
   }
-  return count;
+  return { extracted: count, skippedGit };
 }
 
 async function extractTarArchive(
   path: string,
   format: 'tar' | 'tar.gz',
   destination: string,
-): Promise<number> {
+): Promise<ExtractCounts> {
   const tar = await import('tar');
   const archiveSize = Math.max(1, (await stat(path)).size);
   let count = 0;
   let totalSize = 0;
+  let skippedGit = 0;
   let firstError: unknown;
   const writes: Promise<void>[] = [];
   await pipeline(
@@ -1894,6 +1913,12 @@ async function extractTarArchive(
             set totalSize(next: number) {
               totalSize = next;
             },
+            get skippedGit() {
+              return skippedGit;
+            },
+            set skippedGit(next: number) {
+              skippedGit = next;
+            },
           }).catch((err: unknown) => {
             firstError ??= err;
           }),
@@ -1902,14 +1927,14 @@ async function extractTarArchive(
   );
   await Promise.all(writes);
   if (firstError) throw firstError;
-  return count;
+  return { extracted: count, skippedGit };
 }
 
 async function extractTarEntry(
   entry: ReadEntry,
   destination: string,
   archiveSize: number,
-  totals: { count: number; totalSize: number },
+  totals: { count: number; totalSize: number; skippedGit: number },
 ): Promise<void> {
   try {
     const rel = archiveEntryRelativePath(entry.path);
@@ -1918,6 +1943,11 @@ async function extractTarEntry(
       return;
     }
     assertTarEntryType(entry);
+    if (await isGitControlTarget(destination, rel)) {
+      totals.skippedGit += 1;
+      entry.resume();
+      return;
+    }
     assertArchiveEntryBudget({
       count: totals.count + 1,
       entrySize: entry.size ?? 0,

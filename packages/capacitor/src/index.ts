@@ -29,4 +29,5 @@ export * from './speech-catalog.js';
 export * from './knowledge/catalog.js';
 export type { GezelKnowledgePlugin } from './knowledge/definitions.js';
 export * from './knowledge/manager.js';
+export * from './knowledge/text-embedder.js';
 export type { KnowledgeWorkerUrls } from './knowledge/worker-host.js';

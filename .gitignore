@@ -244,3 +244,4 @@ packages/capacitor/embedding-manifest.json
 # cache. Committed copies conflicted on nearly every merge that touched the docs.
 /packages/service/assets/handboek/
 /state
+/.sn-test-tmp

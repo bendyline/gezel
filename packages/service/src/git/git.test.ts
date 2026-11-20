@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { REPOSITORY_CONFIG_OVERRIDES } from './config-overrides.js';
 
 const spawnMock = vi.hoisted(() => vi.fn());
 
@@ -48,6 +49,7 @@ describe('runGit process safety', () => {
       'safe.bareRepository=all',
       '-c',
       'credential.interactive=false',
+      ...REPOSITORY_CONFIG_OVERRIDES,
       'fetch',
       'origin',
     ]);
@@ -63,6 +65,20 @@ describe('runGit process safety', () => {
       }),
     );
     expect(child.stdin.end).not.toHaveBeenCalled();
+  });
+
+  it('turns off repository-named programs, and puts diff flags after the subcommand', async () => {
+    const child = fakeChild();
+    spawnMock.mockReturnValue(child);
+
+    const pending = runGit(['-c', 'http.extraheader=AUTHORIZATION: Bearer x', 'diff', 'HEAD']);
+    queueMicrotask(() => child.emit('close', 0));
+    await pending;
+
+    const args = spawnMock.mock.calls[0]![1] as string[];
+    expect(args).toEqual(expect.arrayContaining(['core.fsmonitor=false']));
+    expect(args.some((a) => a.startsWith('core.hooksPath='))).toBe(true);
+    expect(args.slice(-4)).toEqual(['diff', '--no-ext-diff', '--no-textconv', 'HEAD']);
   });
 
   it('writes an optional bulk-input payload to stdin and closes it', async () => {
@@ -121,6 +137,7 @@ describe('runGit process safety', () => {
         'safe.bareRepository=all',
         '-c',
         'credential.interactive=false',
+        ...REPOSITORY_CONFIG_OVERRIDES,
         ...cloneArgs,
       ]);
       expect(spawnedArgs.join(' ')).not.toContain(sentinel);

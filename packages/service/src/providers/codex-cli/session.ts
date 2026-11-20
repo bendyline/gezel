@@ -231,9 +231,8 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
       if (this.deps.reasoningEffort) {
         invokerOpts.reasoningEffort = this.deps.reasoningEffort;
       }
-      if (this.deps.extraConfigOverrides) {
-        invokerOpts.extraConfigOverrides = this.deps.extraConfigOverrides;
-      }
+      const configOverrides = this.configOverrides();
+      if (configOverrides) invokerOpts.extraConfigOverrides = configOverrides;
       if (this.codexThreadIdCache) {
         invokerOpts.resumeThreadId = this.codexThreadIdCache;
       }
@@ -254,6 +253,22 @@ export class CodexCliSession extends StreamingSessionBase implements LLMSession 
       }
       throw err;
     }
+  }
+
+  /**
+   * The person's `-c` overrides, plus the shell switch when the shell is off.
+   * The per-session `config.toml` says so too, but a `-c` beats it, and with
+   * `manageRuntimeFiles: false` there is no such file at all: Codex reads the
+   * person's own config. Either way `allowAgentShell` (and a one-shot's
+   * no-shell rule) would not reach it. Ours come last and win.
+   */
+  private configOverrides(): Record<string, string> | undefined {
+    if (this.deps.context.shellTool !== false) return this.deps.extraConfigOverrides;
+    return {
+      ...this.deps.extraConfigOverrides,
+      'features.shell_tool': 'false',
+      'features.unified_exec': 'false',
+    };
   }
 
   /**

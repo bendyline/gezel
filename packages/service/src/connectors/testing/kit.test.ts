@@ -1,12 +1,8 @@
 import { HttpStatusError } from '@bendyline/gezel';
 import { afterEach, describe, expect, it } from 'vitest';
 import { parseRawMessage } from '../../mail/mime.js';
-import {
-  POISON_RECORD_PASSES,
-  partialFailureNote,
-  scopeDirName,
-  syncWithAdapter,
-} from '../manager.js';
+import { POISON_RECORD_PASSES, partialFailureNote, syncWithAdapter } from '../manager.js';
+import { scopeDirName } from '../scoped-cursor.js';
 import type { ChangeBatch, ConnectorAdapter, NormalizedRecord, RecordRef } from '../types.js';
 import { FakeHttp, FakeTokenEndpoint, json, status } from './fake-http.js';
 import {

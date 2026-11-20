@@ -1,6 +1,7 @@
 import { createLogger, externalGezelModelId, toolCallBlockedHistoryEntry } from '@bendyline/gezel';
 import { appendCallerOwnedActionLedger } from '@bendyline/gezel-inference/internal/http/openai-compat/action-ledger';
 import { profileForCallerOwnedInference } from '@bendyline/gezel-inference/internal/http/openai-compat/caller-owned-profile';
+import { callerOwnedTargetRefusal } from '@bendyline/gezel-inference/internal/http/openai-compat/caller-providers';
 import type { ChatTarget } from '@bendyline/gezel-inference/internal/http/openai-compat/chat-target';
 import { resolveChatTarget } from '@bendyline/gezel-inference/internal/http/openai-compat/chat-target';
 import {
@@ -20,7 +21,10 @@ import {
   resolveModelTarget,
   translateMessagesWithPrefix,
 } from '@bendyline/gezel-inference/internal/http/openai-compat/translate';
-import { providerListable } from '@bendyline/gezel-inference/internal/http/routes/v1-models';
+import {
+  providerListable,
+  servableGezelIds,
+} from '@bendyline/gezel-inference/internal/http/routes/v1-models';
 import { ModelNotInstalledError } from '@bendyline/gezel-inference/internal/providers/types';
 import type {
   ExternalToolCall,
@@ -207,12 +211,11 @@ interface OllamaChatStreamChunk {
   eval_count?: number;
 }
 
+/** Never an agent CLI: the chat routes refuse them (see caller-providers.ts). */
 const PROVIDERS_FOR_TAGS: readonly ProviderName[] = [
   'copilot',
   'openai',
   'anthropic',
-  'anthropic-cli',
-  'codex-cli',
   'ollama',
   'llama-cpp',
   'mlx',
@@ -446,7 +449,7 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
       const servingGezelId = config.openaiEndpoints?.servingGezelId;
       if (servingGezelId) {
         const gezel = await ctx.store.getGezel(servingGezelId).catch(() => null);
-        if (gezel) {
+        if (gezel && (await servableGezelIds(ctx, [gezel])).has(gezel.id)) {
           servingEntry.push({
             name: externalGezelModelId(gezel),
             model: externalGezelModelId(gezel),
@@ -495,6 +498,8 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 404);
     }
     if (!target) return c.json({ error: `model "${modelField}" not found` }, 404);
+    const refusal = callerOwnedTargetRefusal(target);
+    if (refusal) return c.json({ error: refusal }, 403);
     let contextWindow: number | undefined;
     try {
       const models = await ctx.chat.listModelsForProvider(target.provider);
@@ -576,6 +581,8 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 404);
     }
     if (!target) return c.json({ error: `model "${parsed.model}" not found` }, 404);
+    const refusal = callerOwnedTargetRefusal(target);
+    if (refusal) return c.json({ error: refusal }, 403);
 
     let provider: Awaited<ReturnType<typeof ctx.chat.getProviderForModel>>;
     try {
@@ -704,6 +711,8 @@ export function ollamaCompatRoutes(ctx: ServiceContext): Hono {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 404);
     }
     if (!target) return c.json({ error: `model "${parsed.model}" not found` }, 404);
+    const refusal = callerOwnedTargetRefusal(target);
+    if (refusal) return c.json({ error: refusal }, 403);
 
     let translated: ReturnType<typeof translateMessagesWithPrefix>;
     let actionReceiptCount = 0;

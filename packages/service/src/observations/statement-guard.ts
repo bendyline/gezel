@@ -36,9 +36,18 @@
  * mistakes into a clear, immediate message instead of a parser error — a
  * model repairs "you cannot INSERT here" far more reliably than "syntax
  * error at or near".
+ *
+ * The parser's verdict only holds if the engine later runs the same text it
+ * judged. Pasting the statement into the script broke that: the DuckDB CLI
+ * splits a script with its own tokenizer, and a statement with nested
+ * comments or `$$` strings that the parser called one SELECT was cut short
+ * by the CLI, whose next line then ran as a `.shell` command. So the
+ * statement only ever travels as `untrustedSqlText` (base64, decoded by the
+ * engine), here and in `query.ts`, and is run through `query()` rather than
+ * spliced into a wrapper.
  */
 
-import { type DuckRunOptions, sqlLiteral } from './duck.js';
+import { type DuckRunOptions, untrustedSqlText } from './duck.js';
 
 /** Longest statement accepted. Well past any legitimate analytical query. */
 export const MAX_SQL_LENGTH = 20_000;
@@ -213,7 +222,7 @@ export async function parserCheck(
   let rows: { verdict?: SerializeVerdict }[];
   try {
     rows = await runner.runTrusted<{ verdict?: SerializeVerdict }>(
-      `SELECT json_serialize_sql('${sqlLiteral(sql)}') AS verdict`,
+      `SELECT json_serialize_sql(${untrustedSqlText(sql)}) AS verdict`,
       opts,
     );
   } catch (err) {

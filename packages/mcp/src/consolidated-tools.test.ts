@@ -442,7 +442,7 @@ describe('consolidated MCP tools', () => {
         url.pathname === '/api/projects/project-a/connectors/actions/post-1/commit' &&
         method === 'POST'
       ) {
-        return { status: 'queued-night-shift', relPath: 'data/bsky/_actions/_outbox/post-1.md' };
+        return { status: 'held-for-approval', relPath: 'data/bsky/_actions/_outbox/post-1.md' };
       }
       throw new Error(`Unexpected request: ${url}`);
     };
@@ -467,7 +467,7 @@ describe('consolidated MCP tools', () => {
     });
     expect(publish.isError).not.toBe(true);
     expect(publish.structuredContent).toMatchObject({
-      status: 'queued-night-shift',
+      status: 'held-for-approval',
       draftId: 'post-1',
       relPath: 'data/bsky/_actions/_outbox/post-1.md',
     });
@@ -543,11 +543,11 @@ describe('consolidated MCP tools', () => {
     expect(JSON.stringify(result)).toMatch(/does not support mailbox drafts yet/);
   });
 
-  it('keeps night-shift email deferral as a structured successful safety outcome', async () => {
+  it('keeps an email held for approval as a structured successful safety outcome', async () => {
     handler = (url, method) => {
       expect(url.pathname).toBe('/api/projects/project-a/connectors/actions/draft-1/commit');
       expect(method).toBe('POST');
-      return { status: 'queued-night-shift', relPath: 'mail/outbox/draft-1.json' };
+      return { status: 'held-for-approval', relPath: 'mail/outbox/draft-1.json' };
     };
 
     const result = await client.callTool({
@@ -556,7 +556,7 @@ describe('consolidated MCP tools', () => {
     });
     expect(result.isError).not.toBe(true);
     expect(result.structuredContent).toMatchObject({
-      status: 'queued-night-shift',
+      status: 'held-for-approval',
       draftId: 'draft-1',
       relPath: 'mail/outbox/draft-1.json',
     });

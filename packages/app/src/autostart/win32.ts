@@ -4,6 +4,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
+import { DISABLE_DEBUG_SIGNAL_FLAG } from '@bendyline/gezel/native';
 import type { AutostartInstallOptions } from './index.js';
 
 const exec = promisify(execFile);
@@ -16,7 +17,7 @@ export function buildTaskXml(opts: AutostartInstallOptions, userId: string): str
   const now = new Date().toISOString();
   const escapeXml = (value: string) =>
     value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const argumentsValue = `"${opts.gezeldPath}" "--gezel-autostart-home=${opts.gezelHome}"`;
+  const argumentsValue = `${DISABLE_DEBUG_SIGNAL_FLAG} "${opts.gezeldPath}" "--gezel-autostart-home=${opts.gezelHome}"`;
   return `<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>

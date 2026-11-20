@@ -610,6 +610,22 @@ describe('computeToolAllowlist', () => {
       expect(allow!.has('write_artifact')).toBe(true);
     });
 
+    // Clones reach the network and sat outside every gate: an injected
+    // Meester could clone https://collector/<base64>.git.
+    it('keeps the clone tools where model git is on and strips them where it is off', () => {
+      const surface = (level: 'lockdown' | 'super-lockdown') =>
+        computeToolAllowlist({
+          role: 'meester',
+          mode: 'always',
+          provider: 'copilot',
+          securityPolicy: resolveSecurityPolicy({ securityPolicy: securityPolicyForLevel(level) }),
+        });
+      expect(surface('lockdown')!.has('fetch_repo')).toBe(true);
+      expect(surface('lockdown')!.has('fetch_diff')).toBe(true);
+      expect(surface('super-lockdown')!.has('fetch_repo')).toBe(false);
+      expect(surface('super-lockdown')!.has('fetch_diff')).toBe(false);
+    });
+
     it('strips scripted Playwright from a browser-capable role when scripts are disabled', () => {
       const allow = computeToolAllowlist({
         role: 'researcher',

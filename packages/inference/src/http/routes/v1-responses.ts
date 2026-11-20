@@ -16,6 +16,7 @@ import type { LLMSession } from '../../providers/types.js';
 import type { InferenceContext } from '../inference-context.js';
 import { appendCallerOwnedActionLedger } from '../openai-compat/action-ledger.js';
 import { profileForCallerOwnedInference } from '../openai-compat/caller-owned-profile.js';
+import { callerOwnedTargetRefusal } from '../openai-compat/caller-providers.js';
 import {
   type ChatTarget,
   resolveChatTarget,
@@ -40,7 +41,6 @@ import {
 
 const log = createLogger('v1-responses');
 const MAX_RESPONSES_BODY_BYTES = 16 * 1024 * 1024;
-const NATIVE_AGENT_LOOP_PROVIDERS = new Set(['anthropic-cli', 'codex-cli']);
 
 /**
  * `POST /v1/responses` — the stateless Responses API subset used by Codex.
@@ -154,13 +154,8 @@ export function v1ResponsesRoutes(ctx: InferenceContext, opts: V1ResponsesRouteO
         );
       }
 
-      if (NATIVE_AGENT_LOOP_PROVIDERS.has(target.provider)) {
-        return invalidRequest(
-          c,
-          `Provider "${target.provider}" owns a native coding-agent tool loop and cannot be nested behind the inference-only Responses facade. Select a raw local/API model instead.`,
-          'provider_not_inference_only',
-        );
-      }
+      const refusal = callerOwnedTargetRefusal(target);
+      if (refusal) return invalidRequest(c, refusal, 'provider_not_inference_only');
 
       let session: LLMSession | undefined;
       const requestStartedAt = Date.now();

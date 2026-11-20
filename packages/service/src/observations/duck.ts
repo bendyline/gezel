@@ -29,6 +29,21 @@
  * legitimate callers; anything carrying a model's or a user's text must go
  * through the guarded query service instead.
  *
+ * ── Text the daemon did not write never reaches the script as text ──────────
+ *
+ * The script goes through the CLI's line reader before the engine sees it,
+ * and the CLI decides where a statement ends, and whether a line is one of
+ * its own `.` commands, with a tokenizer that disagrees with the engine's
+ * parser (nested comments, `$$` strings). Measured against the pinned build:
+ * `SELECT 1 /* /* *\/ $$ ' $$ ;` + newline + `.shell whoami` + newline +
+ * `' *\/` parses as a single SELECT, yet the CLI ended the statement at the
+ * `;` and ran `.shell whoami` as the daemon's account. `-safe` would disable
+ * those commands but also locks the configuration before the prelude can
+ * scope `allowed_directories`, in either flag order. So a statement from a
+ * model, a page or a manifest is carried as {@link untrustedSqlText} (base64,
+ * decoded by the engine), and {@link DuckRunner.runTrusted} refuses any script
+ * holding a line the CLI would run as a command.
+ *
  * Deadlines budget in AWAKE time (`createAwakeTimeout`), not wall clock: a
  * host suspension freezes the daemon and the child alike, so charging sleep
  * against a query produces the "timed out after 60s" reports whose logs show
@@ -148,6 +163,40 @@ export function buildDuckPrelude(opts: DuckRunOptions): string {
 /** Escape a value for a single-quoted SQL string literal. */
 export function sqlLiteral(value: string): string {
   return value.replaceAll("'", "''");
+}
+
+/**
+ * A SQL expression whose value is `sql`, for putting a statement the daemon
+ * did not write into a script: `json_serialize_sql(<this>)` to validate it,
+ * `query(<this>)` to run it. Base64 holds no quote, newline, semicolon or
+ * dollar sign, so the CLI's line reader sees only text the daemon wrote, and
+ * the engine decodes the exact bytes the statement guard validated. See the
+ * file header for the exploit this closes.
+ */
+export function untrustedSqlText(sql: string): string {
+  return `decode(from_base64('${Buffer.from(sql, 'utf8').toString('base64')}'))`;
+}
+
+/**
+ * A line the DuckDB CLI runs as its own command (`.shell`, `.output`,
+ * `.read`) rather than handing to the engine. The CLI only checks a line's
+ * first character, so allowing leading whitespace here is stricter than it
+ * needs to be. No script the daemon writes contains one.
+ */
+const CLI_COMMAND_LINE = /^[\t\v\f\r ]*\./m;
+
+/**
+ * Last line of defense for a caller that put outside text into a script raw.
+ * A NUL ends a line early in the CLI's reader, which changes what it thinks is
+ * open, so it is refused too.
+ */
+function assertNoCliCommands(script: string): void {
+  if (CLI_COMMAND_LINE.test(script) || script.includes('\0')) {
+    throw new DuckQueryError(
+      'refused to run: the query script holds a line the DuckDB command line would run as a command',
+      'a line of the script starts with "." or contains a NUL byte',
+    );
+  }
 }
 
 /** Which rung of {@link DuckRunner.binary}'s ladder produced the executable. */
@@ -308,7 +357,9 @@ export class DuckRunner {
     sql: string,
     opts: DuckRunOptions,
   ): Promise<Row[]> {
-    const stdout = await this.exec(`${buildDuckPrelude(opts)}\n${sql}\n`, opts);
+    const script = `${buildDuckPrelude(opts)}\n${sql}\n`;
+    assertNoCliCommands(script);
+    const stdout = await this.exec(script, opts);
     const text = stdout.trim();
     if (!text) return [];
     try {

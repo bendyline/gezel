@@ -1,5 +1,5 @@
 import { realpath } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, normalize, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 import {
   DESKTOP_SEGMENT_RULES,
   findPathRuleViolation,
@@ -208,7 +208,8 @@ export type PathSafetyCode =
   | 'symlink-escape'
   | 'reserved-name'
   | 'empty-path'
-  | 'template-placeholder';
+  | 'template-placeholder'
+  | 'git-control';
 
 /**
  * Refuse a write whose path still carries an unresolved `{{param}}` token.
@@ -245,6 +246,51 @@ export class PathSafetyError extends Error {
     this.name = 'PathSafetyError';
     this.code = code;
   }
+}
+
+/**
+ * True when `relPath` is a `.git` folder or file, or anything inside one,
+ * compared the way a filesystem resolves the name: in any case (Windows and
+ * macOS fold it), without the trailing dots and spaces Windows drops, and
+ * without an NTFS stream suffix (`.git::$INDEX_ALLOCATION` is the folder).
+ */
+export function isGitControlPath(relPath: string): boolean {
+  return relPath.split(/[\\/]+/).some(isGitControlSegment);
+}
+
+function isGitControlSegment(segment: string): boolean {
+  const name = (segment.split(':', 1)[0] ?? '').replace(/[. ]+$/, '');
+  return name.toLowerCase() === '.git';
+}
+
+/**
+ * Refuse a change inside a `.git` folder. Git reads that folder as its own
+ * configuration, and settings there (`core.fsmonitor`, hooks, filters) run
+ * commands: a gezel-written `.git/config` once ran as the daemon's account the
+ * next time the indexer listed the workspace. Checked by name and again on the
+ * real path, so a link or a Windows short name (`GIT~1`) cannot stand in for
+ * `.git`.
+ */
+export async function assertNotGitControlPath(base: string, relPath: string): Promise<void> {
+  if (!(await isGitControlTarget(base, relPath))) return;
+  throw new PathSafetyError(
+    `"${relPath}" is inside a .git folder. Git reads that folder as its own configuration and can run commands named there, so Gezel does not change it. Use the Git tools to work with the repository.`,
+    'git-control',
+  );
+}
+
+/** {@link assertNotGitControlPath} as a question, for callers that skip rather than refuse. */
+export async function isGitControlTarget(base: string, relPath: string): Promise<boolean> {
+  return isGitControlPath(relPath) || (await realPathIsGitControl(base, relPath));
+}
+
+async function realPathIsGitControl(base: string, relPath: string): Promise<boolean> {
+  const realBase = await realpathNearest(base);
+  const realTarget = await realpathNearest(isAbsolute(relPath) ? relPath : join(base, relPath));
+  if (!realBase || !realTarget) return false;
+  const rel = relative(realBase, realTarget);
+  if (rel === '' || isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) return false;
+  return isGitControlPath(rel);
 }
 
 /**

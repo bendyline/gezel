@@ -61,7 +61,9 @@ describe('linux autostart unit', () => {
   it('persists the bundled runtime without relying on the login PATH', async () => {
     await install(opts, { exec: fakeExec, configDir });
     const unit = await readFile(join(configDir, 'gezeld-user.service'), 'utf8');
-    expect(unit).toContain('ExecStart="/home/tester/.gezel/bin/node" "/opt/gezel/gezeld.js"');
+    expect(unit).toContain(
+      'ExecStart="/home/tester/.gezel/bin/node" --disable-sigusr1 "/opt/gezel/gezeld.js"',
+    );
     expect(unit).toContain('Environment="GEZEL_NODE_PATH=/home/tester/.gezel/bin/node"');
     expect(unit).toContain(
       'Environment="GEZEL_PNPM_PATH=/home/tester/.gezel/bin/pnpm-runtime/bin/pnpm.mjs"',

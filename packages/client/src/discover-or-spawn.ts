@@ -8,7 +8,11 @@
 import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { setTimeout as wait } from 'node:timers/promises';
-import { foreignHolderMessage, windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
+import {
+  debugSignalLockArgs,
+  foreignHolderMessage,
+  windowsHeadlessSpawnOptions,
+} from '@bendyline/gezel/native';
 import { GezelClient } from './client.js';
 import {
   type ForeignLockHolder,
@@ -295,8 +299,12 @@ export async function discoverOrSpawn(
   const daemonEnv = env ?? process.env;
   // V8 compiler-zone OOM aborts the entire daemon, outside JS error handling.
   // Keep this opt-in: baseline WASM may run slower, but avoids that compiler.
-  const runtimeArgs =
-    daemonEnv.GEZEL_WASM_BASELINE === '1' ? ['--liftoff-only', '--no-wasm-tier-up'] : [];
+  const runtimeArgs = [
+    // Under Electron this is the app binary run as Node, which honors the
+    // inspector signal whatever the app's fuses say.
+    ...debugSignalLockArgs(),
+    ...(daemonEnv.GEZEL_WASM_BASELINE === '1' ? ['--liftoff-only', '--no-wasm-tier-up'] : []),
+  ];
   const child = spawnFn(process.execPath, [...runtimeArgs, daemonEntry], {
     detached,
     stdio,

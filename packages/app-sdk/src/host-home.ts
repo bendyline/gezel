@@ -124,6 +124,11 @@ export function computeHostEnvironment(
   // A system scope inherited from a service host or a developer shell is
   // never right for a daemon this app owns.
   variables.set('GEZEL_SYSTEM_SCOPE', undefined);
+  // The app's home is its own, isolated from the person's Gezel. Without this
+  // its daemon would also list the machine's shared projects and crew, write
+  // into them, and act on what other local accounts put there. `gezel --home`
+  // keeps an alternate home apart the same way.
+  variables.set('GEZEL_DISABLE_MACHINE_SHARED', '1');
   if (!opts.systemBootstrap) variables.set('GEZEL_SKIP_SYSTEM_BOOTSTRAP', '1');
   // A store build must refuse runtime code downloads, and the daemon reads
   // that from the environment. Without this a store-packaged consumer has to

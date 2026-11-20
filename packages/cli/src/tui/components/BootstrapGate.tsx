@@ -14,7 +14,7 @@ import type {
 } from '@bendyline/gezel-client/node';
 import { Box, Text, useApp, useInput } from 'ink';
 import type { JSX, ReactNode } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { settledFirstRunConfig } from '../../run-readiness.js';
 import {
   type BootstrapAccessoryModel,
@@ -32,6 +32,7 @@ import {
   rankChatModels,
   recoDevice,
   runsHere,
+  shouldOfferNativeToolkit,
 } from '../bootstrap.js';
 
 type DownloadEvent =
@@ -282,7 +283,7 @@ export function BootstrapGate(props: {
         nativeStatus,
       };
       const missing = missingToolkit(nativeStatus);
-      if (missing.length > 0) {
+      if (shouldOfferNativeToolkit(missing, context.provider)) {
         setScreen({ kind: 'native-choice', context, missing });
       } else {
         await prepareModels(context);
@@ -636,25 +637,48 @@ function BootstrapChoiceList(props: {
   onSelect: (value: string) => void;
 }): JSX.Element {
   const [index, setIndex] = useState(0);
+  // Someone who expected the chat types a message here. Until they reach for
+  // the arrow keys again, Enter and digits are part of that message, not a
+  // choice: a typed question plus Enter used to confirm the default and start
+  // a 153 MB download (2026-11-20 npm ship audit). A ref, not only state, so
+  // keys arriving before the next render still see the text.
+  const typedRef = useRef(false);
+  const [typed, setTypedState] = useState(false);
+  const setTyped = (value: boolean) => {
+    typedRef.current = value;
+    setTypedState(value);
+  };
   const options = props.options;
   useInput((input, key) => {
     if (key.upArrow) {
+      setTyped(false);
       setIndex((current) => (current <= 0 ? options.length - 1 : current - 1));
       return;
     }
     if (key.downArrow) {
+      setTyped(false);
       setIndex((current) => (current >= options.length - 1 ? 0 : current + 1));
       return;
     }
-    const numeric = Number.parseInt(input, 10);
-    if (/^[1-9]$/.test(input) && numeric <= options.length) {
-      props.onSelect(options[numeric - 1]!.value);
+    if (key.escape) {
+      setTyped(false);
       return;
     }
     if (key.return) {
+      if (typedRef.current) {
+        setTyped(false);
+        return;
+      }
       const selected = options[index];
       if (selected) props.onSelect(selected.value);
+      return;
     }
+    const numeric = Number.parseInt(input, 10);
+    if (!typedRef.current && /^[1-9]$/.test(input) && numeric <= options.length) {
+      props.onSelect(options[numeric - 1]!.value);
+      return;
+    }
+    if (input && !key.ctrl && !key.meta && !key.tab) setTyped(true);
   });
   return (
     <Box flexDirection="column" marginTop={1}>
@@ -665,6 +689,11 @@ function BootstrapChoiceList(props: {
           {option.hint ? <Text dimColor> — {option.hint}</Text> : null}
         </Text>
       ))}
+      {typed ? (
+        <Text color="yellow">
+          Typing here doesn't send a message. Choose with ↑/↓ or a number, then press Enter.
+        </Text>
+      ) : null}
       <Text dimColor>
         ↑/↓ choose · 1–{Math.min(9, options.length)} quick select · Enter confirm
       </Text>

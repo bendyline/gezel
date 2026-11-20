@@ -24,7 +24,13 @@ import { type ObservationTableManifest, createLogger } from '@bendyline/gezel';
 import { resolveInside } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { corpusDirFor } from '../connectors/manager.js';
 import type { Store } from '../fs/store.js';
-import { DEFAULT_DUCK_TIMEOUT_MS, type DuckRunner, sqlLiteral } from './duck.js';
+import {
+  DEFAULT_DUCK_TIMEOUT_MS,
+  DuckQueryError,
+  type DuckRunner,
+  sqlLiteral,
+  untrustedSqlText,
+} from './duck.js';
 import {
   type ObservationTableState,
   listPartitionFiles,
@@ -298,8 +304,10 @@ export interface RunQueryOptions {
  *
  * The statement is validated by `assertReadOnlyStatement` *before* the views
  * are assembled around it, so an attempt to smuggle a second statement is
- * refused rather than being wrapped and executed — the wrapper below is a
- * row-cap, never a security boundary.
+ * refused rather than being wrapped and executed — the `LIMIT` below is a
+ * row-cap, never a security boundary. The statement reaches the script only
+ * as `untrustedSqlText`, run through `query()`, so the DuckDB CLI never reads
+ * its text (see `duck.ts`).
  */
 export async function runQuery(
   deps: ObservationQueryDeps,
@@ -359,14 +367,18 @@ export async function runQueryOnTables(
   const views = await Promise.all(scope.map((t) => buildTableView(storageDir, t)));
   // One extra row is requested so "there were more" is a fact rather than a
   // guess from `rows.length === limit`.
-  const script = `${views.join('\n')}\nSELECT * FROM (\n${statement}\n) LIMIT ${limit + 1};`;
+  const script = `${views.join('\n')}\nSELECT * FROM query(${untrustedSqlText(statement)}) LIMIT ${limit + 1};`;
 
-  const rows = await deps.duck.runTrusted<Record<string, unknown>>(script, {
-    allowedDirectories,
-    timeoutMs: opts.timeoutMs ?? DEFAULT_DUCK_TIMEOUT_MS,
-    memoryLimit: opts.memoryLimit,
-    threads: opts.threads,
-  });
+  const rows = await deps.duck
+    .runTrusted<Record<string, unknown>>(script, {
+      allowedDirectories,
+      timeoutMs: opts.timeoutMs ?? DEFAULT_DUCK_TIMEOUT_MS,
+      memoryLimit: opts.memoryLimit,
+      threads: opts.threads,
+    })
+    .catch((err: unknown) => {
+      throw withoutCarrierExcerpt(err);
+    });
 
   const truncated = rows.length > limit;
   const kept = truncated ? rows.slice(0, limit) : rows;
@@ -377,6 +389,21 @@ export async function runQueryOnTables(
     limit,
     tablesInScope: scope.map((t) => t.queryName),
   };
+}
+
+/**
+ * DuckDB quotes the line a query failed on. For a model's statement that line
+ * is the base64 carrier, which says nothing about the SQL the model wrote and
+ * crowds out the part of the message that does.
+ */
+const CARRIER_EXCERPT = /\n*LINE \d+: [^\n]*from_base64\([^\n]*(?:\n[ \t]*\^[^\n]*)?/g;
+
+function withoutCarrierExcerpt(err: unknown): unknown {
+  if (!(err instanceof DuckQueryError)) return err;
+  const message = err.message.replace(CARRIER_EXCERPT, '').trim();
+  const engineMessage = err.engineMessage.replace(CARRIER_EXCERPT, '').trim();
+  if (message === err.message && engineMessage === err.engineMessage) return err;
+  return new DuckQueryError(message, engineMessage);
 }
 
 export class NoTablesError extends Error {

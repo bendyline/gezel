@@ -179,6 +179,27 @@ const connection = { ...(await connectEmbeddingRuntime()), knowledge };
 - **Licenses.** The worker and the tokenizer compile third-party code into
   `dist/`; the build stages their license texts in `dist/licenses/npm/`.
 
+### Embedding an app's own text
+
+`createMobileTextEmbedder()` embeds text an app stores itself (a person's notes,
+for semantic search) with one profile's query model, the same files the
+catalogs search with, so a device that has them for knowledge downloads
+nothing.
+
+```ts
+import { createMobileTextEmbedder } from '@bendyline/gezel-capacitor';
+
+const embedder = createMobileTextEmbedder(); // bge-small-en-v1.5@1
+if ((await embedder.status()).state === 'download-required') await embedder.install();
+const [vector] = await embedder.embed('query', ['garden pests']);
+```
+
+Queries get the profile's query instruction; passages are embedded exactly as
+given, because their embed input (`passageEmbedInput` in
+`@bendyline/gezel-knowledge`) already carries the passage instruction and
+context header. `tokenizer()` returns the profile's tokenizer files as text,
+so the app chunks in the model's own tokens.
+
 ## Install
 
 ```sh

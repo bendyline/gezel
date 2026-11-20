@@ -1,8 +1,16 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { HttpStatusError } from '@bendyline/gezel/runtime';
 import { describe, expect, it } from 'vitest';
-import { ArtifactRootDeniedError, ProjectArtifactsStore } from './project-artifacts-store.js';
+import {
+  ArtifactPathDeniedError,
+  ArtifactRootDeniedError,
+  ArtifactShortNamePathDeniedError,
+  DiffpackPathWriteDeniedError,
+  ProjectArtifactsStore,
+} from './project-artifacts-store.js';
 
 describe('ProjectArtifactsStore recursive listings', () => {
   it('enumerates connector corpora larger than the generic 500-entry walk cap', async () => {
@@ -210,6 +218,155 @@ describe('the reserved tabular subtree', () => {
     try {
       const recursive = await artifacts.listProjectArtifactsRecursiveDetailed('p1');
       expect(recursive.entries.some((e) => e.path.startsWith('tabular/'))).toBe(false);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+});
+
+// `DIFFPA~1/12/files/01.diff` rewrote a sealed proposal on a volume that keeps
+// 8.3 short names, and the rename route had no diffpack or corpus rule at all.
+describe('reserved paths, however they are reached', () => {
+  const gezel = { initiatedByGezel: true };
+
+  async function drawer() {
+    const home = await mkdtemp(join(tmpdir(), 'gezel-artifact-reserved-test-'));
+    const artifacts = new ProjectArtifactsStore({ home, touchProject: async () => {} });
+    const root = artifacts.projectArtifactsDir('p');
+    await mkdir(join(root, 'diffpacks', '12', 'files'), { recursive: true });
+    await writeFile(join(root, 'diffpacks', '12', 'files', '01.diff'), 'sealed');
+    await mkdir(join(root, 'data', 'mail'), { recursive: true });
+    await writeFile(join(root, 'data', 'mail', '_meta.json'), '{}');
+    await artifacts.writeProjectArtifact('p', 'scratch/forged/01.diff', 'forged');
+    return { home, root, artifacts };
+  }
+
+  it("refuses a gezel's rename into or out of a proposal or a connector mirror", async () => {
+    const { home, root, artifacts } = await drawer();
+    try {
+      for (const [from, to] of [
+        ['scratch/forged', 'diffpacks/12/files'],
+        ['scratch/forged', 'diffpacks/13'],
+        ['diffpacks/12/files', 'scratch/old'],
+        ['diffpacks/12', 'scratch/pack'],
+        ['scratch/forged/01.diff', 'diffpacks/12/deletions.json'],
+        ['data/mail/_meta.json', 'scratch/meta.json'],
+        ['scratch/forged/01.diff', 'data/mail/inbox/record.md'],
+      ] as const) {
+        await expect(
+          artifacts.renameProjectArtifactPath('p', from, to, gezel),
+          `${from} → ${to}`,
+        ).rejects.toBeInstanceOf(ArtifactPathDeniedError);
+      }
+      expect(await readFile(join(root, 'diffpacks', '12', 'files', '01.diff'), 'utf8')).toBe(
+        'sealed',
+      );
+      // Ordinary renames still work.
+      await artifacts.renameProjectArtifactPath('p', 'scratch/forged', 'scratch/kept', gezel);
+      expect(await artifacts.readProjectArtifact('p', 'scratch/kept/01.diff')).toBe('forged');
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a gezel's delete of a proposal's files, and lets the person remove a proposal", async () => {
+    const { home, artifacts } = await drawer();
+    try {
+      for (const path of ['diffpacks/12/files/01.diff', 'diffpacks/12', 'diffpacks']) {
+        await expect(
+          artifacts.deleteProjectArtifact('p', path, gezel),
+          path,
+        ).rejects.toBeInstanceOf(DiffpackPathWriteDeniedError);
+      }
+      await artifacts.deleteProjectArtifact('p', 'diffpacks/12');
+      expect(await artifacts.readProjectArtifact('p', 'diffpacks/12/files/01.diff')).toBeNull();
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses writes to a pack's deletions, operations and manifest, but not its notes", async () => {
+    const { home, artifacts } = await drawer();
+    try {
+      for (const name of ['deletions.json', 'operations.json', 'manifest.json']) {
+        await expect(
+          artifacts.writeProjectArtifact('p', `diffpacks/12/${name}`, '[]', gezel),
+          name,
+        ).rejects.toBeInstanceOf(DiffpackPathWriteDeniedError);
+      }
+      await artifacts.writeProjectArtifact('p', 'diffpacks/12/notes.md', '# Fix', gezel);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('answers 403 with the reason, so an unlisted refusal is not an internal error', async () => {
+    const { home, artifacts } = await drawer();
+    try {
+      const err = await artifacts
+        .writeProjectArtifact('p', 'diffpacks/12/files/02.diff', 'x', gezel)
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(HttpStatusError);
+      expect(err).toMatchObject({ status: 403, body: { code: 'diffpack-readonly' } });
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a gezel's short-name-shaped segment on every platform", async () => {
+    const { home, artifacts } = await drawer();
+    try {
+      for (const path of [
+        'DIFFPA~1/12/files/01.diff',
+        'data/mail/_META~1.JSO',
+        'notes/REPOR~12.MD',
+      ]) {
+        await expect(
+          artifacts.writeProjectArtifact('p', path, 'x', gezel),
+          path,
+        ).rejects.toBeInstanceOf(ArtifactShortNamePathDeniedError);
+      }
+      // A tilde that is not a short name is an ordinary name.
+      await artifacts.writeProjectArtifact('p', 'notes/draft~old-version.md', 'x', gezel);
+      await artifacts.writeProjectArtifact('p', 'notes/~1.md.bak', 'x', gezel);
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('judges a link inside the drawer by where it lands', async () => {
+    const { home, root, artifacts } = await drawer();
+    try {
+      // A junction needs no privilege on Windows; elsewhere it is a symlink.
+      await symlink(join(root, 'diffpacks', '12', 'files'), join(root, 'shortcut'), 'junction');
+      for (const initiatedByGezel of [false, true]) {
+        await expect(
+          artifacts.writeProjectArtifact('p', 'shortcut/01.diff', 'forged', { initiatedByGezel }),
+        ).rejects.toBeInstanceOf(DiffpackPathWriteDeniedError);
+      }
+      expect(await readFile(join(root, 'diffpacks', '12', 'files', '01.diff'), 'utf8')).toBe(
+        'sealed',
+      );
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('judges a Windows short name by the long name it opens', async () => {
+    const { home, root, artifacts } = await drawer();
+    try {
+      // Only on a volume that generates 8.3 names (the system drive does by
+      // default); elsewhere `DIFFPA~1` is just a new folder.
+      if (!existsSync(join(root, 'DIFFPA~1'))) return;
+      await expect(
+        artifacts.writeProjectArtifact('p', 'DIFFPA~1/12/files/01.diff', 'forged'),
+      ).rejects.toBeInstanceOf(DiffpackPathWriteDeniedError);
+      await expect(
+        artifacts.renameProjectArtifactPath('p', 'scratch/forged', 'DIFFPA~1/13'),
+      ).rejects.toBeInstanceOf(DiffpackPathWriteDeniedError);
+      expect(await readFile(join(root, 'diffpacks', '12', 'files', '01.diff'), 'utf8')).toBe(
+        'sealed',
+      );
     } finally {
       await rm(home, { recursive: true, force: true });
     }

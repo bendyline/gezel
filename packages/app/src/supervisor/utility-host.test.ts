@@ -136,15 +136,32 @@ describe('startUtilityHostedService', () => {
       serviceModuleUrl: 'file:///svc/dist/index.js',
       options: base.startOptions,
       env: { GEZEL_HOME: '/home/.gezel' },
-      unset: [],
+      unset: ['NODE_OPTIONS'],
     });
   });
 
   it('never passes RUN_AS_NODE to the child', async () => {
     const child = wellBehaved();
     await startUtilityHostedService({ ...base, fork: forkOf(child) });
-    expect(child.env).toEqual({ GEZEL_HOME: '/home/.gezel' });
+    expect(child.env).toEqual({ GEZEL_HOME: '/home/.gezel', NODE_OPTIONS: '--disable-sigusr1' });
     expect(child.sent[0]).toMatchObject({ env: { GEZEL_HOME: '/home/.gezel' } });
+  });
+
+  // Electron ignores execArgv here; without the flag any process of the
+  // account could open the service's inspector. The start message removes it
+  // again so the service's own children never inherit it.
+  it('forks with the inspector signal off and hands the service its own NODE_OPTIONS back', async () => {
+    const child = wellBehaved();
+    await startUtilityHostedService({
+      ...base,
+      env: { GEZEL_HOME: '/home/.gezel', NODE_OPTIONS: '--max-old-space-size=4096' },
+      fork: forkOf(child),
+    });
+    expect(child.env?.NODE_OPTIONS).toBe('--max-old-space-size=4096 --disable-sigusr1');
+    expect(child.sent[0]).toMatchObject({
+      env: { NODE_OPTIONS: '--max-old-space-size=4096' },
+      unset: [],
+    });
   });
 
   it('uses http when the service has no certificate', async () => {
@@ -308,7 +325,7 @@ describe('prewarmUtilityService', () => {
       serviceModuleUrl: base.serviceModuleUrl,
       options: base.startOptions,
       env: prepared,
-      unset: ['GEZEL_NODE_PATH'],
+      unset: ['GEZEL_NODE_PATH', 'NODE_OPTIONS'],
     });
   });
 
@@ -333,7 +350,7 @@ describe('prewarmUtilityService', () => {
     const hosted = await startUtilityHostedService({ ...base, env: prepared, fork, prewarmed });
 
     expect(fork).toHaveBeenCalledTimes(1);
-    expect(fresh.sent[0]).toMatchObject({ type: 'start', unset: [] });
+    expect(fresh.sent[0]).toMatchObject({ type: 'start', unset: ['NODE_OPTIONS'] });
     expect(hosted.prewarm).toBeNull();
   });
 

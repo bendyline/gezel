@@ -61,6 +61,7 @@ const PACKED_SIZE_BUDGETS: Record<string, number> = {
   '@bendyline/gezel-plugin-sdk': 50_000, //              2 KB
   '@bendyline/gezel-catalog': 150_000, //               28 KB
   '@bendyline/gezel-knowledge': 150_000, //             ~25 KB
+  '@bendyline/gezel-retrieval': 50_000, //              ~16 KB
   '@bendyline/gezel-inference': 9_000_000, //           5.8 MB
   '@bendyline/gezel-mcp': 300_000, //                  111 KB
   '@bendyline/gezel-connectors-spectral': 100_000, //    4 KB

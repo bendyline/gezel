@@ -12,6 +12,7 @@ import { OutputRingBuffer } from '../fs/ring.js';
 import type { Store } from '../fs/store.js';
 import { runInSandbox } from '../sandbox/runner.js';
 import { WorkspaceWriteDeniedError } from './errors.js';
+import { restoreGitControl, snapshotGitControl } from './git-control-guard.js';
 import { restoreGatedManifestEdits, snapshotRootManifests } from './manifest-guard.js';
 import { workspaceScriptDeniesNetwork } from './runner.js';
 
@@ -103,6 +104,7 @@ export async function deriveWorkspaceFile(
   const stderrRing = new OutputRingBuffer(OUTPUT_CAP_BYTES);
   const artifactsDir = store.projectArtifactsDir(opts.projectId);
   const manifests = await snapshotRootManifests(workspaceDir);
+  const gitControl = await snapshotGitControl(workspaceDir);
 
   // `tmpdir()` is often `/var/...` on macOS while Node's permission
   // checks compare the resolved `/private/var/...` path. Match
@@ -127,6 +129,8 @@ export async function deriveWorkspaceFile(
     });
   } finally {
     await rm(scratchDir, { recursive: true, force: true }).catch(() => {});
+    const gitNote = await restoreGitControl(gitControl);
+    if (gitNote) stderrRing.append(`${gitNote}\n`);
   }
   const restoredNote = await restoreGatedManifestEdits(store, workspaceDir, manifests);
   if (restoredNote) stderrRing.append(`${restoredNote}\n`);

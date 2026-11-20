@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Task } from '@bendyline/gezel';
 import { DiffpackManifestSchema } from '@bendyline/gezel';
+import { projectDiffpacksFile } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import type { TaskManager } from '../tasks/manager.js';
@@ -345,6 +346,54 @@ describe('DiffpackManager.seal', () => {
     await manager.drafts.write(projectId, '7', 'src/a.ts', 'after\n');
     const sealed = await manager.seal(projectId, '7');
     expect(sealed.summary).toBe('The validator rejected empty arrays.');
+  });
+});
+
+// The sidecar sits in the artifacts drawer; a Windows short name
+// (`DIFFPA~1/12/files/01.diff`) once let a gezel rewrite one after sealing,
+// and apply writes it as the person.
+describe('DiffpackManager sealed diffs', () => {
+  it('records each diff hash and refuses to apply or export one changed on disk', async () => {
+    await seedWorkspace('src/a.ts', 'const a = 1;\n');
+    await seedWorkspace('src/b.ts', 'const b = 1;\n');
+    const sealed = await draftAndSeal('1', async (drafts) => {
+      await drafts.replaceIn(projectId, '1', { path: 'src/a.ts', find: '1', replace: '2' });
+      await drafts.replaceIn(projectId, '1', { path: 'src/b.ts', find: '1', replace: '2' });
+    });
+    const a = sealed.files.find((f) => f.path === 'src/a.ts')!;
+    expect(a.diffHash).toMatch(/^[0-9a-f]{64}$/);
+    expect((await manager.get(projectId, '1')).altered).toBeUndefined();
+
+    const sidecar = join(store.projectArtifactsDir(projectId), a.diffArtifact);
+    const forged = (await readFile(sidecar, 'utf8')).replace('const a = 2;', 'const a = evil();');
+    await writeFile(sidecar, forged);
+
+    expect((await manager.get(projectId, '1')).altered).toEqual(['src/a.ts']);
+    const result = await manager.apply(projectId, '1');
+    expect(result.ok).toBe(false);
+    expect(result.results).toContainEqual({
+      path: 'src/a.ts',
+      ok: false,
+      error: 'the diff for this file was changed after the proposal was sealed',
+    });
+    // Validate-all-first: the untouched file does not land either.
+    expect(await readWorkspace('src/a.ts')).toBe('const a = 1;\n');
+    expect(await readWorkspace('src/b.ts')).toBe('const b = 1;\n');
+    expect(await manager.readSealedDiff(projectId, a)).toMatchObject({ ok: false, altered: true });
+  });
+
+  it('applies a pack sealed before hashes were recorded', async () => {
+    await seedWorkspace('src/a.ts', 'const a = 1;\n');
+    const sealed = await draftAndSeal('1', async (drafts) => {
+      await drafts.replaceIn(projectId, '1', { path: 'src/a.ts', find: '1', replace: '2' });
+    });
+    const file = projectDiffpacksFile(home, projectId);
+    const body = JSON.parse(await readFile(file, 'utf8'));
+    for (const row of body.diffpacks) for (const f of row.files) delete f.diffHash;
+    await writeFile(file, JSON.stringify(body));
+    expect(sealed.files[0]?.diffHash).toBeTruthy();
+    expect((await manager.apply(projectId, '1')).ok).toBe(true);
+    expect(await readWorkspace('src/a.ts')).toBe('const a = 2;\n');
   });
 });
 

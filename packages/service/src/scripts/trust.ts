@@ -29,12 +29,22 @@ export interface ScriptTrust {
 }
 
 export async function computeScriptTrust(
-  deps: { catalog?: CatalogService; readTask: Store['readTask'] },
+  deps: {
+    catalog?: CatalogService;
+    readTask: Store['readTask'];
+    /**
+     * A machine-shared project's task files are writable by every local
+     * account, so a hash list there may have been planted by another one to
+     * mark its own inline scripts trusted. Such a task never grants trust.
+     */
+    isMachineShared: (projectId: string) => boolean;
+  },
   input: ScriptTrustInput,
 ): Promise<ScriptTrust> {
   return {
     provenanceTrusted: await isProvenanceTrusted(deps.catalog, input),
-    cliTrusted: await isCliTrustedSource(deps.readTask, input),
+    cliTrusted:
+      !deps.isMachineShared(input.projectId) && (await isCliTrustedSource(deps.readTask, input)),
   };
 }
 

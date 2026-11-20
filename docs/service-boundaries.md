@@ -179,6 +179,30 @@ legacy chats, memories, and growth state are copied once into each account's pri
 new personal activity stays per-user. Account-local delete controls refuse shared entities; their
 eventual removal requires a deliberately machine-wide administration flow.
 
+**A shared definition is text another account may have written.** Every local account can write the
+shared root, and each account's daemon reads it with that account's own authority, so one account
+could once aim every other account's daemon at that account's folders, saved credentials and Startup
+folder by editing a shared `project.json`. So a shared project only ever touches the shared tree:
+
+- The Store ignores, on read, and refuses, on write (`fs/machine-shared-trust.ts`, at
+  `acceptProjectMeta` and `writeProjectMeta`): `workingDir`, `linkedProjectIds`, `github`,
+  `connectors`, `grantedCredentials`, `credentialAllowedOrigins`, `claudePermissionMode` and
+  `codexPermissionMode`. A shared project uses its own internal workspace. The refusal is a 403
+  that says to use a project of one's own; a migrated project's values drop out of the shared file
+  the next time an upgraded account edits it.
+- Shared gezels, and project-local gezels in a shared workspace, lose `sandboxCopilot`,
+  `claudePermissionMode` and `codexPermissionMode` the same way; each account's own defaults apply.
+- Nothing starts there unattended. `projectAllowsUnattendedWork` (core) is false for a shared
+  project, so boot rehydration, cron ticks, nudges, stuck-step re-drives, the night shift and its
+  review, Meester check-ins, night fixes and nightly rollups pass it by. A run someone starts from
+  this account still continues step to step (`projectAllowsAmbientWork`).
+- A task file's CLI trust stamp (`cliTrustedScriptHashes`) never grants trust in a shared project
+  (`scripts/trust.ts`).
+- An app-SDK host's daemon does not mount the shared root at all (`GEZEL_DISABLE_MACHINE_SHARED`).
+
+Content stays collaborative: a shared project's workspace, artifacts, memory and task text still
+reach every account's gezels, as text.
+
 A machine-wide project must not give the engine broker project APIs or access to arbitrary user
 folders. Keep compute sharing and data sharing independent.
 

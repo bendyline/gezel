@@ -1,6 +1,7 @@
 import { disableOnnxRuntimeTelemetry } from '@bendyline/gezel/native';
 import { gezelHome } from '@bendyline/gezel/paths';
 import { daemonHost } from './daemon-host.js';
+import { guardDebugSignalOnce } from './debug-signal-guard.js';
 import type { EngineContext } from './http/engine-context.js';
 import type { RunningInferenceOnlyService } from './inference-host.js';
 import { routeServiceLogs } from './log-routing.js';
@@ -42,6 +43,10 @@ export async function startService(
   const logOutput = opts.logOutput ?? 'stderr';
   const restoreLogs = routeServiceLogs(logOutput, home);
   try {
+    // Before any sandboxed script could run: see debug-signal-guard.ts. After
+    // the routing, so a CLI one-shot hosting the service in its own process
+    // (logOutput 'file') files the Windows warning instead of printing it.
+    guardDebugSignalOnce();
     const running = await startForRole({ ...opts, home, logOutput });
     restoreLogsOnStop(running, restoreLogs);
     return running;

@@ -34,6 +34,7 @@
     <key>ProgramArguments</key>
     <array>
         <string>/Applications/Gezel.app/Contents/MacOS/Gezel</string>
+        <string>--disable-sigusr1</string>
         <string>/Library/Application Support/Gezel/service/dist/bin/gezeld.js</string>
     </array>
 

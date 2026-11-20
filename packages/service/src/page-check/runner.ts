@@ -63,9 +63,22 @@ const MAX_ERROR_CHARS = 300;
  */
 const RESULT_SENTINEL = 'GEZEL_PAGE_CHECK_RESULT:';
 const RUNNER_SOURCE = `import { createRequire } from 'node:module';
-const [url, settleMsArg, capMsArg] = process.argv.slice(2);
+const [url, settleMsArg, capMsArg, externalArg] = process.argv.slice(2);
 const settleMs = Number(settleMsArg) || 1500;
 const capMs = Number(capMsArg) || 12000;
+const allowExternal = externalArg === '1';
+const pageUrl = new URL(url);
+// Contained: every request outside the page's own origin is aborted, and a
+// proxy that answers nothing catches what routing cannot see off this host
+// (WebSockets, WebRTC over TCP). Loopback and the page's own host skip the
+// proxy, which Playwright otherwise forces loopback through, and are left to
+// the route below. UDP and DNS prefetch are off outright.
+const contained = allowExternal
+  ? {}
+  : {
+      args: ['--force-webrtc-ip-handling-policy=disable_non_proxied_udp', '--dns-prefetch-disable'],
+      proxy: { server: 'http://127.0.0.1:9', bypass: 'localhost,' + pageUrl.hostname },
+    };
 const finish = (result) => {
   console.log('${RESULT_SENTINEL}' + JSON.stringify(result));
   process.exit(0);
@@ -80,8 +93,18 @@ let browser;
 try {
   const require = createRequire(process.cwd() + '/');
   const { chromium } = require('playwright');
-  browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({ ignoreHTTPSErrors: true });
+  browser = await chromium.launch({ headless: true, ...contained });
+  const context = await browser.newContext({
+    ignoreHTTPSErrors: true,
+    ...(allowExternal ? {} : { serviceWorkers: 'block' }),
+  });
+  if (!allowExternal) {
+    await context.route('**/*', (route) =>
+      new URL(route.request().url()).origin === pageUrl.origin
+        ? route.continue()
+        : route.abort('blockedbyclient'),
+    );
+  }
   const page = await context.newPage();
   page.on('pageerror', (e) => push('pageerror', e && e.message ? e.message : e));
   page.on('console', (m) => { if (m.type() === 'error') push('console.error', m.text()); });
@@ -147,6 +170,13 @@ export interface RunPageCheckOptions {
   browsersPath: string;
   /** Absolute URL of the page (normally a freshly minted preview lease). */
   url: string;
+  /**
+   * Let the page reach other origins, as the preview does when the security
+   * level allows web services. Otherwise it is contained: the preview's CSP
+   * does not cover a meta refresh to `https://collector/?d=…`, WebRTC or
+   * DNS, and this browser had nothing else between it and the network.
+   */
+  allowExternalNetwork?: boolean;
   /** How long the page gets after `load` to throw (animation-frame bugs). */
   settleMs?: number;
   /** Hard wall-clock cap on the whole child process. */
@@ -184,6 +214,7 @@ async function runPageCheckInner(opts: RunPageCheckOptions): Promise<PageCheckOu
     opts.url,
     String(settleMs),
     String(inBrowserCapMs),
+    opts.allowExternalNetwork ? '1' : '0',
   ];
   const pnpm = resolvePnpmCommand(args);
 

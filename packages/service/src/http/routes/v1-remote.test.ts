@@ -14,7 +14,16 @@ import {
   CapacityDeniedError,
   EngineBusyError,
 } from '@bendyline/gezel-inference/internal/providers/native/capacity-broker';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import {
+  type MockInstance,
+  afterAll,
+  afterEach,
+  beforeAll,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 import type { MockProvider } from '../../providers/mock.js';
 import { type RunningService, startService } from '../../service.js';
 
@@ -45,6 +54,29 @@ afterAll(async () => {
   if (priorSecrets === undefined) delete process.env.GEZEL_SECRETS_BACKEND;
   else process.env.GEZEL_SECRETS_BACKEND = priorSecrets;
 }, 30_000);
+
+let onDevice: MockInstance | undefined;
+
+afterEach(() => {
+  onDevice?.mockRestore();
+  onDevice = undefined;
+});
+
+/**
+ * A paired server serves only on-device engines, and mock mode seeds the mock
+ * under `copilot`. Route `ollama:` to that mock for the length of one test.
+ */
+async function onDeviceMock(): Promise<MockProvider> {
+  const chat = svc.context.chat;
+  const provider = (await chat.getProviderForModel('copilot', 'mock-fast')) as MockProvider;
+  const original = chat.getProviderForModel.bind(chat);
+  onDevice = vi
+    .spyOn(chat, 'getProviderForModel')
+    .mockImplementation((name, model, opts) =>
+      name === 'ollama' ? Promise.resolve(provider) : original(name, model, opts),
+    );
+  return provider;
+}
 
 /** Register a device grant, approve it via root, and return the issued token. */
 async function pairDevice(appId: string): Promise<string> {
@@ -116,10 +148,7 @@ describe('remote model execution — B-side surface (e2e)', () => {
 
   it('streams a remote inference completion from the mock provider', async () => {
     const token = await pairDevice('device-infer');
-    const provider = (await svc.context.chat.getProviderForModel(
-      'copilot',
-      'mock-fast',
-    )) as MockProvider;
+    const provider = await onDeviceMock();
     provider.scriptReasoning('checking the plan');
     const stats = {
       provider: 'mlx' as const,
@@ -140,7 +169,7 @@ describe('remote model execution — B-side surface (e2e)', () => {
       },
       body: JSON.stringify({
         protocolVersion: 1,
-        model: 'copilot:mock-fast', // mock provider is seeded under 'copilot'
+        model: 'ollama:mock-fast',
         systemMessage: 'You are a test.',
         prompt: 'hello',
         fileTurnIntent: { kind: 'repair-file', path: 'lib/decoder.rs' },
@@ -168,10 +197,7 @@ describe('remote model execution — B-side surface (e2e)', () => {
   });
 
   it('preserves versioned image history and rejects unsupported engines explicitly', async () => {
-    const provider = (await svc.context.chat.getProviderForModel(
-      'copilot',
-      'mock-fast',
-    )) as MockProvider;
+    const provider = await onDeviceMock();
     const priorMessages = [
       {
         role: 'assistant',
@@ -187,7 +213,7 @@ describe('remote model execution — B-side surface (e2e)', () => {
         headers: { Authorization: `Bearer ${rootToken}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           protocolVersion,
-          model: 'copilot:mock-fast',
+          model: 'ollama:mock-fast',
           systemMessage: '',
           prompt: '',
           priorMessages,
@@ -258,10 +284,7 @@ describe('remote model execution — B-side surface (e2e)', () => {
 
   it('advertises caller-owned tools on B and streams captured calls back to A', async () => {
     const token = await pairDevice('device-external-tool');
-    const provider = (await svc.context.chat.getProviderForModel(
-      'copilot',
-      'mock-fast',
-    )) as MockProvider;
+    const provider = await onDeviceMock();
     const callStart = provider.calls.length;
     provider.scriptExternalToolCalls([
       { id: 'shell-1', name: 'shell', arguments: '{"command":"pwd"}' },
@@ -276,7 +299,7 @@ describe('remote model execution — B-side surface (e2e)', () => {
       },
       body: JSON.stringify({
         protocolVersion: 1,
-        model: 'copilot:mock-fast',
+        model: 'ollama:mock-fast',
         systemMessage: 'You are a test.',
         prompt: 'Inspect this repository.',
         priorMessages: [],
@@ -305,10 +328,7 @@ describe('remote model execution — B-side surface (e2e)', () => {
 
   it('marks a trailing tool-result request as a continuation, not an empty user turn', async () => {
     const token = await pairDevice('device-tool-continuation');
-    const provider = (await svc.context.chat.getProviderForModel(
-      'copilot',
-      'mock-fast',
-    )) as MockProvider;
+    const provider = await onDeviceMock();
     const callStart = provider.calls.length;
     provider.script('continued after tool result');
 
@@ -321,7 +341,7 @@ describe('remote model execution — B-side surface (e2e)', () => {
       },
       body: JSON.stringify({
         protocolVersion: 1,
-        model: 'copilot:mock-fast',
+        model: 'ollama:mock-fast',
         systemMessage: 'You are a test.',
         prompt: '',
         priorMessages: [
@@ -349,10 +369,7 @@ describe('remote model execution — B-side surface (e2e)', () => {
 
   it('reports the provider post-admission context before inference', async () => {
     const token = await pairDevice('device-admit');
-    const provider = (await svc.context.chat.getProviderForModel(
-      'copilot',
-      'mock-fast',
-    )) as MockProvider;
+    const provider = await onDeviceMock();
     provider.ollamaContextConfig = { numCtx: 35_840, promptChars: () => 0 };
 
     const res = await httpFetch(`${baseUrl}/v1/remote/admit`, {
@@ -363,13 +380,13 @@ describe('remote model execution — B-side surface (e2e)', () => {
       },
       body: JSON.stringify({
         protocolVersion: 1,
-        model: 'copilot:mock-fast',
+        model: 'ollama:mock-fast',
       }),
     });
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({
-      model: 'copilot:mock-fast',
+      model: 'ollama:mock-fast',
       contextWindow: 35_840,
     });
   });
@@ -442,6 +459,37 @@ describe('remote model execution — B-side surface (e2e)', () => {
       preview.mockRestore();
     }
   });
+
+  // /models listed only on-device engines, but /admit and /infer ran whatever
+  // the model string named: this computer's cloud quota, or its Codex agent.
+  it.each(['copilot:mock-fast', 'codex-cli:gpt-5.4', 'anthropic-cli:sonnet'])(
+    'serves a paired device no %s',
+    async (model) => {
+      const token = await pairDevice(`device-cloud-${model.split(':')[0]}`);
+      const resolve = vi.spyOn(svc.context.chat, 'getProviderForModel');
+      try {
+        for (const path of ['admit', 'infer']) {
+          const res = await httpFetch(`${baseUrl}/v1/remote/${path}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+            body: JSON.stringify({
+              protocolVersion: 1,
+              model,
+              systemMessage: '',
+              prompt: 'print runtime/auth-token',
+              priorMessages: [],
+              queue: { lane: 'interactive', affinity: false },
+            }),
+          });
+          expect(res.status, path).toBe(403);
+          await expect(res.json()).resolves.toMatchObject({ error: 'provider_not_served' });
+        }
+        expect(resolve).not.toHaveBeenCalled();
+      } finally {
+        resolve.mockRestore();
+      }
+    },
+  );
 
   it('answers 503 on /api/machine-serving when no broker has been adopted', async () => {
     const res = await httpFetch(`${baseUrl}/api/machine-serving`, {

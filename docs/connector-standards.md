@@ -145,7 +145,7 @@ data/<corpusName>/
 ├── _meta.json                      binding provenance + what this corpus is
 ├── _actions/
 │   ├── _drafts/<id>.md             drafted by a gezel — the human review surface
-│   ├── _outbox/<id>.md             staged, awaiting daytime approval
+│   ├── _outbox/<id>.md             staged, awaiting the person's approval
 │   ├── _sending/<id>.md            being sent, or a send that may have gone out
 │   └── _sent/<id>.md               committed receipt
 └── <scope>/
@@ -422,15 +422,19 @@ narrow, deny-by-default surface with a fixed shape:
 Two gates, both load-bearing against a prompt-injected turn:
 
 - **Consent scope.** Every action declares one; the daemon enforces it at commit. The model
-  cannot widen it. Mail's recipient allowlist is the reference implementation.
-- **Night-shift deferral.** A commit during night shift stages to `_outbox/` instead of
-  transmitting, for daytime approval. This is the morning-briefing model.
+  cannot widen it. Mail's recipient allowlist is the reference implementation. A scope is a
+  standing permission on the connection (`social-publish` is the `allowPublish` switch), never
+  a question asked per write, and a manifest must not promise otherwise.
+- **An unattended commit holds.** A commit transmits only when the person pressed Approve or
+  the committing gezel is running a turn the person started; any other commit (a scheduled
+  task, the night shift, a nudge, another gezel's request) stages to `_outbox/` and answers
+  `held-for-approval`. This is the morning-briefing model.
 
 **Mailbox drafts are the low-risk write.** Mail types also declare `save-draft`, scoped
 `mailbox-draft`: the message is saved into the account's own Drafts folder (Gmail drafts,
 Graph `POST /me/messages`, IMAP `APPEND` to `\Drafts`) and nothing is sent. The person is
 the approval step — they review and press Send in their mail app — so the `save_email_draft`
-tool drafts and commits in one call, and `mailbox-draft` is exempt from night-shift deferral
+tool drafts and commits in one call, and `mailbox-draft` is exempt from the unattended hold
 (`NON_TRANSMITTING_SCOPES` in [actions.ts](../packages/service/src/connectors/actions.ts)):
 an overnight "draft my replies" run should leave the Drafts folder full by morning. Prefer
 this shape for any future write whose effect stays inside the person's own account.

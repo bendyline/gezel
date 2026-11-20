@@ -9,6 +9,7 @@ import {
 } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import type { ServiceContext } from '../context.js';
+import { modelGitHubTextRefusal, modelGitRefusal } from '../model-git-gate.js';
 import { gitError } from './git.js';
 
 /**
@@ -115,6 +116,10 @@ export function githubRoutes(ctx: ServiceContext): Hono {
     const num = Number.parseInt(c.req.param('num'), 10);
     if (!Number.isFinite(num)) return c.json({ error: 'invalid PR number' }, 400);
     const body = GitHubCreateCommentRequestSchema.parse(await c.req.json());
+    const refusal =
+      (await modelGitRefusal(c, ctx)) ??
+      (await modelGitHubTextRefusal(c, ctx, 'github_pr_comment', [body.body]));
+    if (refusal) return refusal;
     try {
       const result = await ctx.gitHubPrs.createComment(project, num, body.body);
       const out: GitHubCreateCommentResponse = result;
@@ -129,6 +134,10 @@ export function githubRoutes(ctx: ServiceContext): Hono {
     if (!project) return c.json({ error: 'not found' }, 404);
     if (!project.github) return c.json({ error: 'project has no github link' }, 400);
     const body = GitHubCreatePullRequestSchema.parse(await c.req.json());
+    const refusal =
+      (await modelGitRefusal(c, ctx)) ??
+      (await modelGitHubTextRefusal(c, ctx, 'github_pr_create', [body.title, body.body]));
+    if (refusal) return refusal;
     try {
       const result = await ctx.gitHubPrs.createPullRequest(project, {
         title: body.title,

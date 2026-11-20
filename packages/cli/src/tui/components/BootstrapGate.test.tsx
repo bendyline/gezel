@@ -58,6 +58,75 @@ describe('BootstrapGate interactions', () => {
     expect(client.ensureNativeEngine.mock.calls.at(-1)?.[2]).toBe('cuda');
   });
 
+  it('opens straight to chat when only optional engines are missing', async () => {
+    // A home already chatting on its model was shown the toolkit offer on every
+    // launch, and Enter on its default installed 153 MB of optional engines.
+    const client = createClient({
+      getNativeEngineStatus: vi.fn().mockResolvedValue(nativeStatus(['llama-server'])),
+    });
+    const harness = mountGate(client);
+
+    await vi.waitFor(() => expect(harness.text()).toContain('READY'));
+    expect(harness.text()).not.toContain('Install the Gezel native toolkit');
+    expect(client.ensureNativeEngine).not.toHaveBeenCalled();
+  });
+
+  it('goes to the model choices when only optional engines are missing, and the complete set installs them', async () => {
+    const client = createClient({
+      getNativeEngineStatus: vi.fn().mockResolvedValue(nativeStatus(['llama-server'])),
+      listLlamaCppModels: vi.fn().mockResolvedValue({ models: [] }),
+      listCatalogItems: vi.fn(async (kind: string) =>
+        kind === 'chat-model' ? { items: [chatModel()] } : { items: [] },
+      ),
+      listRecognitionCatalog: vi.fn().mockResolvedValue({ models: [recognitionModel()] }),
+      ensureNativeEngine: vi.fn(async (_engine, onEvent) => {
+        onEvent({ type: 'done', binPath: '/native/engine', cached: false });
+      }),
+      installLlamaCppModel: vi.fn(async (_id, onEvent) => {
+        onEvent({ type: 'done', id: 'chat-model' });
+      }),
+      pullRecognitionModel: vi.fn(async (_id, onEvent) => {
+        onEvent({ type: 'done', id: 'reader' });
+      }),
+    });
+    const harness = mountGate(client);
+
+    await vi.waitFor(() => expect(harness.text()).toContain('Complete set'));
+    expect(harness.text()).not.toContain('Install the Gezel native toolkit');
+    await chooseOption(harness, 'Complete set', '2');
+
+    await vi.waitFor(() => expect(harness.text()).toContain('READY'));
+    expect(client.ensureNativeEngine.mock.calls.map(([engine]) => engine)).toEqual([
+      'uv',
+      'sd-server',
+      'whisper-server',
+    ]);
+  });
+
+  it('never takes a typed message as a choice', async () => {
+    const client = createClient({
+      getNativeEngineStatus: vi.fn().mockResolvedValue(nativeStatus(false)),
+    });
+    const harness = mountGate(client);
+    const pause = () => new Promise((resolve) => setTimeout(resolve, 20));
+
+    await vi.waitFor(() => expect(harness.text()).toContain('Install the Gezel native toolkit'));
+    await pause();
+    harness.write('What did Ben say');
+    await pause();
+    harness.write('1');
+    await pause();
+    harness.write('\r');
+    await vi.waitFor(() => expect(harness.text()).toContain("Typing here doesn't send a message"));
+    expect(client.ensureNativeEngine).not.toHaveBeenCalled();
+
+    // The ignored Enter clears the text, so a deliberate choice works again.
+    await pause();
+    harness.write('2');
+    await vi.waitFor(() => expect(harness.text()).toContain('READY'));
+    expect(client.ensureNativeEngine).not.toHaveBeenCalled();
+  });
+
   it('names Gezel, not a workshop, while it checks this computer', async () => {
     const client = createClient({ getConfig: vi.fn(() => new Promise(() => {})) });
     const harness = mountGate(client);
@@ -483,13 +552,19 @@ async function chooseOption(harness: InkHarness, marker: string, option: string)
   harness.write(option);
 }
 
-function nativeStatus(installed: boolean): NativeEngineStatusResponse {
+/** All engines installed (`true`), none (`false`), or exactly the ones named. */
+function nativeStatus(
+  installed: boolean | ReadonlyArray<NativeEngineName>,
+): NativeEngineStatusResponse {
   return {
     release: '9.9.9',
     pinned: true,
     platformKey: 'linux-x64',
     llamaBackend: 'cuda',
-    engines: NATIVE_TOOLKIT.map((name) => ({ name, installed })),
+    engines: NATIVE_TOOLKIT.map((name) => ({
+      name,
+      installed: typeof installed === 'boolean' ? installed : installed.includes(name),
+    })),
   };
 }
 

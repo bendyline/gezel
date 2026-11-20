@@ -201,7 +201,7 @@ describe('artifact folder operations', () => {
       client.renameProjectArtifactPath(projectId, 'movable', 'movable/inner'),
     ).rejects.toThrow(/400/);
     await expect(client.renameProjectArtifactPath(projectId, 'movable', 'shadow')).rejects.toThrow(
-      /400/,
+      /403/,
     );
   });
 

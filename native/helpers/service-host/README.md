@@ -12,7 +12,8 @@ NSSM is a general-purpose "run anything as a service" tool — even signed
 and renamed, a Bendyline-signed copy would be a dual-use persistence
 gadget (a classic signed LOLBin). This host's launch contract is
 **compiled in**: it can only spawn its sibling `Gezel.exe` running
-`C:\ProgramData\Gezel\service\dist\bin\gezeld.js`, with a fixed derived
+`C:\ProgramData\Gezel\service\dist\bin\gezeld.js` with `--disable-sigusr1`
+(so no other process can open its inspector), with a fixed derived
 environment. No flag, subcommand, or config channel makes it run
 anything else, and service registration stays in the installer (sc.exe),
 so the binary cannot even register services.

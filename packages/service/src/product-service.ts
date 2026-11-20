@@ -25,6 +25,7 @@ import {
   onSuspension,
   parseTaskRef,
   projectAllowsAmbientWork,
+  projectAllowsUnattendedWork,
   projectNightWorkEnabled,
   resolveSecurityPolicy,
   resolveSocialMode,
@@ -868,7 +869,7 @@ export async function startProductService(
       (p) =>
         Boolean(p.workingDir || p.github) &&
         p.indexingEnabled !== false &&
-        projectAllowsAmbientWork(p) &&
+        projectAllowsUnattendedWork(p) &&
         projectNightWorkEnabled(p) &&
         !isSharedLibraryProject(p),
     );
@@ -2121,7 +2122,6 @@ export async function startProductService(
     catalog,
     contentIndex,
     scriptRunner,
-    isNightShiftActive: () => nightShift.isActive(),
     locks: connectorLocks,
     ...(connectorFetch ? { fetch: connectorFetch } : {}),
   });

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
+import { escapingLinkRefusal, findEscapingLinks } from './escaping-links.js';
 import { runUnderMacSandbox } from './macos.js';
 import {
   MAX_RPC_FRAME_CHARS,
@@ -144,7 +145,7 @@ export async function runInSandbox(opts: SandboxRunOptions): Promise<SandboxRunR
   // and tests, use the current executable instead of a PATH lookup so
   // sandboxed children survive env-scrubbing and test env mutation.
   const nodeBin = process.env.GEZEL_NODE_PATH || process.execPath;
-  const permissionFlag = await resolveNodePermissionFlag(nodeBin);
+  const { permissionFlag, hardeningFlags } = await resolveNodeSandboxFlags(nodeBin);
 
   // A preload can remove the public socket APIs, but user-supplied code
   // executes in the same JS runtime and therefore must not be trusted to
@@ -164,6 +165,13 @@ export async function runInSandbox(opts: SandboxRunOptions): Promise<SandboxRunR
     process.platform === 'linux' && !linuxSystemdSandboxAvailable && opts.denyNet
       ? await linuxSandboxHelperForRun()
       : null;
+  // Network-on work gets the network and nothing else: no D-Bus (systemd's
+  // StartTransientUnit starts an unconfined process), no Docker socket.
+  const linuxSystemdNetworkSandboxAvailable =
+    process.platform === 'linux' &&
+    !opts.denyNet &&
+    linuxSystemdSandboxAvailable &&
+    (await canApplyLinuxSystemdNetworkSandbox());
   const mxcLauncher = process.platform === 'win32' ? await windowsMxcLauncherForRun(nodeBin) : null;
   const windowsMxcSandboxAvailable = mxcLauncher !== null;
   if (
@@ -199,14 +207,27 @@ export async function runInSandbox(opts: SandboxRunOptions): Promise<SandboxRunR
     ]);
     const writePaths = await expandPermissionPaths([opts.cwd, workdir]);
 
-    // When egress is denied, drop a JS-layer network neutralizer the
-    // child `--import`s before user code. The OS/runtime boundary checked
-    // above is the real fence; this preload is cross-platform
-    // defense-in-depth. It lives in the scratch read allowlist.
+    // Where nothing confines the file system by real path, a link already in
+    // the folder would carry the script's reads and writes out of it.
+    if (!(windowsMxcSandboxAvailable || macSandboxAvailable)) {
+      const links = await findEscapingLinks([cwd], [...readPaths, ...writePaths]);
+      if (!links.ok) return refusedResult(escapingLinkRefusal(links), opts);
+    }
+
+    // Preloads the child `--import`s before user code, from the scratch read
+    // allowlist. The process guard runs everywhere. A denyNet run gets the
+    // network neutralizer, a network-on run the local-socket block; the OS
+    // boundaries above are the real fence for both, and these are
+    // defense-in-depth where one is missing.
     const netBlockArgs: string[] = [];
-    if (opts.denyNet) {
-      const preloadPath = join(workdir, '__net_block.mjs');
-      await writeFile(preloadPath, NET_BLOCK_PRELOAD, 'utf8');
+    for (const [name, source] of [
+      ['__process_guard.mjs', PROCESS_GUARD_PRELOAD],
+      opts.denyNet
+        ? ['__net_block.mjs', NET_BLOCK_PRELOAD]
+        : ['__local_socket_block.mjs', LOCAL_SOCKET_BLOCK_PRELOAD],
+    ] as const) {
+      const preloadPath = join(workdir, name);
+      await writeFile(preloadPath, source, 'utf8');
       netBlockArgs.push(`--import=${pathToFileURL(preloadPath).href}`);
     }
     // Inside the container, resolution goes through the contained-realpath
@@ -221,6 +242,7 @@ export async function runInSandbox(opts: SandboxRunOptions): Promise<SandboxRunR
     const nodeArgs: string[] = [
       ...(windowsMxcSandboxAvailable ? MXC_NODE_PATH_FLAGS : []),
       permissionFlag,
+      ...hardeningFlags,
       ...resolveHookArgs,
       ...netBlockArgs,
       ...(opts.maxOldSpaceMb ? [`--max-old-space-size=${opts.maxOldSpaceMb}`] : []),
@@ -235,7 +257,9 @@ export async function runInSandbox(opts: SandboxRunOptions): Promise<SandboxRunR
     // standard pipes, so RPC rides stdin/stdout there instead of fd 3. Before
     // the Linux unit used it, every denyNet script with an RPC channel (a
     // gate script a model wrote, among others) refused to start on Linux.
-    const linuxSystemdWraps = linuxSystemdSandboxAvailable && opts.denyNet === true;
+    const linuxSystemdWraps =
+      (linuxSystemdSandboxAvailable && opts.denyNet === true) ||
+      linuxSystemdNetworkSandboxAvailable;
     const stdioRpcNonce =
       (windowsMxcSandboxAvailable || linuxSystemdWraps) && opts.rpcChannel
         ? newStdioRpcNonce()
@@ -258,6 +282,7 @@ export async function runInSandbox(opts: SandboxRunOptions): Promise<SandboxRunR
         denyNet: opts.denyNet,
         macSandboxAvailable,
         linuxSystemdSandboxAvailable,
+        linuxSystemdNetworkSandboxAvailable,
         sandboxHelperBin,
         mxcLauncher,
         timeoutMs: opts.timeoutMs,
@@ -347,10 +372,12 @@ function refusedResult(message: string, opts: SandboxRunOptions, exitCode = 126)
   } satisfies SandboxRunResult;
 }
 
-const nodePermissionFlagCache = new Map<
-  string,
-  Promise<'--permission' | '--experimental-permission'>
->();
+interface NodeSandboxFlags {
+  permissionFlag: '--permission' | '--experimental-permission';
+  hardeningFlags: string[];
+}
+
+const nodeSandboxFlagCache = new Map<string, Promise<NodeSandboxFlags>>();
 
 /**
  * Select the permission-model flag from `node --help` instead of assuming
@@ -369,25 +396,39 @@ export function selectNodePermissionFlag(
   return null;
 }
 
-async function resolveNodePermissionFlag(
-  nodeBin: string,
-): Promise<'--permission' | '--experimental-permission'> {
-  const cached = nodePermissionFlagCache.get(nodeBin);
+/**
+ * Options that take away what the permission model leaves a script, for the
+ * Node releases that have them (an older one refuses an unknown option):
+ *
+ * - `--disable-sigusr1`: one script could otherwise open another's inspector,
+ *   a Spectral component holding the person's credentials among them.
+ * - `--no-experimental-sqlite`: `node:sqlite` opens, ATTACHes and VACUUMs
+ *   INTO any path, outside the folders the run may write (Node 24.22 checks
+ *   none of it). Node before 22.13 has the module only behind an opt-in.
+ */
+export function selectNodeHardeningFlags(helpText: string): string[] {
+  return ['--disable-sigusr1', '--no-experimental-sqlite'].filter((flag) =>
+    new RegExp(`^\\s*${flag}(?:\\s|$)`, 'm').test(helpText),
+  );
+}
+
+async function resolveNodeSandboxFlags(nodeBin: string): Promise<NodeSandboxFlags> {
+  const cached = nodeSandboxFlagCache.get(nodeBin);
   if (cached) return cached;
   const pending = readNodeHelp(nodeBin).then((helpText) => {
-    const flag = selectNodePermissionFlag(helpText);
-    if (!flag) {
+    const permissionFlag = selectNodePermissionFlag(helpText);
+    if (!permissionFlag) {
       throw new Error(
         `[sandbox error] Node at ${nodeBin} does not advertise a supported permission-model flag`,
       );
     }
-    return flag;
+    return { permissionFlag, hardeningFlags: selectNodeHardeningFlags(helpText) };
   });
-  nodePermissionFlagCache.set(nodeBin, pending);
+  nodeSandboxFlagCache.set(nodeBin, pending);
   try {
     return await pending;
   } catch (err) {
-    nodePermissionFlagCache.delete(nodeBin);
+    nodeSandboxFlagCache.delete(nodeBin);
     throw err;
   }
 }
@@ -813,6 +854,7 @@ async function wrapForPlatform(
     denyNet?: boolean;
     macSandboxAvailable: boolean;
     linuxSystemdSandboxAvailable: boolean;
+    linuxSystemdNetworkSandboxAvailable?: boolean;
     sandboxHelperBin?: string | null;
     mxcLauncher: string | null;
     timeoutMs?: number;
@@ -841,7 +883,10 @@ async function wrapForPlatform(
       denyNet: ctx.denyNet,
     });
   }
-  if (process.platform === 'linux' && ctx.denyNet && ctx.linuxSystemdSandboxAvailable) {
+  const systemdFamilies = ctx.denyNet
+    ? ctx.linuxSystemdSandboxAvailable && DENY_NET_ADDRESS_FAMILIES
+    : ctx.linuxSystemdNetworkSandboxAvailable && NETWORK_ADDRESS_FAMILIES;
+  if (process.platform === 'linux' && systemdFamilies) {
     const runtimeSeconds = Math.max(30, Math.ceil((ctx.timeoutMs ?? 5 * 60_000) / 1_000) + 5);
     return {
       command: 'systemd-run',
@@ -852,7 +897,7 @@ async function wrapForPlatform(
         '--wait',
         '--collect',
         '-p',
-        'RestrictAddressFamilies=AF_UNIX',
+        `RestrictAddressFamilies=${systemdFamilies}`,
         '-p',
         `RuntimeMaxSec=${runtimeSeconds}`,
         `--working-directory=${ctx.workdir}`,
@@ -870,9 +915,11 @@ async function wrapForPlatform(
     // the runner's pipes (its RPC channel on fd 3 included) and its env.
     return { command: ctx.sandboxHelperBin, args: ['--deny-net', '--', command, ...args] };
   }
-  // Reached by non-denyNet work, and by provenance-trusted denyNet work
-  // on platforms with no OS boundary (`allowMissingNetBoundary`) — the
-  // permission model + JS neutralizer layers still apply to the bare run.
+  // Reached by network-on work where no systemd user manager can confine it
+  // (a container, Windows without the container, macOS without Seatbelt), and
+  // by provenance-trusted denyNet work on platforms with no OS boundary
+  // (`allowMissingNetBoundary`). The permission model, the escaping-link check
+  // and the preloads still apply to the bare run.
   return { command, args };
 }
 
@@ -984,7 +1031,30 @@ function sandboxHelperFeatures(bin: string): Promise<Set<string>> {
   });
 }
 
+const DENY_NET_ADDRESS_FAMILIES = 'AF_UNIX';
+// AF_NETLINK keeps os.networkInterfaces() working; it reaches no other process.
+const NETWORK_ADDRESS_FAMILIES = 'AF_INET AF_INET6 AF_NETLINK';
+
+const DENY_NET_PROBE =
+  "const net=require('node:net');" +
+  "const s=net.connect({host:'127.0.0.1',port:9});" +
+  "s.once('connect',()=>process.exit(9));" +
+  "s.once('error',e=>process.exit(['EAFNOSUPPORT','EPERM','EACCES'].includes(e.code)?0:2));" +
+  'setTimeout(()=>process.exit(3),1000);';
+
+// A local socket must be refused at socket creation, and TCP must still work.
+const LOCAL_SOCKET_PROBE =
+  "const net=require('node:net');" +
+  "const u=net.connect({path:'/nonexistent/gezel-sandbox-probe.sock'});" +
+  "u.once('connect',()=>process.exit(9));" +
+  "u.once('error',e=>{if(e.code!=='EAFNOSUPPORT')process.exit(4);" +
+  "const s=net.connect({host:'127.0.0.1',port:9});" +
+  "s.once('connect',()=>process.exit(0));" +
+  "s.once('error',e=>process.exit(['EAFNOSUPPORT','EPERM','EACCES'].includes(e.code)?5:0));});" +
+  'setTimeout(()=>process.exit(3),1500);';
+
 let linuxSystemdSandboxProbe: Promise<boolean> | undefined;
+let linuxSystemdNetworkSandboxProbe: Promise<boolean> | undefined;
 
 /**
  * Verify that the current user manager can start a transient service and
@@ -994,19 +1064,28 @@ let linuxSystemdSandboxProbe: Promise<boolean> | undefined;
  */
 export function canApplyLinuxSystemdSandbox(): Promise<boolean> {
   if (process.platform !== 'linux') return Promise.resolve(false);
-  linuxSystemdSandboxProbe ??= new Promise((resolve) => {
+  linuxSystemdSandboxProbe ??= probeLinuxSystemdSandbox(DENY_NET_ADDRESS_FAMILIES, DENY_NET_PROBE);
+  return linuxSystemdSandboxProbe;
+}
+
+/** The same proof for network-on work: local sockets refused, TCP allowed. */
+export function canApplyLinuxSystemdNetworkSandbox(): Promise<boolean> {
+  if (process.platform !== 'linux') return Promise.resolve(false);
+  linuxSystemdNetworkSandboxProbe ??= probeLinuxSystemdSandbox(
+    NETWORK_ADDRESS_FAMILIES,
+    LOCAL_SOCKET_PROBE,
+  );
+  return linuxSystemdNetworkSandboxProbe;
+}
+
+function probeLinuxSystemdSandbox(families: string, probe: string): Promise<boolean> {
+  return new Promise((resolve) => {
     let settled = false;
     const finish = (ok: boolean) => {
       if (settled) return;
       settled = true;
       resolve(ok);
     };
-    const probe =
-      "const net=require('node:net');" +
-      "const s=net.connect({host:'127.0.0.1',port:9});" +
-      "s.once('connect',()=>process.exit(9));" +
-      "s.once('error',e=>process.exit(['EAFNOSUPPORT','EPERM','EACCES'].includes(e.code)?0:2));" +
-      'setTimeout(()=>process.exit(3),1000);';
     const child = spawn(
       'systemd-run',
       [
@@ -1016,7 +1095,7 @@ export function canApplyLinuxSystemdSandbox(): Promise<boolean> {
         '--wait',
         '--collect',
         '-p',
-        'RestrictAddressFamilies=AF_UNIX',
+        `RestrictAddressFamilies=${families}`,
         '-p',
         'RuntimeMaxSec=3',
         '--',
@@ -1049,8 +1128,70 @@ export function canApplyLinuxSystemdSandbox(): Promise<boolean> {
       finish(code === 0);
     });
   });
-  return linuxSystemdSandboxProbe;
 }
+
+/**
+ * `--import`ed into every sandboxed child before user code. Node's permission
+ * model lets a script signal any process of the account and open another
+ * Node process's inspector (`_debugProcess`), which on Windows needs no
+ * signal at all; a Gezel process launched without `--disable-sigusr1`, or
+ * any other Node program the person runs, would then run the script's code.
+ * `process.kill` reaches the binding through `process._kill`, so guarding
+ * that covers both, and the original survives only in this closure:
+ * `process.binding` is refused under the permission model.
+ */
+export const PROCESS_GUARD_PRELOAD = `const ownPid = process.pid;
+const refuse = (what) => {
+  throw new Error('not allowed in this sandbox: ' + what);
+};
+const rawKill = process._kill;
+const guarded = {
+  _kill: function (pid, signal) {
+    if (pid !== ownPid && pid !== 0 && pid !== -ownPid) refuse('signaling another process');
+    if (typeof rawKill !== 'function') refuse('signaling');
+    return rawKill.call(process, pid, signal);
+  },
+  _debugProcess: function () {
+    return refuse("opening another process's inspector");
+  },
+};
+for (const [name, value] of Object.entries(guarded)) {
+  try {
+    Object.defineProperty(process, name, {
+      value,
+      writable: false,
+      configurable: false,
+      enumerable: false,
+    });
+  } catch {}
+}
+`;
+
+/**
+ * `--import`ed into network-on children. The permission model does not gate
+ * local sockets, so a script with the network could reach the D-Bus session
+ * bus (systemd's StartTransientUnit starts an unconfined process), the Docker
+ * socket, or a named pipe on Windows. TCP and UDP are untouched. The Linux
+ * systemd unit refuses AF_UNIX outright where it runs; this is the backstop
+ * everywhere else.
+ */
+export const LOCAL_SOCKET_BLOCK_PRELOAD = `import net from 'node:net';
+const connect = net.Socket.prototype.connect;
+// Node's own test: a string that is not a non-negative number names a pipe.
+const isPipeName = (value) => typeof value === 'string' && !(Number(value) >= 0);
+Object.defineProperty(net.Socket.prototype, 'connect', {
+  value: function (...args) {
+    const first = Array.isArray(args[0]) ? args[0][0] : args[0];
+    const path = first !== null && typeof first === 'object' ? first.path : isPipeName(first) ? first : undefined;
+    if (path !== undefined && path !== null) {
+      throw new Error('local sockets and pipes are not reachable from this sandbox: ' + String(path));
+    }
+    return connect.apply(this, args);
+  },
+  writable: false,
+  configurable: false,
+});
+`;
 
 /**
  * JS-layer network neutralizer, `--import`ed into the sandboxed child

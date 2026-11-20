@@ -32,7 +32,7 @@ import {
   stopOwnedDaemon,
   stopProcessByPid,
 } from '@bendyline/gezel-client/node';
-import { resolveOnDeviceProvider } from '@bendyline/gezel/native';
+import { debugSignalLockArgs, resolveOnDeviceProvider } from '@bendyline/gezel/native';
 import { Command, Option } from 'commander';
 import { registerAccountCommands, registerIntegrationCommands } from '../account-command.js';
 import { autoDownloadRequested, downloadForRun } from '../auto-download.js';
@@ -510,7 +510,7 @@ async function startForeground(env: NodeJS.ProcessEnv): Promise<void> {
   // gezeld a graceful, cross-platform stop channel and the OS closes the same
   // pipe if this foreground owner crashes. In web mode the daemon still
   // prints its per-launch URL to this stdout.
-  const child = spawn(process.execPath, [entry], {
+  const child = spawn(process.execPath, [...debugSignalLockArgs(), entry], {
     detached: false,
     stdio: ['pipe', 'inherit', 'inherit'],
     env: { ...env, GEZEL_SHUTDOWN_ON_STDIN_EOF: '1' },

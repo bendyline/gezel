@@ -38,6 +38,10 @@ const TOOLCHAIN_ONLY = new Set([
   // The keyword-search stopwords live in gezk only because it is the one
   // package core, knowledge and the service can all import.
   'QUERY_STOP_WORDS',
+  // Synchronous hashing for a live index's writer; core's runtime already
+  // exports an async `sha256Hex` with a different signature.
+  'sha256',
+  'sha256Hex',
 ]);
 
 describe('core forwards the gezk format surface', () => {

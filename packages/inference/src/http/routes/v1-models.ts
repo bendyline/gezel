@@ -41,6 +41,7 @@ import type { ProviderName } from '../../providers/types.js';
 import { type MemoryProfile, detectMemoryProfileCached } from '../../system/memory.js';
 import type { InferenceContext as ServiceContext } from '../inference-context.js';
 import { appleSystemModel } from '../openai-compat/apple-model.js';
+import { servesCallerOwnedTurns } from '../openai-compat/caller-providers.js';
 import { resolveFallbackGezelId } from '../openai-compat/chat-target.js';
 
 /**
@@ -333,6 +334,25 @@ async function downloadableCatalogEntries(
   });
 }
 
+/**
+ * The gezels a caller-owned turn may run on: not one whose provider is an
+ * agent CLI, which the chat routes refuse. A gezel whose provider cannot be
+ * resolved stays listed; its request reports the real problem.
+ */
+export async function servableGezelIds(
+  ctx: Pick<ServiceContext, 'chat'>,
+  gezels: ReadonlyArray<{ id: string }>,
+): Promise<Set<string>> {
+  const resolve = ctx.chat.providerForGezel?.bind(ctx.chat);
+  const verdicts = await Promise.all(
+    gezels.map(async (gezel) => {
+      const provider = resolve ? await resolve(gezel.id).catch(() => null) : null;
+      return provider === null || servesCallerOwnedTurns(provider) ? gezel.id : null;
+    }),
+  );
+  return new Set(verdicts.filter((id): id is string => id !== null));
+}
+
 async function buildModelEntries(
   ctx: ServiceContext,
   created: number,
@@ -351,7 +371,9 @@ async function buildModelEntries(
       ctx,
       config?.openaiEndpoints?.servingGezelId,
     );
-    gezelEntries = [...gezels]
+    const servable = await servableGezelIds(ctx, gezels);
+    gezelEntries = gezels
+      .filter((gezel) => servable.has(gezel.id))
       .sort((a, b) => {
         if (a.id === fallbackGezelId) return -1;
         if (b.id === fallbackGezelId) return 1;
@@ -379,6 +401,7 @@ async function buildModelEntries(
   const providers = (options.localOnly ? LOCAL_PROVIDERS : PROVIDERS_TO_ENUMERATE).filter(
     (provider) =>
       (provider !== 'mlx' || resolveDistributionProfile().pythonProvisioning !== 'frozen-only') &&
+      servesCallerOwnedTurns(provider) &&
       providerListable(provider, config, gezels),
   );
   const buckets = await Promise.all(

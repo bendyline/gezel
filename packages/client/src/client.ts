@@ -5711,7 +5711,11 @@ export class GezelClient {
     );
   }
 
-  /** Commit a drafted action (the live write). Defers during night shift. */
+  /**
+   * Commit a drafted action (the live write). A commit no one is attending
+   * answers `held-for-approval` and waits in the outbox; the app's own
+   * commit is the person's approval and never holds.
+   */
   commitConnectorAction(
     id: string,
     draftId: string,

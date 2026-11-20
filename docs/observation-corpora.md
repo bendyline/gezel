@@ -236,6 +236,21 @@ reports the statement count. It parses without executing, so validation is
 inert. A cheap lexical pass runs first only to turn the common mistakes into a
 clear message.
 
+**The engine must run the text the parser judged, so a statement never
+reaches the script as text.** Scripts are piped to the DuckDB CLI, which splits
+them into statements, and spots its own `.` commands, with a tokenizer that
+disagrees with the engine's parser. Against the pinned engine,
+`SELECT 1 /* /* */ $$ ' $$ ;` followed by `.shell whoami` and `' */` on the
+next two lines parses as one SELECT. Spliced in raw, the CLI ended it at the `;`
+and ran `.shell whoami` as the daemon's account. `-safe` is not an option: it
+locks the configuration before the prelude can scope `allowed_directories`.
+So a model's, a page's or a manifest's statement travels as `untrustedSqlText`
+(`duck.ts`), base64 that the engine decodes. It is validated as
+`json_serialize_sql(<carrier>)` and run as `SELECT * FROM query(<carrier>)
+LIMIT n`, and `runTrusted` refuses any script with a line the CLI would run as
+a command. `query()` refuses a `PIVOT` with no `IN` list; DuckDB's message
+says to add one.
+
 ## 6. The semantic layer
 
 `tables/<table>/manifest.json` is the table's `about.md`, and it is the single
