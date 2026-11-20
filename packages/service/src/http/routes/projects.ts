@@ -57,13 +57,10 @@ import {
 } from '../../craftbook/applicable.js';
 import { MutationPathRefusedError } from '../../fs/mutation-path-refusal.js';
 import {
+  ArtifactPathDeniedError,
   ArtifactPathExistsError,
   ArtifactPathNotFoundError,
   ArtifactRootDeniedError,
-  ConnectorCorpusWriteDeniedError,
-  PromptDraftPathWriteDeniedError,
-  ShadowPathWriteDeniedError,
-  TaskInputPathWriteDeniedError,
   normalizeArtifactPath,
 } from '../../fs/project-artifacts-store.js';
 import { ProjectDeleteError } from '../../fs/store.js';
@@ -1492,12 +1489,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         scheduleAlbumPhotos(albumMediaDeps(ctx.store), id, body.path);
       return c.json({ ok: true, path: body.path });
     } catch (err) {
-      if (
-        err instanceof ConnectorCorpusWriteDeniedError ||
-        err instanceof ShadowPathWriteDeniedError ||
-        err instanceof PromptDraftPathWriteDeniedError ||
-        err instanceof TaskInputPathWriteDeniedError
-      ) {
+      if (err instanceof ArtifactPathDeniedError) {
         return c.json({ error: err.message, code: err.code }, 403);
       }
       throw err;
@@ -1520,11 +1512,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       });
       return c.json({ ok: true, path: written });
     } catch (err) {
-      if (
-        err instanceof ShadowPathWriteDeniedError ||
-        err instanceof PromptDraftPathWriteDeniedError ||
-        err instanceof TaskInputPathWriteDeniedError
-      ) {
+      if (err instanceof ArtifactPathDeniedError) {
         return c.json({ error: err.message, code: err.code }, 403);
       }
       if ((err as NodeJS.ErrnoException).code === 'EEXIST') {
@@ -1543,10 +1531,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         initiatedByGezel: initiatedByGezel(c),
       });
     } catch (err) {
-      if (
-        err instanceof PromptDraftPathWriteDeniedError ||
-        err instanceof TaskInputPathWriteDeniedError
-      ) {
+      if (err instanceof ArtifactPathDeniedError) {
         return c.json({ error: err.message, code: err.code }, 403);
       }
       if (err instanceof ArtifactRootDeniedError) {
@@ -1567,10 +1552,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       });
       return c.json({ ok: true, path });
     } catch (err) {
-      if (
-        err instanceof PromptDraftPathWriteDeniedError ||
-        err instanceof TaskInputPathWriteDeniedError
-      ) {
+      if (err instanceof ArtifactPathDeniedError) {
         return c.json({ error: err.message, code: err.code }, 403);
       }
       if (err instanceof MutationPathRefusedError) throw err;
@@ -1593,10 +1575,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       });
       return c.json({ ok: true, ...moved });
     } catch (err) {
-      if (
-        err instanceof PromptDraftPathWriteDeniedError ||
-        err instanceof TaskInputPathWriteDeniedError
-      ) {
+      if (err instanceof ArtifactPathDeniedError) {
         return c.json({ error: err.message, code: err.code }, 403);
       }
       if (err instanceof MutationPathRefusedError) throw err;

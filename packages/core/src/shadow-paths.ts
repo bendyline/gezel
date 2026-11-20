@@ -58,11 +58,26 @@ export function isReservedTabularArtifactPath(path: string): boolean {
 }
 
 /**
- * True for the machine-owned halves of a diffpack: `diffpacks/<id>/after/**`
- * (the copy-on-write draft tree) and `diffpacks/<id>/files/**` (the sealed
- * unified diffs). Those two are written only by the draft store and the
- * sealer, which bypass the artifact store — routing an ordinary
- * `write_artifact` there would let a model forge a diff it never drafted.
+ * What the runtime writes into a pack folder and reads back: the draft tree,
+ * the sealed diffs, and the proposed deletions, moves and manifest. A gezel
+ * that could write `deletions.json` in another pack's folder would add a
+ * deletion to a proposal it never drafted.
+ */
+const DIFFPACK_MACHINE_ENTRIES: ReadonlySet<string> = new Set([
+  'after',
+  'files',
+  'deletions.json',
+  'operations.json',
+  'manifest.json',
+]);
+
+/**
+ * True for the machine-owned parts of a diffpack: `diffpacks/<id>/after/**`
+ * (the copy-on-write draft tree), `diffpacks/<id>/files/**` (the sealed
+ * unified diffs), and the pack's `deletions.json`, `operations.json` and
+ * `manifest.json`. They are written only by the draft store and the sealer,
+ * which bypass the artifact store — routing an ordinary `write_artifact`
+ * there would let a model forge a change it never drafted.
  *
  * Deliberately NOT the whole pack folder: `notes.md` and any scratch the
  * gezel keeps beside it stay writable, because explaining the fix is the
@@ -72,8 +87,20 @@ export function isReservedDiffpackArtifactPath(path: string): boolean {
   const segments = artifactSegments(path);
   if (segments[0]?.toLowerCase() !== PROJECT_DIFFPACKS_DIR_NAME) return false;
   if (segments.length < 3) return false;
-  const third = segments[2]?.toLowerCase();
-  return third === 'after' || third === 'files';
+  return DIFFPACK_MACHINE_ENTRIES.has(segments[2]!.toLowerCase());
+}
+
+/**
+ * True when moving or deleting `path` would carry machine-owned diffpack
+ * content with it, or when a folder moved TO `path` would put its own tree
+ * there: the `diffpacks` folder, a pack folder, or anything reserved inside
+ * one. Writes and mkdirs use {@link isReservedDiffpackArtifactPath} instead —
+ * creating a pack folder or its `notes.md` is harmless.
+ */
+export function touchesReservedDiffpackArtifactPath(path: string): boolean {
+  const segments = artifactSegments(path);
+  if (segments[0]?.toLowerCase() !== PROJECT_DIFFPACKS_DIR_NAME) return false;
+  return segments.length <= 2 || isReservedDiffpackArtifactPath(path);
 }
 
 /**

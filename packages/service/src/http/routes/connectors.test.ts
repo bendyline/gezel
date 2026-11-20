@@ -1,8 +1,9 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { securityPolicyForLevel } from '@bendyline/gezel';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerConsentEnforcer } from '../../connectors/consent.js';
 import { connectorSecretKey, registerNativeAdapter } from '../../connectors/registry.js';
 import { readCorpus } from '../../connectors/testing/harness.js';
@@ -422,6 +423,57 @@ describe('/api/projects/:id/connectors', () => {
     expect(sent).toMatch(/status: sent/);
     const after = await call<{ pending: unknown[] }>('GET', '/connectors/actions');
     expect(after.body.pending).toEqual([]);
+  });
+
+  // A consent scope is a standing permission on the connection, so the hold is
+  // what stops an unattended run. It keyed on the night shift alone, and a
+  // daytime scheduled task's commit went straight out.
+  it("holds a gezel's commit unless the person started the turn", async () => {
+    const binding = await bind();
+    const gezel = await svc.context.store.createGezel({ name: 'Rosa', role: 'Writer' });
+    const sessionToken = svc.context.tokenStore.issueSession({
+      appId: 'session:attend-1',
+      projectId: PROJECT,
+      gezelId: gezel.id,
+      team: false,
+    }).token;
+    const commitAsSession = async (draftId: string) => {
+      const res = await httpFetch(
+        `${baseUrl}/api/projects/${PROJECT}/connectors/actions/${draftId}/commit`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${sessionToken}`, 'Content-Type': 'application/json' },
+        },
+      );
+      return { status: res.status, body: (await res.json()) as { status?: string } };
+    };
+    const draft = async () =>
+      (
+        await call<{ draftId: string }>(
+          'POST',
+          `/connectors/${encodeURIComponent(binding.id)}/actions`,
+          { action: 'note', input: { text: 'hello', approve: true } },
+        )
+      ).body.draftId;
+
+    const turn = vi.spyOn(svc.context.chat, 'isUserDirectedTurn').mockReturnValue(false);
+    const priorPolicy = (await svc.context.store.readConfig()).securityPolicy ?? null;
+    // A gezel's commit needs external services before the hold is reached.
+    await svc.context.store.writeConfig({ securityPolicy: securityPolicyForLevel('free') });
+    try {
+      const unattended = await commitAsSession(await draft());
+      expect(unattended).toMatchObject({ status: 200, body: { status: 'held-for-approval' } });
+      expect(upstream.committed).toEqual([]);
+      expect(turn).toHaveBeenCalledWith('attend-1');
+
+      turn.mockReturnValue(true);
+      const asked = await commitAsSession(await draft());
+      expect(asked).toMatchObject({ status: 200, body: { status: 'committed' } });
+      expect(upstream.committed).toHaveLength(1);
+    } finally {
+      turn.mockRestore();
+      await svc.context.store.writeConfig({ securityPolicy: priorPolicy });
+    }
   });
 
   it('discarding a draft removes it; committing a missing draft is a 400', async () => {

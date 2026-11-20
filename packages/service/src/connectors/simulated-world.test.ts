@@ -98,12 +98,10 @@ beforeAll(() => {
 
 let env: ConnectorTestEnv;
 let world: SimulatedWorld;
-let nightShift = false;
 const priorClientId = process.env.GEZEL_GOOGLE_CLIENT_ID;
 
 afterEach(async () => {
   await env?.dispose();
-  nightShift = false;
   if (priorClientId === undefined) delete process.env.GEZEL_GOOGLE_CLIENT_ID;
   else process.env.GEZEL_GOOGLE_CLIENT_ID = priorClientId;
 });
@@ -122,7 +120,6 @@ async function setup() {
     secrets: env.secrets,
     catalog,
     fetch: world.fetch,
-    isNightShiftActive: () => nightShift,
   });
   const project = () => env.project() as never;
   return { connectors, actions, project };
@@ -213,7 +210,7 @@ describe('connectors against the simulated world', { timeout: 30_000 }, () => {
       action: 'send',
       input: { to: ['jordan@contoso-customer.test'], subject: 'Update', body: 'Working on it.' },
     });
-    await expect(actions.commit(project(), toCustomer.draftId)).rejects.toThrow(
+    await expect(actions.commit(project(), toCustomer.draftId, { attended: true })).rejects.toThrow(
       /not on the binding's allowlist/,
     );
     expect(world.gmail.sent).toHaveLength(0);
@@ -223,11 +220,8 @@ describe('connectors against the simulated world', { timeout: 30_000 }, () => {
       action: 'send',
       input: { to: ['priya@northwind.test'], subject: 'Done', body: 'Slide updated.' },
     });
-    // Night shift holds a send for daytime approval, but not a mailbox draft.
-    nightShift = true;
-    expect((await actions.commit(project(), toColleague.draftId)).status).toBe(
-      'queued-night-shift',
-    );
+    // A send no one is attending holds for approval, but a mailbox draft does not.
+    expect((await actions.commit(project(), toColleague.draftId)).status).toBe('held-for-approval');
     expect(world.gmail.sent).toHaveLength(0);
     const overnight = await actions.draft(project(), {
       bindingId: binding.id,
@@ -240,8 +234,9 @@ describe('connectors against the simulated world', { timeout: 30_000 }, () => {
     });
     expect((await actions.commit(project(), overnight.draftId)).status).toBe('committed');
     expect(world.gmail.drafts).toHaveLength(2);
-    nightShift = false;
-    expect((await actions.commit(project(), toColleague.draftId)).status).toBe('committed');
+    expect((await actions.commit(project(), toColleague.draftId, { attended: true })).status).toBe(
+      'committed',
+    );
     expect(world.gmail.sent).toHaveLength(1);
 
     // ── Token refresh mid-life ──────────────────────────────────────────

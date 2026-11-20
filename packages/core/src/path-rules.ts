@@ -50,6 +50,20 @@ export function isReservedWindowsName(name: string): boolean {
 }
 
 /**
+ * Whether a path segment has the shape of a Windows 8.3 short name:
+ * `DIFFPA~1`, `_META~1.JSO`, `GIT~1`. NTFS volumes that generate short names
+ * (the system drive does by default) open the long-named entry they alias, so
+ * a check that compares names sees `DIFFPA~1` while the write lands in
+ * `diffpacks`. A segment of at most eight characters before one optional
+ * extension of up to three, ending in `~` and digits; trailing dots and spaces
+ * are dropped first because Windows drops them.
+ */
+export function looksLikeWindowsShortName(segment: string): boolean {
+  const match = /^([^.]{1,8})(?:\.[^.]{1,3})?$/.exec(segment.replace(/[ .]+$/, ''));
+  return match !== null && /~\d+$/.test(match[1]!);
+}
+
+/**
  * The token shape `interpolateStepsContext` substitutes, so a check sees
  * exactly what launch interpolation left behind.
  */

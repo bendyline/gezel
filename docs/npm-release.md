@@ -6,7 +6,7 @@ version line.
 
 ## What ships
 
-Sixteen packages under the `@bendyline` scope, all public API under semver,
+Seventeen packages under the `@bendyline` scope, all public API under semver,
 plus three unscoped short names (below):
 
 | Package | What it is |
@@ -19,6 +19,7 @@ plus three unscoped short names (below):
 | `@bendyline/gezel-plugin-sdk` | Legacy extension surface, kept for compatibility |
 | `@bendyline/gezel-catalog` | Catalog loader (content lives in `@bendyline/gilde`) |
 | `@bendyline/gezel-knowledge` | The `.gezk` toolchain: compiler, verified archive reader, retrieval |
+| `@bendyline/gezel-retrieval` | A mutable, browser-safe retrieval index for documents an app owns: FTS5 over `node:sqlite` or sqlite-wasm (`./sqlite-wasm`) |
 | `@bendyline/gezel-connectors-spectral` | Spawned Prismatic component host |
 | `@bendyline/gezel-script-stdlib` | Standard gate-script library |
 | `@bendyline/gezel-script-runtime` | Portable, capability-mediated script execution: the `ScriptExecutor` contract and the QuickJS-WASM executor |
@@ -44,7 +45,7 @@ and a short name bootstrapped by hand depends on one of those.
 
 Three tiers, and the tier is a property of the manifest, not a list:
 
-- **Published** — the nineteen above.
+- **Published** — the twenty above.
 - **Versioned but not published** — `packages/app` and `packages/vscode`.
   multi-semantic-release versions, tags and changelogs them, but they stay
   `private: true`, and [`scripts/publish-package.mjs`](../scripts/publish-package.mjs)

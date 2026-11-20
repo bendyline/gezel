@@ -21,7 +21,7 @@ import {
   stat,
   writeFile,
 } from 'node:fs/promises';
-import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import {
   type ChatModelTuning,
@@ -5392,7 +5392,6 @@ export class Store {
    * the script SDK's `fs.write` from a run a gezel started.
    */
   async assertGezelPackageScriptEdit(id: string, relPath: string, after: string): Promise<void> {
-    if (!isPackageManifestPath(relPath)) return;
     const full = await resolveInside(await this.projectWorkspaceDir(id), relPath, {
       allowRoot: false,
     });
@@ -5411,11 +5410,13 @@ export class Store {
     ctx?: JournalContext,
     opts?: { userInitiated?: boolean; before?: string | null },
   ): Promise<void> {
-    if (!ctx?.gezelId || opts?.userInitiated || !isPackageManifestPath(relPath)) return;
+    if (!ctx?.gezelId || opts?.userInitiated) return;
+    const manifest = await packageManifestName(relPath, full);
+    if (!manifest) return;
     const before =
       opts?.before !== undefined ? opts.before : await readFile(full, 'utf8').catch(() => null);
     const edit = packageScriptsEdit(
-      relPath,
+      manifest,
       before,
       typeof after === 'string' ? after : after.toString('utf8'),
     );
@@ -5436,7 +5437,9 @@ export class Store {
     ctx?: JournalContext,
     opts?: { userInitiated?: boolean },
   ): Promise<void> {
-    if (!ctx?.gezelId || opts?.userInitiated || !isPackageManifestPath(toPath)) return;
+    if (!ctx?.gezelId || opts?.userInitiated || !(await packageManifestName(toPath, toFull))) {
+      return;
+    }
     const source = await stat(fromFull).catch(() => null);
     if (!source?.isFile()) return;
     await this.guardPackageScriptEdit(toPath, toFull, await readFile(fromFull), ctx, opts);
@@ -7647,6 +7650,18 @@ async function pathExists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * The name to judge `relPath` by as a package manifest, or null when it is
+ * not one: its own name, else the name the filesystem resolves it to. On a
+ * volume that keeps 8.3 short names `PACKAG~1.JSO` opens `package.json`, and
+ * a link opens its target, so the name a gezel typed proves nothing.
+ */
+async function packageManifestName(relPath: string, full: string): Promise<string | null> {
+  if (isPackageManifestPath(relPath)) return relPath;
+  const real = await realpathNearest(full);
+  return real !== null && isPackageManifestPath(real) ? basename(real) : null;
 }
 
 function projectMetaStateOf(info: { size: number; mtimeMs: number } | null): string {

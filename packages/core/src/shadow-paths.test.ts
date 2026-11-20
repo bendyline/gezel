@@ -1,5 +1,71 @@
 import { describe, expect, it } from 'vitest';
-import { isReservedPromptDraftArtifactPath, isReservedShadowArtifactPath } from './shadow-paths.js';
+import { looksLikeWindowsShortName } from './path-rules.js';
+import {
+  isReservedDiffpackArtifactPath,
+  isReservedPromptDraftArtifactPath,
+  isReservedShadowArtifactPath,
+  touchesReservedDiffpackArtifactPath,
+} from './shadow-paths.js';
+
+describe('isReservedDiffpackArtifactPath', () => {
+  it("covers everything the runtime writes in a pack folder, and not the gezel's notes", () => {
+    for (const path of [
+      'diffpacks/12/after/src/a.ts',
+      'diffpacks/12/files/01-a.diff',
+      'diffpacks/12/deletions.json',
+      'diffpacks/12/operations.json',
+      'Diffpacks/12/Manifest.json',
+      'diffpacks/12/files./01.diff',
+    ]) {
+      expect(isReservedDiffpackArtifactPath(path), path).toBe(true);
+    }
+    for (const path of ['diffpacks/12/notes.md', 'diffpacks/12', 'diffpacks', 'notes/files/a']) {
+      expect(isReservedDiffpackArtifactPath(path), path).toBe(false);
+    }
+  });
+
+  it('counts the folders that hold a proposal when it is moved or deleted', () => {
+    for (const path of [
+      'diffpacks',
+      'diffpacks/12',
+      'diffpacks/12/files',
+      'diffpacks/12/after/x',
+    ]) {
+      expect(touchesReservedDiffpackArtifactPath(path), path).toBe(true);
+    }
+    for (const path of ['diffpacks/12/notes.md', 'scratch/diffpacks', 'tasks/12']) {
+      expect(touchesReservedDiffpackArtifactPath(path), path).toBe(false);
+    }
+  });
+});
+
+describe('looksLikeWindowsShortName', () => {
+  it('matches the 8.3 aliases NTFS generates', () => {
+    for (const name of [
+      'DIFFPA~1',
+      '_META~1.JSO',
+      'GIT~1',
+      'MESSA~12',
+      'di3f2a~1',
+      'PACKAG~1.JSO.',
+    ]) {
+      expect(looksLikeWindowsShortName(name), name).toBe(true);
+    }
+  });
+
+  it('leaves longer names and other tildes alone', () => {
+    for (const name of [
+      'diffpacks',
+      'draft~old-version.md',
+      '~1.md.bak',
+      'notes~',
+      'a~b.txt',
+      '~$doc.docx',
+    ]) {
+      expect(looksLikeWindowsShortName(name), name).toBe(false);
+    }
+  });
+});
 
 describe('isReservedShadowArtifactPath', () => {
   it('matches the shadow root and everything under it', () => {

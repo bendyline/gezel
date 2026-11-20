@@ -13,10 +13,13 @@ import { z } from 'zod';
  *   diffpacks/<packId>/after/<workspace path>   copy-on-write draft tree
  *   diffpacks/<packId>/files/<nn>-<slug>.diff   sealed single-file unified diffs
  *   diffpacks/<packId>/notes.md                 the gezel's explanation
- *   diffpacks/<packId>/manifest.json            pack metadata (also the export payload)
+ *   diffpacks/<packId>/manifest.json            pack metadata (a copy; the record is authoritative)
+ *   diffpacks/<packId>/deletions.json           proposed deletions while drafting
+ *   diffpacks/<packId>/operations.json          proposed moves, copies and folders
  *
- * `after/` and `files/` are machine-owned (see `isReservedDiffpackArtifactPath`)
- * so a model cannot forge a diff it never drafted by calling `write_artifact`.
+ * Everything but `notes.md` is machine-owned (see `isReservedDiffpackArtifactPath`)
+ * so a model cannot forge a change it never drafted by calling `write_artifact`,
+ * and each sealed diff's hash is kept in the record, outside the drawer.
  *
  * `packId` is always the `num` of the task that drafted it — including a
  * fanout shard, which has its own number. Unique per project, nothing to
@@ -129,6 +132,13 @@ export const DiffpackFileSchema = z.object({
    * name thousands of photos, and hashing every one at seal would take hours.
    */
   baseHash: z.string(),
+  /**
+   * sha256 of the sidecar as the sealer wrote it. The sidecar sits in the
+   * artifacts drawer and this record does not, so a diff that no longer
+   * hashes to it was changed after sealing and is never applied or exported.
+   * Absent on packs sealed before builds recorded it.
+   */
+  diffHash: z.string().optional(),
   additions: z.number().int().nonnegative(),
   deletions: z.number().int().nonnegative(),
   change: DiffpackFileChangeSchema,
@@ -177,6 +187,8 @@ export type DiffpackOverlap = z.infer<typeof DiffpackOverlapSchema>;
 export const DiffpackSchema = DiffpackRecordSchema.extend({
   /** Files whose current workspace hash no longer matches `baseHash`. */
   drifted: z.array(z.string()),
+  /** Files whose sealed diff no longer matches `diffHash`; apply refuses the pack. */
+  altered: z.array(z.string()).optional(),
   overlaps: z.array(DiffpackOverlapSchema),
   additions: z.number().int().nonnegative(),
   deletions: z.number().int().nonnegative(),

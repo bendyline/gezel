@@ -5,11 +5,26 @@
  * autonomous `allowExternalServices` posture — that gates the background loop.
  */
 
+import type { Context } from 'hono';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { ConnectorPolicyError } from '../../connectors/manager.js';
 import { isFirstPartyCaller } from '../auth.js';
 import type { ServiceContext } from '../context.js';
+
+/**
+ * Whether the person asked for this commit just now: they pressed Approve in
+ * the app, or the gezel session committing is running a turn they started.
+ * Every other caller (a scheduled or night-shift turn, a nudge, another
+ * gezel's request, an app's grant) is unattended, and its commit holds for
+ * approval.
+ */
+function commitIsAttended(ctx: ServiceContext, c: Context): boolean {
+  if (isFirstPartyCaller(c)) return true;
+  const auth = c.get('auth');
+  if (!auth?.scopes.includes('session') || !auth.appId.startsWith('session:')) return false;
+  return ctx.chat.isUserDirectedTurn(auth.appId.slice('session:'.length));
+}
 
 const BindRequestSchema = z.object({
   type: z.string().min(1),
@@ -323,14 +338,16 @@ export function connectorRoutes(ctx: ServiceContext): Hono {
   });
 
   // Commit a drafted action. Reaches transmission only through the action's
-  // consent scope (daemon-enforced, deny-by-default) + night-shift deferral,
-  // so both users and enforcer-cleared agent tools (send_email) land here.
+  // consent scope (daemon-enforced, deny-by-default), and only when someone
+  // is attending; otherwise it holds for approval. Both users and
+  // enforcer-cleared agent tools (send_email, publish_post) land here.
   app.post('/:id/connectors/actions/:draftId/commit', async (c) => {
     const project = await ctx.store.getProject(c.req.param('id'));
     if (!project) return c.json({ error: 'not found' }, 404);
     try {
       const result = await ctx.connectorActions.commit(project, c.req.param('draftId'), {
         agentInitiated: !isFirstPartyCaller(c),
+        attended: commitIsAttended(ctx, c),
       });
       return c.json({ ok: true, ...result });
     } catch (err) {

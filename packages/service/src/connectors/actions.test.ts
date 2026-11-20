@@ -88,7 +88,11 @@ const project = {
   // biome-ignore lint/suspicious/noExplicitAny: minimal ProjectDetail fake.
 } as any;
 
-function mgr(nightShift = false) {
+/**
+ * These tests are about the consent scopes, so the person is attending
+ * unless a test says otherwise (`attended: false`, or its own commit opts).
+ */
+function mgr({ attended = true }: { attended?: boolean } = {}) {
   const store = {
     projectWorkspaceDir: async () => ws,
     projectArtifactsDir: () => join(ws, 'artifacts'),
@@ -99,12 +103,10 @@ function mgr(nightShift = false) {
   const catalog = { get: async () => ({ manifest: MANIFEST }) } as unknown as ConstructorParameters<
     typeof ConnectorActionManager
   >[0]['catalog'];
-  return new ConnectorActionManager({
-    store,
-    secrets,
-    catalog,
-    isNightShiftActive: () => nightShift,
-  });
+  const manager = new ConnectorActionManager({ store, secrets, catalog });
+  const commit = manager.commit.bind(manager);
+  manager.commit = (p, id, opts = {}) => commit(p, id, { attended, ...opts });
+  return manager;
 }
 
 describe('ConnectorActionManager send journal', () => {
@@ -154,18 +156,64 @@ describe('ConnectorActionManager', () => {
     expect(after.pending).toHaveLength(0);
   });
 
-  it('defers the commit during night shift (stages to _outbox, no write)', async () => {
-    const m = mgr(true);
+  it('holds a commit no one is attending (stages to _outbox, no write)', async () => {
+    const m = mgr({ attended: false });
     const { draftId } = await m.draft(project, {
       bindingId: 'fake-action-conn:abc',
       action: 'comment',
       input: {},
     });
     const r = await m.commit(project, draftId);
-    expect(r.status).toBe('queued-night-shift');
+    expect(r.status).toBe('held-for-approval');
     expect(lastAction).toBeNull(); // NOT executed
     const { pending } = await m.list(project);
     expect(pending[0]?.status).toBe('queued'); // now staged in _outbox
+  });
+
+  // allowPublish is a switch on the connection, not a question per post, so a
+  // daytime scheduled task used to publish the moment it asked to.
+  it('social-publish: an unattended publish holds whatever the hour, then the person approves it', async () => {
+    const m = mgr({ attended: false });
+    project.connectors[0].config = { allowPublish: true };
+    try {
+      const { draftId } = await m.draft(project, {
+        bindingId: 'fake-action-conn:abc',
+        action: 'publish',
+        input: { text: 'Scheduled post' },
+      });
+      expect((await m.commit(project, draftId)).status).toBe('held-for-approval');
+      expect(lastAction).toBeNull();
+      expect((await m.commit(project, draftId, { attended: true })).status).toBe('committed');
+      expect(lastAction).toEqual({ action: 'publish', input: { text: 'Scheduled post' } });
+    } finally {
+      project.connectors[0].config = {};
+    }
+  });
+
+  it("an unattended send to a lookout's own recipients transmits, and no other", async () => {
+    const m = mgr({ attended: false });
+    project.connectors[0].config = { allowedRecipients: ['me@home.example', 'other@home.example'] };
+    try {
+      const alert = await m.draft(project, {
+        bindingId: 'fake-action-conn:abc',
+        action: 'send',
+        input: { to: ['me@home.example'], body: 'Someone is at the door' },
+      });
+      const standingRecipients = ['me@home.example'];
+      expect((await m.commit(project, alert.draftId, { standingRecipients })).status).toBe(
+        'committed',
+      );
+      const wider = await m.draft(project, {
+        bindingId: 'fake-action-conn:abc',
+        action: 'send',
+        input: { to: ['me@home.example', 'other@home.example'], body: 'hi' },
+      });
+      expect((await m.commit(project, wider.draftId, { standingRecipients })).status).toBe(
+        'held-for-approval',
+      );
+    } finally {
+      project.connectors[0].config = {};
+    }
   });
 
   it('discards a drafted action', async () => {

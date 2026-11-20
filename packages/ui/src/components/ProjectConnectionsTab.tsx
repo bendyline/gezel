@@ -111,11 +111,7 @@ export function ProjectConnectionsTab({
       setNotice('');
       try {
         const r = await api.commitConnectorAction(project.id, draftId);
-        setNotice(
-          r.status === 'queued-night-shift'
-            ? 'Held for daytime approval (night shift).'
-            : 'Action committed.',
-        );
+        setNotice(r.status === 'committed' ? 'Action committed.' : 'Held in the outbox.');
         await refresh();
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -417,7 +413,8 @@ export function ProjectConnectionsTab({
         <div className="settings-subsection">
           <h4>Pending actions</h4>
           <p className="muted small">
-            Drafted by Gezel — review, then commit (the live write). You commit; Gezel can't.
+            Drafted by your gezels. Review each one, then commit it to send it. Anything a gezel
+            tried to send or post while you weren't directing it waits here.
           </p>
           <ul className="settings-list">
             {pending.map((a) => (
@@ -425,7 +422,7 @@ export function ProjectConnectionsTab({
                 <div>
                   <strong>{a.action}</strong>
                   <span className="muted small"> · {a.connectorType}</span>
-                  {a.status === 'queued' && <span className="badge"> held for daytime</span>}
+                  {a.status === 'queued' && <span className="badge"> waiting for you</span>}
                 </div>
                 <div className="gz-mail-link-actions">
                   <button

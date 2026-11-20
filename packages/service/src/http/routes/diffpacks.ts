@@ -10,6 +10,7 @@ import {
 import { PathSafetyError } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { type Context, Hono } from 'hono';
 import {
+  DiffpackAlteredError,
   DiffpackDriftedError,
   DiffpackNotFoundError,
   DiffpackNotReviewableError,
@@ -125,6 +126,9 @@ export function diffpackRoutes(ctx: ServiceContext): Hono {
       });
     } catch (err) {
       if (err instanceof DiffpackNotFoundError) return c.json({ error: err.message }, 404);
+      if (err instanceof DiffpackAlteredError) {
+        return c.json({ error: err.message, code: 'altered', paths: err.paths }, 409);
+      }
       log.warn(`[diffpack] export failed for ${packId}: ${String(err)}`);
       throw err;
     }

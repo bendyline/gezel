@@ -35,8 +35,6 @@ export async function startService(
 ): Promise<RunningService<EngineContext> | RunningInferenceOnlyService> {
   // Before any child process is spawned: see daemon-host.ts.
   daemonHost();
-  // Before any sandboxed script could run: see debug-signal-guard.ts.
-  guardDebugSignalOnce();
   // Before any worker or child loads ONNX Runtime: see core native/onnx-telemetry.ts.
   disableOnnxRuntimeTelemetry();
   const home = opts.home ?? gezelHome();
@@ -45,6 +43,10 @@ export async function startService(
   const logOutput = opts.logOutput ?? 'stderr';
   const restoreLogs = routeServiceLogs(logOutput, home);
   try {
+    // Before any sandboxed script could run: see debug-signal-guard.ts. After
+    // the routing, so a CLI one-shot hosting the service in its own process
+    // (logOutput 'file') files the Windows warning instead of printing it.
+    guardDebugSignalOnce();
     const running = await startForRole({ ...opts, home, logOutput });
     restoreLogsOnStop(running, restoreLogs);
     return running;

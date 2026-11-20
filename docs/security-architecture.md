@@ -872,6 +872,16 @@ unsandboxed Copilot) are not covered; see §14.
   `workspace/git-control-guard.ts` snapshots each `.git` at the workspace root and two levels
   down (config, `config.worktree`, `commondir`, `info/attributes`, hooks, pointer files) and
   puts it back after the run. The person's own editor can still read a change during the run.
+- **A reserved path is judged by the name the filesystem opens, not the name typed.** On an
+  NTFS volume that keeps 8.3 short names (the system drive, and so `~/.gezel`, by default)
+  `DIFFPA~1/12/files/01.diff` wrote into a sealed proposal and `_META~1.JSO` into a corpus's
+  bookkeeping while every predicate saw an ordinary folder. The artifacts store runs one rule
+  table (`artifactMutationDenial`) on the given path and again on its native `realpath`, which
+  answers with long names and follows links, for writes, mkdirs, deletes and both ends of a
+  rename; a gezel's short-name-shaped segment is refused outright, for volumes whose `realpath`
+  keeps the spelling. The package-script gate and DocBlocks' `save_artifact` check the same
+  way. A sealed diff's sha256 lives in `diffpacks.json`, outside the drawer, and apply and
+  export refuse a sidecar that no longer matches, whatever guard failed.
 - **`run_playwright_script`** runs outside the script sandbox. The security level strips it
   whenever external services are off (it is open-web egress, like `fetch_url`), and the route
   refuses it the same way. A run a gezel asks for needs the user's approval of that exact
@@ -996,6 +1006,7 @@ privileged service identity or putting the daemon root token on disk.
 | SSRF connect-time IP pin | DEFERRED | Current guard validates at DNS-resolution time (rebinding-window residual). |
 | Agent CLIs behind caller-owned surfaces | ENFORCED | The `/v1`, Ollama and bridge surfaces refuse `anthropic-cli` and `codex-cli`, directly or through a gezel on one, and leave them out of their listings; a paired device reaches only on-device engines (§7.1). |
 | Connector credentials and destinations | ENFORCED | A `connector-*` credential serves only its own binding's sync run; a destination field changes only from the person's app, and a sync never widens a credential's origins (§8). |
+| Unattended connector sends and posts | ENFORCED | A consent scope such as `allowPublish` is a standing permission on the connection, not a question per post. A commit transmits only when the person pressed Approve or the committing gezel runs a turn the person started (`isUserDirectedTurn`); a scheduled task by day, the night shift, a nudge or another gezel's request holds in the outbox (`held-for-approval`). A lookout's own recipients and mailbox drafts are the exceptions. Within a turn the person started, a gezel that read hostile content can still post without a further click. See [connectors.md](connectors.md#write-back-and-the-morning-briefing). |
 | Gezel posts to GitHub at `lockdown` | PRODUCT CHOICE | Lockdown keeps GitHub read and write for gezels, so after a turn reads a hostile pull request a gezel can still post ordinary text as a comment: the screen stops stored credentials, secret-shaped strings and tripwire addresses, not private code or prose. The fix is a per-project "may post to GitHub" switch or an approval for a post that follows untrusted content. |
 | Egress tripwire coverage (§11.1) | PARTIAL | Lexical and easy to evade on purpose: it targets trained-in habits, not an adversary. Provider-native shells (Claude CLI, Codex CLI, an unsandboxed Copilot) and MCP toolsets those providers call directly never pass the bridge, so their calls are not read. The next layer is a Gezel-owned egress proxy that logs and filters the connections themselves. |
 | Package-script edits by sandboxed scripts | PARTIAL | `run_nodejs_script` / `derive_file` write through Node's permission model, not the Store, so only the workspace's root manifests are snapshotted and put back. A nested workspace package's `scripts` can still change that way while `allowPackageScriptEdits` is off. |

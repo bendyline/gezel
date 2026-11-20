@@ -208,10 +208,13 @@ function malformedImagesReason(input: unknown): string | undefined {
 }
 
 /**
- * `social-publish` gates social-post write-back (Bluesky today; X/Instagram
- * follow the same scope). Publishing is off by default: the binding's owner
- * must flip `allowPublish` on the connector's settings before any commit
- * transmits, and an empty draft never does. Platform-specific validation
+ * `social-publish` gates social-post write-back (Bluesky, X, Instagram,
+ * LinkedIn). Publishing is off by default: the binding's owner must flip
+ * `allowPublish` on the connector's settings before any commit transmits,
+ * and an empty draft never does. That switch is a standing permission for
+ * the connection, not a question asked per post; what keeps an unattended
+ * run from posting is the commit's hold (`ConnectorActionManager.commit`),
+ * so manifests must not promise per-post consent. Platform-specific validation
  * (length limits, reply threading, image bytes) stays in the adapter's
  * `runAction`; only the images *shape* is rejected here so a malformed draft
  * fails before the outbox ever accepts it.

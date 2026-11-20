@@ -215,6 +215,17 @@ describe('DiffpackReviewView', () => {
     expect(screen.getByText('Out of date')).toBeInTheDocument();
   });
 
+  it('will not apply a proposal whose diff changed after sealing, and says so', async () => {
+    vi.mocked(api.listDiffpacks).mockResolvedValue({
+      diffpacks: [pack({ altered: ['src/a.ts'] })],
+    });
+    render(<DiffpackReviewView projectId="p1" />);
+    expect(await screen.findByText(/was changed after this proposal was/)).toBeInTheDocument();
+    expect(screen.getByText('Changed after sealing')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Apply all' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Apply this file' })).toBeNull();
+  });
+
   it('will not apply a proposal that is still being drafted', async () => {
     vi.mocked(api.listDiffpacks).mockResolvedValue({
       diffpacks: [pack({ status: 'drafting', files: [] })],

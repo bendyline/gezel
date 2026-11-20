@@ -1,5 +1,7 @@
 import { createLogger } from '@bendyline/gezel';
-import { KNOWLEDGE_VECTOR_FLOORS } from '@bendyline/gezel-knowledge';
+// The browser entry: Capacitor bundles this module into its WebView build, and
+// the root entry loads node:sqlite and CommonJS yaml as soon as it is imported.
+import { KNOWLEDGE_VECTOR_FLOORS } from '@bendyline/gezel-knowledge/browser';
 
 const log = createLogger('knowledge');
 

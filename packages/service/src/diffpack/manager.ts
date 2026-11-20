@@ -51,6 +51,20 @@ export class DiffpackNotFoundError extends Error {
   }
 }
 
+/**
+ * A sealed diff no longer reads back as the sealer wrote it. Nothing in the
+ * drawer may be trusted over the record, so the proposal cannot be exported;
+ * apply reports the same thing per file and writes nothing.
+ */
+export class DiffpackAlteredError extends Error {
+  constructor(readonly paths: string[]) {
+    super(
+      `The diff for ${paths.join(', ')} was changed after this proposal was sealed, so Gezel won't export it. Dismiss the proposal.`,
+    );
+    this.name = 'DiffpackAlteredError';
+  }
+}
+
 export class DiffpackNotReviewableError extends Error {
   constructor(status: DiffpackStatus) {
     super(`A ${status} proposal cannot be applied.`);
@@ -219,6 +233,7 @@ export class DiffpackManager {
         path: normalizeDraftPath(path),
         diffArtifact,
         baseHash: before === null ? '' : sha256(before),
+        diffHash: sha256(result.diff),
         additions: result.addedLines,
         deletions: result.removedLines,
         change: before === null ? 'add' : 'modify',
@@ -349,10 +364,12 @@ export class DiffpackManager {
     siblings: DiffpackRecord[],
   ): Promise<Diffpack> {
     const drifted = await this.driftedPaths(projectId, record);
+    const altered = await this.alteredPaths(projectId, record);
     const overlaps = overlapsFor(record, siblings);
     const out: Diffpack = {
       ...record,
       drifted,
+      ...(altered.length > 0 ? { altered } : {}),
       overlaps,
       additions: record.files.reduce((n, f) => n + f.additions, 0),
       deletions: record.files.reduce((n, f) => n + f.deletions, 0),
@@ -388,6 +405,49 @@ export class DiffpackManager {
       if (current === null || sha256(current) !== file.baseHash) out.push(file.path);
     }
     return out;
+  }
+
+  /**
+   * Files still to apply whose sealed diff no longer reads back as the sealer
+   * wrote it. Read-time like drift, because the sidecar is a file in the
+   * drawer and the record is not.
+   */
+  private async alteredPaths(projectId: string, record: DiffpackRecord): Promise<string[]> {
+    if (record.status === 'applied' || record.status === 'dismissed') return [];
+    const out: string[] = [];
+    for (const file of pendingFiles(record)) {
+      if (!file.diffArtifact || !file.diffHash) continue;
+      const sealed = await this.readSealedDiff(projectId, file);
+      if (!sealed.ok && sealed.altered) out.push(file.path);
+    }
+    return out;
+  }
+
+  /**
+   * The diff the sealer wrote for `file`, or why it cannot be used. The
+   * sidecar lives in the artifacts drawer, where a short name or a missed
+   * guard once let a gezel rewrite one after sealing; applying it writes as
+   * the person, into folders gezels hold no grant for. The hash in the record
+   * is the check that does not depend on any guard holding.
+   */
+  async readSealedDiff(
+    projectId: string,
+    file: DiffpackFile,
+  ): Promise<{ ok: true; diff: string } | { ok: false; altered: boolean; error: string }> {
+    const diff = await this.deps.store
+      .readProjectArtifact(projectId, file.diffArtifact)
+      .catch(() => null);
+    if (diff === null) {
+      return { ok: false, altered: false, error: 'the diff for this file is missing' };
+    }
+    if (file.diffHash && sha256(diff) !== file.diffHash) {
+      return {
+        ok: false,
+        altered: true,
+        error: 'the diff for this file was changed after the proposal was sealed',
+      };
+    }
+    return { ok: true, diff };
   }
 
   /**
@@ -469,13 +529,12 @@ export class DiffpackManager {
         operations.push(file);
         continue;
       }
-      const diff = await this.deps.store
-        .readProjectArtifact(projectId, file.diffArtifact)
-        .catch(() => null);
-      if (diff === null) {
-        results.push({ path: file.path, ok: false, error: 'the diff for this file is missing' });
+      const sealed = await this.readSealedDiff(projectId, file);
+      if (!sealed.ok) {
+        results.push({ path: file.path, ok: false, error: sealed.error });
         continue;
       }
+      const diff = sealed.diff;
       if (file.change === 'add') {
         const content = contentFromCreationPatch(diff);
         if (content === null) {
@@ -492,8 +551,8 @@ export class DiffpackManager {
       patches.push({ path: file.path, diff });
     }
 
-    // A missing sidecar fails the whole pack before anything is written —
-    // same validate-all-first stance as the pack applier itself.
+    // A missing or altered sidecar fails the whole pack before anything is
+    // written — same validate-all-first stance as the pack applier itself.
     if (results.some((r) => !r.ok)) {
       const skipped = (path: string) => ({
         path,
@@ -703,12 +762,8 @@ export class DiffpackManager {
       files: record.files,
       deletions,
     };
-    await this.deps.store
-      .writeProjectArtifact(
-        projectId,
-        record.manifestPath,
-        `${JSON.stringify(manifest, null, 2)}\n`,
-      )
+    await this.drafts
+      .writeManifest(projectId, record.packId, `${JSON.stringify(manifest, null, 2)}\n`)
       .catch((err) => log.warn(`[diffpack] manifest write failed: ${String(err)}`));
   }
 

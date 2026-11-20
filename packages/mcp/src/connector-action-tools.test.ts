@@ -173,9 +173,13 @@ describe('registerEmailTools', () => {
     expect(result.structured).toMatchObject({ status: 'queued', draftId: 'd1' });
   });
 
-  it('reports a send, a night-shift hold, and an allowlist refusal', async () => {
+  it('reports a send, a hold for approval, and an allowlist refusal', async () => {
     const { call } = setup(registerEmailTools, {
       'POST /actions/sent/commit': () => ({ body: { result: { messageId: '<m1@test>' } } }),
+      'POST /actions/held/commit': () => ({
+        body: { status: 'held-for-approval', relPath: 'outbox/held.md' },
+      }),
+      // What a daemon from before the attendance check answered.
       'POST /actions/night/commit': () => ({
         body: { status: 'queued-night-shift', relPath: 'outbox/night.md' },
       }),
@@ -189,9 +193,13 @@ describe('registerEmailTools', () => {
       'Sent. Message-ID: <m1@test>',
     );
 
-    const night = await call('send_email', { draftId: 'night' });
-    expect(night.text).toContain('Night shift is active — not sending unattended');
-    expect(night.structured).toMatchObject({ status: 'queued-night-shift' });
+    for (const draftId of ['held', 'night']) {
+      const held = await call('send_email', { draftId });
+      expect(held.text).toBe(
+        `Not sent: the user isn't directing this conversation, so the message is held in the outbox (outbox/${draftId}.md) until they approve it in the project's Connections.`,
+      );
+      expect(held.structured).toMatchObject({ status: 'held-for-approval', draftId });
+    }
 
     const blocked = await call('send_email', { draftId: 'blocked' });
     expect(blocked.isError).toBe(true);
@@ -233,13 +241,13 @@ describe('registerSocialTools', () => {
     expect(result.text).toContain('This project has no linked social connector.');
   });
 
-  it('reports a publish with its link, a night-shift hold, and disabled publishing', async () => {
+  it('reports a publish with its link, a hold for approval, and disabled publishing', async () => {
     const { call } = setup(registerSocialTools, {
       'POST /actions/p1/queue': () => ({ body: {} }),
       'POST /actions/p1/commit': () => ({
         body: { result: { uri: 'at://x', permalink: 'https://bsky.test/p1' } },
       }),
-      'POST /actions/p2/commit': () => ({ body: { status: 'queued-night-shift' } }),
+      'POST /actions/p2/commit': () => ({ body: { status: 'held-for-approval' } }),
       'POST /actions/p3/commit': () => ({
         status: 403,
         body: { error: 'Publishing is disabled on this connector' },
@@ -250,8 +258,8 @@ describe('registerSocialTools', () => {
     expect((await call('publish_post', { draftId: 'p1' })).text).toBe(
       'Published. https://bsky.test/p1',
     );
-    expect((await call('publish_post', { draftId: 'p2' })).text).toContain(
-      'Night shift is active — not publishing unattended',
+    expect((await call('publish_post', { draftId: 'p2' })).text).toBe(
+      "Not published: the user isn't directing this conversation, so the post is held in the outbox until they approve it in the project's Connections.",
     );
     const disabled = await call('publish_post', { draftId: 'p3' });
     expect(disabled.isError).toBe(true);

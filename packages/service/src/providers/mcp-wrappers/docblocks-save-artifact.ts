@@ -25,7 +25,7 @@ import { mkdir, readFile, realpath } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import {
-  gezelArtifactWriteDenial,
+  gezelArtifactWriteDenialAt,
   normalizeArtifactPath,
 } from '../../fs/project-artifacts-store.js';
 import {
@@ -164,7 +164,7 @@ export const DocblocksSaveArtifact: McpToolWrapper = {
     if (typeof destination.path === 'string') {
       const path = normalizeArtifactPath(destination.path.trim());
       if (!isRootRelativePath(path)) return { kind: 'allow', args: { ...args, destination: next } };
-      const denial = gezelArtifactWriteDenial(path);
+      const denial = await gezelArtifactWriteDenialAt(write.physical, path);
       if (denial) {
         return {
           kind: 'reject',

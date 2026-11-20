@@ -9,7 +9,8 @@
  * Publishing works with the ordinary `w_member_social` product: `runAction`
  * POSTs a text post to the versioned REST API and returns the created post
  * URN + permalink. Commits are consent-gated through the `social-publish`
- * scope exactly like bluesky-posts (allowPublish + per-post consent).
+ * scope exactly like bluesky-posts (allowPublish on the connection; an
+ * unattended commit holds in the outbox).
  *
  * Auth quirks, encoded honestly:
  * - LinkedIn has no public-client PKCE support and requires the client

@@ -445,6 +445,17 @@ export class DiffpackDraftStore {
     await writeFileAtomic(full, content);
   }
 
+  /**
+   * Write the pack's `manifest.json` beside its notes. Straight to disk like
+   * the sidecars: the artifact store refuses that name so no tool can rewrite
+   * what a proposal says it contains.
+   */
+  async writeManifest(projectId: string, packId: string, content: string): Promise<void> {
+    const dir = dirname(this.afterDir(projectId, packId));
+    await mkdir(dir, { recursive: true });
+    await writeFileAtomic(await resolveInside(dir, 'manifest.json'), content);
+  }
+
   /** Drop stale sidecars so a re-seal never leaves a previous run's diffs behind. */
   async clearSidecars(projectId: string, packId: string): Promise<void> {
     const dir = join(dirname(this.afterDir(projectId, packId)), 'files');

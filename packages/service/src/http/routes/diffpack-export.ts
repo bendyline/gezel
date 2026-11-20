@@ -1,7 +1,7 @@
 import { basename } from 'node:path';
 import { formatDiffpackRef } from '@bendyline/gezel';
 import yazl from 'yazl';
-import { DiffpackNotFoundError } from '../../diffpack/manager.js';
+import { DiffpackAlteredError, DiffpackNotFoundError } from '../../diffpack/manager.js';
 import type { ServiceContext } from '../context.js';
 
 /**
@@ -36,19 +36,23 @@ export async function buildDiffpackZip(
 
   const patches: string[] = [];
   const deletions: string[] = [];
+  const altered: string[] = [];
   for (const file of pack.files) {
     if (file.change === 'delete') {
       deletions.push(file.path);
       continue;
     }
-    const diff = await ctx.store
-      .readProjectArtifact(projectId, file.diffArtifact)
-      .catch(() => null);
-    if (diff === null) continue;
+    if (!file.diffArtifact) continue;
+    const sealed = await ctx.diffpacks.readSealedDiff(projectId, file);
+    if (!sealed.ok) {
+      if (sealed.altered) altered.push(file.path);
+      continue;
+    }
     const name = `patches/${basename(file.diffArtifact)}`;
-    zip.addBuffer(Buffer.from(diff, 'utf8'), name);
+    zip.addBuffer(Buffer.from(sealed.diff, 'utf8'), name);
     patches.push(name);
   }
+  if (altered.length > 0) throw new DiffpackAlteredError(altered);
 
   zip.addBuffer(
     Buffer.from(applyInstructions(ref, pack.title, patches, deletions), 'utf8'),

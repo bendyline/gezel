@@ -2122,7 +2122,6 @@ export async function startProductService(
     catalog,
     contentIndex,
     scriptRunner,
-    isNightShiftActive: () => nightShift.isActive(),
     locks: connectorLocks,
     ...(connectorFetch ? { fetch: connectorFetch } : {}),
   });
