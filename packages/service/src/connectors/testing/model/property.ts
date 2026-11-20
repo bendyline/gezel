@@ -8,7 +8,7 @@
  */
 
 import { syncWithAdapter } from '../../manager.js';
-import { scopeDirName } from '../../manager.js';
+import { scopeDirName } from '../../scoped-cursor.js';
 import { assertCorpusInvariants, createConnectorTestEnv, readCorpus } from '../harness.js';
 import { type Rng, createRng } from './prng.js';
 import { ModelAdapter, type ModelProfile, SourceModel } from './source-model.js';

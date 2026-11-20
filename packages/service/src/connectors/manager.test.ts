@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { asScopedCursor, partialFailureNote, syncWithAdapter } from './manager.js';
+import { partialFailureNote, syncWithAdapter } from './manager.js';
+import { asScopedCursor } from './scoped-cursor.js';
 import type { ChangeBatch, ConnectorAdapter, NormalizedRecord, RecordRef } from './types.js';
 import type { WriteRecordResult } from './writer.js';
 
