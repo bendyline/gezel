@@ -4,7 +4,7 @@ import type { SqlDatabase } from './sql.js';
  * Bumped for a change an existing database cannot be migrated across; the
  * index is then dropped and rebuilt, and the app re-ingests its documents.
  */
-export const LIVE_INDEX_SCHEMA = 1;
+export const LIVE_INDEX_SCHEMA = 2;
 
 /**
  * bm25() column weights for `fts_chunks`, in column order. A document's own
@@ -31,6 +31,14 @@ export const LIVE_CHUNK_FTS_WEIGHTS = { title: 5, heading: 2, text: 1 } as const
  * `fts_chunks_vocab` answers "how many chunks contain this term" from the
  * index's own term list, which is what lets a query drop words too common to
  * rank by without counting matches.
+ *
+ * With an embedding profile configured, `chunks.embed_hash` is the SHA-256
+ * of the exact text the embedder sees for a chunk, and `embeddings` keeps
+ * one quantized vector per hash: sign bits for the first-stage scan, int8
+ * for rescoring (the catalogs' encoding). Keyed by content, not by chunk,
+ * so a renamed or re-chunked passage with the same text is never embedded
+ * again, and two identical passages share one vector. Vectors whose text
+ * no chunk holds any longer stay as a cache until `pruneEmbeddings`.
  */
 const DDL = `
 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
@@ -57,9 +65,18 @@ CREATE TABLE chunks(
   line_end INTEGER NOT NULL,
   text_start INTEGER,
   text_length INTEGER,
-  text_inline TEXT
+  text_inline TEXT,
+  embed_hash TEXT
 );
 CREATE INDEX chunks_document ON chunks(document_id, ordinal);
+CREATE INDEX chunks_embed_hash ON chunks(embed_hash);
+
+CREATE TABLE embeddings(
+  id INTEGER PRIMARY KEY,
+  hash TEXT NOT NULL UNIQUE,
+  bits BLOB NOT NULL,
+  int8 BLOB NOT NULL
+);
 
 CREATE VIEW chunk_content AS
   SELECT c.id AS id, c.document_id AS document_id, d.title AS title,
@@ -86,6 +103,7 @@ export function dropLiveIndexSchema(db: SqlDatabase): void {
     DROP TABLE IF EXISTS fts_chunks_vocab;
     DROP TABLE IF EXISTS fts_chunks;
     DROP VIEW IF EXISTS chunk_content;
+    DROP TABLE IF EXISTS embeddings;
     DROP TABLE IF EXISTS chunks;
     DROP TABLE IF EXISTS documents;
     DROP TABLE IF EXISTS meta;

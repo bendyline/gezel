@@ -1,4 +1,5 @@
-import { selectiveFtsQuery } from '@bendyline/gezel-knowledge/browser';
+import { asymmetricTopK, selectiveFtsQuery } from '@bendyline/gezel-knowledge/browser';
+import { sha256Hex } from '@bendyline/gezk';
 import {
   type LiveChunking,
   MATCH_CLOSE,
@@ -14,6 +15,17 @@ import {
   dropLiveIndexSchema,
 } from './schema.js';
 import type { SqlDatabase, SqlStatement, SqlValue } from './sql.js';
+import {
+  LIVE_HYBRID_WEIGHTS,
+  LIVE_RRF_K,
+  type LiveEmbedding,
+  embedInputFor,
+  excerpt,
+  measuredFloor,
+  prepareQuery,
+  quantizeEmbedding,
+  similarity,
+} from './vectors.js';
 
 export interface LiveIndexOptions {
   readonly chunking: LiveChunking;
@@ -24,6 +36,12 @@ export interface LiveIndexOptions {
   readonly appVersion: string;
   /** Milliseconds since the epoch, for `updatedAt`. */
   readonly now?: () => number;
+  /**
+   * Store vectors for this embedding profile (see `liveIndexEmbedding`).
+   * Without it the index is lexical only. Changing it marks every document
+   * stale for `rechunkStale()` and drops vectors from the old profile.
+   */
+  readonly embedding?: LiveEmbedding;
 }
 
 /** Why the index opened empty: a new database, an incompatible one, or a new app format. */
@@ -79,6 +97,36 @@ export interface LiveSearchHit {
   readonly ranges: ReadonlyArray<readonly [number, number]>;
   /** Higher is better; comparable within one search. */
   readonly score: number;
+  /** The passage's chunk, stable until its document changes. */
+  readonly chunk: number;
+  /** Cosine similarity to the query, for a hit the vector arm found. */
+  readonly similarity?: number;
+  /** Rank in each arm that found the hit (1 is best), for a hybrid search. */
+  readonly arms?: { readonly lexical?: number; readonly vector?: number };
+}
+
+export interface LiveSemanticOptions {
+  readonly limit?: number;
+  readonly perDocument?: number;
+  readonly exclude?: ReadonlySet<string>;
+  /**
+   * Cosine below which a hit is no evidence. Default: the profile's measured
+   * floor; `null` keeps every candidate (calibration, tests).
+   */
+  readonly floor?: number | null;
+}
+
+/** A passage awaiting its vector: embed `input` and hand the result back with `hash`. */
+export interface LivePendingEmbedding {
+  readonly hash: string;
+  readonly input: string;
+}
+
+export interface LiveEmbeddingStats {
+  /** Distinct passages that need a vector. */
+  readonly total: number;
+  /** Of those, how many have one. */
+  readonly embedded: number;
 }
 
 export interface LiveIndexStats {
@@ -89,6 +137,9 @@ export interface LiveIndexStats {
 }
 
 const SEARCH_LIMIT_MAX = 200;
+/** First-stage candidates per hit asked for, before int8 rescoring. */
+const VECTOR_CANDIDATES_PER_HIT = 16;
+const VECTOR_CANDIDATES_MIN = 256;
 const SNIPPET_TOKENS = 24;
 const TERM_CACHE_MAX = 512;
 const BM25 = `bm25(fts_chunks, ${LIVE_CHUNK_FTS_WEIGHTS.title}.0, ${LIVE_CHUNK_FTS_WEIGHTS.heading}.0, ${LIVE_CHUNK_FTS_WEIGHTS.text}.0)`;
@@ -159,7 +210,13 @@ export class LiveIndex {
   readonly reset: LiveIndexReset;
   readonly #db: SqlDatabase;
   readonly #chunking: LiveChunking;
+  readonly #embedding: LiveEmbedding | null;
+  /** What `documents.chunked_with` records: the chunking, and the profile hashes are for. */
+  readonly #identity: string;
   readonly #now: () => number;
+  /** Every stored vector's sign bits in one block, and the hash of each row. */
+  #bitIndex: { bits: Uint8Array; bytesPerRow: number; rows: number; hashes: string[] } | null =
+    null;
   readonly #statements = new Map<string, SqlStatement>();
   readonly #termRows = new Map<string, number>();
   #chunkCount: number | null = null;
@@ -168,6 +225,8 @@ export class LiveIndex {
   private constructor(db: SqlDatabase, options: LiveIndexOptions, reset: LiveIndexReset) {
     this.#db = db;
     this.#chunking = options.chunking;
+    this.#embedding = options.embedding ?? null;
+    this.#identity = identityOf(options);
     this.#now = options.now ?? Date.now;
     this.reset = reset;
   }
@@ -199,10 +258,14 @@ export class LiveIndex {
           "INSERT INTO fts_chunks(fts_chunks) VALUES('delete-all'); DELETE FROM chunks; DELETE FROM documents;",
         );
       }
+      const profile = options.embedding?.profile.id ?? '';
+      // Vectors from another profile are another vector space.
+      if (reset === null && meta('embedding') !== profile) db.exec('DELETE FROM embeddings');
       const write = db.prepare('INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)');
       write.run('schema', String(LIVE_INDEX_SCHEMA));
       write.run('app', options.appVersion);
-      write.run('chunking', options.chunking.id);
+      write.run('chunking', identityOf(options));
+      write.run('embedding', profile);
       db.exec('COMMIT');
     } catch (error) {
       db.exec('ROLLBACK');
@@ -249,15 +312,15 @@ export class LiveIndex {
         this.#statement(
           `UPDATE documents SET version = ?, title = ?, body = ?, payload = ?, chunked_with = ?,
              updated_at = ? WHERE id = ?`,
-        ).run(version, title, body, payload, this.#chunking.id, this.#now(), id);
+        ).run(version, title, body, payload, this.#identity, this.#now(), id);
       } else {
         const row = this.#statement(
           `INSERT INTO documents (path, version, title, body, payload, chunked_with, updated_at)
            VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id`,
-        ).get(path, version, title, body, payload, this.#chunking.id, this.#now());
+        ).get(path, version, title, body, payload, this.#identity, this.#now());
         id = Number(row?.id);
       }
-      const chunks = this.#index(id, placed);
+      const chunks = this.#index(id, title, placed);
       this.#changed();
       return { chunks };
     });
@@ -276,13 +339,14 @@ export class LiveIndex {
     });
   }
 
-  /** Remove every document. */
+  /** Remove every document, and every stored vector. */
   clear(): void {
     this.transaction(() => {
       this.#db.exec(
-        "INSERT INTO fts_chunks(fts_chunks) VALUES('delete-all'); DELETE FROM chunks; DELETE FROM documents;",
+        "INSERT INTO fts_chunks(fts_chunks) VALUES('delete-all'); DELETE FROM chunks; DELETE FROM documents; DELETE FROM embeddings;",
       );
       this.#changed();
+      this.#bitIndex = null;
     });
   }
 
@@ -326,7 +390,7 @@ export class LiveIndex {
       `SELECT (SELECT COUNT(*) FROM documents) AS documents,
               (SELECT COUNT(*) FROM chunks) AS chunks,
               (SELECT COUNT(*) FROM documents WHERE chunked_with != ?) AS stale`,
-    ).get(this.#chunking.id);
+    ).get(this.#identity);
     return {
       documents: Number(row?.documents ?? 0),
       chunks: Number(row?.chunks ?? 0),
@@ -341,16 +405,16 @@ export class LiveIndex {
    */
   rechunkStale(limit = 100): number {
     const rows = this.#statement(
-      'SELECT id, body FROM documents WHERE chunked_with != ? LIMIT ?',
-    ).all(this.#chunking.id, clamp(limit, 100, 100_000));
+      'SELECT id, title, body FROM documents WHERE chunked_with != ? LIMIT ?',
+    ).all(this.#identity, clamp(limit, 100, 100_000));
     if (rows.length === 0) return 0;
     this.transaction(() => {
       for (const row of rows) {
         const id = Number(row.id);
         this.#unindex(id);
-        this.#index(id, placeChunks(String(row.body), this.#chunking));
+        this.#index(id, String(row.title), placeChunks(String(row.body), this.#chunking));
         this.#statement('UPDATE documents SET chunked_with = ? WHERE id = ?').run(
-          this.#chunking.id,
+          this.#identity,
           id,
         );
       }
@@ -427,9 +491,242 @@ export class LiveIndex {
           snippet,
           ranges,
           score,
+          chunk: id,
         },
       ];
     });
+  }
+
+  /**
+   * Passages still waiting for a vector, most recently changed documents
+   * first. Embed each `input` with the profile's passage model and hand the
+   * vectors back through `storeEmbeddings`. Empty without an embedding
+   * profile, or when every passage has one.
+   */
+  /**
+   * The full text of these passages, by chunk id (a hit's `chunk`), for an
+   * app that quotes passages to a model. Ids that are gone are absent.
+   */
+  passageTexts(chunks: readonly number[]): Map<number, string> {
+    const ids = [...new Set(chunks)].filter((id) => Number.isSafeInteger(id)).slice(0, 1_000);
+    const out = new Map<number, string>();
+    if (ids.length === 0) return out;
+    for (const row of this.#statement(
+      'SELECT id, text FROM chunk_content WHERE id IN (SELECT value FROM json_each(?))',
+    ).all(JSON.stringify(ids))) {
+      out.set(Number(row.id), String(row.text));
+    }
+    return out;
+  }
+
+  pendingEmbeddings(limit = 64): LivePendingEmbedding[] {
+    const embedding = this.#embedding;
+    if (!embedding) return [];
+    const rows = this.#statement(
+      `SELECT c.embed_hash AS hash, MIN(c.id) AS id, MAX(d.updated_at) AS updated
+       FROM chunks c JOIN documents d ON d.id = c.document_id
+       LEFT JOIN embeddings e ON e.hash = c.embed_hash
+       WHERE c.embed_hash IS NOT NULL AND e.hash IS NULL
+       GROUP BY c.embed_hash ORDER BY updated DESC, id LIMIT ?`,
+    ).all(clamp(limit, 64, 4_096));
+    if (rows.length === 0) return [];
+    const content = new Map<number, Record<string, SqlValue>>();
+    for (const row of this.#statement(
+      `SELECT v.id AS id, v.title AS title, c.heading_path AS heading_path, v.text AS text
+       FROM chunk_content v JOIN chunks c ON c.id = v.id
+       WHERE v.id IN (SELECT value FROM json_each(?))`,
+    ).all(JSON.stringify(rows.map((row) => Number(row.id))))) {
+      content.set(Number(row.id), row);
+    }
+    return rows.flatMap((row) => {
+      const chunk = content.get(Number(row.id));
+      if (!chunk) return [];
+      return [
+        {
+          hash: String(row.hash),
+          input: embedInputFor(
+            embedding,
+            String(chunk.title),
+            JSON.parse(String(chunk.heading_path)) as string[],
+            String(chunk.text),
+          ),
+        },
+      ];
+    });
+  }
+
+  /** Store passage vectors, raw from the model, against the hashes `pendingEmbeddings` gave. */
+  storeEmbeddings(
+    entries: ReadonlyArray<{ readonly hash: string; readonly vector: ArrayLike<number> }>,
+  ): void {
+    const embedding = this.#embedding;
+    if (!embedding) throw new Error('This live index has no embedding profile');
+    const quantized = entries.map(({ hash, vector }) => {
+      if (typeof hash !== 'string' || !/^[0-9a-f]{64}$/.test(hash)) {
+        throw new TypeError('embedding hash must be a SHA-256 hex string');
+      }
+      return { hash, ...quantizeEmbedding(embedding.profile, vector) };
+    });
+    this.transaction(() => {
+      const insert = this.#statement(
+        'INSERT OR REPLACE INTO embeddings(hash, bits, int8) VALUES (?, ?, ?)',
+      );
+      for (const { hash, bits, int8 } of quantized) insert.run(hash, bits, int8);
+      this.#bitIndex = null;
+    });
+  }
+
+  embeddingStats(): LiveEmbeddingStats {
+    const row = this.#statement(
+      `SELECT (SELECT COUNT(DISTINCT embed_hash) FROM chunks WHERE embed_hash IS NOT NULL) AS total,
+              (SELECT COUNT(DISTINCT c.embed_hash) FROM chunks c
+               JOIN embeddings e ON e.hash = c.embed_hash) AS embedded`,
+    ).get();
+    return { total: Number(row?.total ?? 0), embedded: Number(row?.embedded ?? 0) };
+  }
+
+  /** Drop vectors whose text no passage holds any more; returns how many. */
+  pruneEmbeddings(): number {
+    return this.transaction(() => {
+      const result = this.#statement(
+        'DELETE FROM embeddings WHERE hash NOT IN (SELECT embed_hash FROM chunks WHERE embed_hash IS NOT NULL)',
+      ).run();
+      this.#bitIndex = null;
+      return Number(result.changes);
+    });
+  }
+
+  /**
+   * Passages nearest a query embedding (raw from the profile's query model,
+   * query instruction applied): the catalogs' two-stage scan, sign bits then
+   * int8 rescoring, kept only above the profile's measured cosine floor.
+   */
+  semanticSearch(vector: ArrayLike<number>, options: LiveSemanticOptions = {}): LiveSearchHit[] {
+    const embedding = this.#embedding;
+    if (!embedding) return [];
+    const limit = clamp(options.limit, 20, SEARCH_LIMIT_MAX);
+    const perDocument = clamp(options.perDocument, 3, SEARCH_LIMIT_MAX);
+    const floor = options.floor === undefined ? measuredFloor(embedding.profile) : options.floor;
+    const index = this.#bits();
+    if (index.rows === 0) return [];
+    const { unit, scan } = prepareQuery(embedding.profile, vector);
+    const candidates = asymmetricTopK(
+      index,
+      scan,
+      Math.max(VECTOR_CANDIDATES_MIN, limit * perDocument * VECTOR_CANDIDATES_PER_HIT),
+    );
+    const hashes = candidates.map((candidate) => index.hashes[candidate.chunkId - 1] as string);
+    const scored = new Map<string, number>();
+    for (const row of this.#statement(
+      'SELECT hash, int8 FROM embeddings WHERE hash IN (SELECT value FROM json_each(?))',
+    ).all(JSON.stringify(hashes))) {
+      const score = similarity(unit, row.int8 as Uint8Array);
+      if (floor === null || score >= floor) scored.set(String(row.hash), score);
+    }
+    if (scored.size === 0) return [];
+
+    const chunks = this.#statement(
+      `SELECT c.id AS id, c.embed_hash AS hash, d.path AS path, d.title AS title,
+              c.heading_path AS heading_path, c.line_start AS line_start, c.line_end AS line_end,
+              v.text AS text
+       FROM chunks c JOIN documents d ON d.id = c.document_id JOIN chunk_content v ON v.id = c.id
+       WHERE c.embed_hash IN (SELECT value FROM json_each(?))`,
+    ).all(JSON.stringify([...scored.keys()]));
+    chunks.sort(
+      (left, right) =>
+        (scored.get(String(right.hash)) ?? 0) - (scored.get(String(left.hash)) ?? 0) ||
+        Number(left.id) - Number(right.id),
+    );
+    const hits: LiveSearchHit[] = [];
+    const perPath = new Map<string, number>();
+    for (const row of chunks) {
+      const path = String(row.path);
+      if (options.exclude?.has(path)) continue;
+      const taken = perPath.get(path) ?? 0;
+      if (taken >= perDocument) continue;
+      perPath.set(path, taken + 1);
+      const score = scored.get(String(row.hash)) ?? 0;
+      hits.push({
+        path,
+        title: String(row.title),
+        headingPath: JSON.parse(String(row.heading_path)) as string[],
+        lineStart: Number(row.line_start),
+        lineEnd: Number(row.line_end),
+        snippet: excerpt(String(row.text)),
+        ranges: [],
+        score,
+        chunk: Number(row.id),
+        similarity: score,
+      });
+      if (hits.length >= limit) break;
+    }
+    return hits;
+  }
+
+  /**
+   * Lexical and semantic results fused by reciprocal rank: the passages that
+   * match the words, and those that mean the same thing, in one list. Without
+   * a query vector (no model yet) it is the lexical search.
+   */
+  hybridSearch(
+    query: string,
+    vector: ArrayLike<number> | null,
+    options: LiveSearchOptions & Pick<LiveSemanticOptions, 'floor'> = {},
+  ): LiveSearchHit[] {
+    const limit = clamp(options.limit, 20, SEARCH_LIMIT_MAX);
+    const perDocument = clamp(options.perDocument, 3, SEARCH_LIMIT_MAX);
+    const wide = {
+      ...options,
+      limit: Math.min(SEARCH_LIMIT_MAX, limit * 3),
+      perDocument: perDocument * 2,
+    };
+    const lexical = this.search(query, wide);
+    const semantic = vector ? this.semanticSearch(vector, wide) : [];
+    if (semantic.length === 0) return lexical.slice(0, limit);
+
+    const fused = new Map<
+      number,
+      { hit: LiveSearchHit; score: number; lexical?: number; vector?: number }
+    >();
+    lexical.forEach((hit, index) => {
+      fused.set(hit.chunk, {
+        hit,
+        score: LIVE_HYBRID_WEIGHTS.lexical / (LIVE_RRF_K + index + 1),
+        lexical: index + 1,
+      });
+    });
+    semantic.forEach((hit, index) => {
+      const share = LIVE_HYBRID_WEIGHTS.vector / (LIVE_RRF_K + index + 1);
+      const existing = fused.get(hit.chunk);
+      // Keep the lexical hit's snippet, which highlights the words.
+      if (existing) {
+        existing.score += share;
+        existing.vector = index + 1;
+        existing.hit = { ...existing.hit, similarity: hit.similarity };
+      } else {
+        fused.set(hit.chunk, { hit, score: share, vector: index + 1 });
+      }
+    });
+    const ordered = [...fused.values()].sort(
+      (left, right) => right.score - left.score || left.hit.chunk - right.hit.chunk,
+    );
+    const hits: LiveSearchHit[] = [];
+    const perPath = new Map<string, number>();
+    for (const entry of ordered) {
+      const taken = perPath.get(entry.hit.path) ?? 0;
+      if (taken >= perDocument) continue;
+      perPath.set(entry.hit.path, taken + 1);
+      hits.push({
+        ...entry.hit,
+        score: entry.score,
+        arms: {
+          ...(entry.lexical ? { lexical: entry.lexical } : {}),
+          ...(entry.vector ? { vector: entry.vector } : {}),
+        },
+      });
+      if (hits.length >= limit) break;
+    }
+    return hits;
   }
 
   #statement(sql: string): SqlStatement {
@@ -450,7 +747,7 @@ export class LiveIndex {
     this.#statement('DELETE FROM chunks WHERE document_id = ?').run(documentId);
   }
 
-  #index(documentId: number, placed: readonly PlacedChunk[]): number {
+  #index(documentId: number, title: string, placed: readonly PlacedChunk[]): number {
     // A document with no text still gets one chunk, so its title is searchable.
     const chunks: readonly PlacedChunk[] =
       placed.length > 0
@@ -468,10 +765,17 @@ export class LiveIndex {
           ];
     const insert = this.#statement(
       `INSERT INTO chunks (document_id, ordinal, kind, heading_path, heading_text, line_start,
-         line_end, text_start, text_length, text_inline) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         line_end, text_start, text_length, text_inline, embed_hash)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
+    const embedding = this.#embedding;
     chunks.forEach((chunk, ordinal) => {
       const inline = chunk.start === null || chunk.length === null;
+      // A title-only chunk has nothing to embed.
+      const embedHash =
+        embedding && chunk.text.length > 0
+          ? sha256Hex(embedInputFor(embedding, title, chunk.headingPath, chunk.text))
+          : null;
       insert.run(
         documentId,
         ordinal,
@@ -483,6 +787,7 @@ export class LiveIndex {
         inline ? null : chunk.start,
         inline ? null : chunk.length,
         inline ? chunk.text : null,
+        embedHash,
       );
     });
     this.#statement(
@@ -490,6 +795,21 @@ export class LiveIndex {
        SELECT id, title, heading_text, text FROM chunk_content WHERE document_id = ?`,
     ).run(documentId);
     return chunks.length;
+  }
+
+  /** The sign-bit block for the first-stage scan, rebuilt after vectors change. */
+  #bits(): { bits: Uint8Array; bytesPerRow: number; rows: number; hashes: string[] } {
+    if (this.#bitIndex) return this.#bitIndex;
+    const rows = this.#statement('SELECT hash, bits FROM embeddings ORDER BY id').all();
+    const bytesPerRow = Math.ceil((this.#embedding?.profile.dimensions ?? 0) / 8);
+    const bits = new Uint8Array(rows.length * bytesPerRow);
+    const hashes: string[] = [];
+    rows.forEach((row, index) => {
+      bits.set(row.bits as Uint8Array, index * bytesPerRow);
+      hashes.push(String(row.hash));
+    });
+    this.#bitIndex = { bits, bytesPerRow, rows: rows.length, hashes };
+    return this.#bitIndex;
   }
 
   #rows(): number {
@@ -516,6 +836,12 @@ export class LiveIndex {
     this.#chunkCount = null;
     this.#termRows.clear();
   }
+}
+
+/** What a document's `chunked_with` records; any change re-chunks it. */
+function identityOf(options: LiveIndexOptions): string {
+  const profile = options.embedding?.profile.id;
+  return profile ? `${options.chunking.id}|embed:${profile}` : options.chunking.id;
 }
 
 function toDocument(row: Record<string, SqlValue>): LiveDocument {

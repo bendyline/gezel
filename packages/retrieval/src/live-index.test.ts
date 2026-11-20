@@ -77,6 +77,16 @@ describe('LiveIndex', () => {
     assertIntact(db);
   });
 
+  it('reads the full text of passages a search found', () => {
+    const index = LiveIndex.open(memory(), options);
+    index.upsert({ path: 'garden.md', version: 'v1', title: 'Garden notes', body: garden });
+    const [hit] = index.search('aphids');
+    const texts = index.passageTexts([hit?.chunk ?? -1, hit?.chunk ?? -1, 999_999]);
+    expect([...texts.keys()]).toEqual([hit?.chunk]);
+    expect(texts.get(hit?.chunk ?? -1)).toContain('Aphids gather under the leaves');
+    expect(index.passageTexts([]).size).toBe(0);
+  });
+
   it('ranks a document named by the query above one that mentions it', () => {
     const index = LiveIndex.open(memory(), options);
     index.upsert({

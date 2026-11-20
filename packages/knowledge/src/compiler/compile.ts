@@ -50,6 +50,7 @@ import {
   spatialManifest,
 } from '@bendyline/gezk';
 import { writeGezkArchive } from '../archive/write.js';
+import { passageEmbedInput } from '../chunking/embed-input.js';
 import { type MarkdownChunk, chunkMarkdownProfile } from '../chunking/markdown-chunker.js';
 import {
   BODY_CODEC_MIN_BYTES,
@@ -349,12 +350,14 @@ export async function compileKnowledgeCatalog(
   const semanticFill = opts.shardFill === 'semantic' && !embedded;
   /** The exact passage text the embedder sees for one chunk (§5). */
   const embedInput = (p: PreparedDocument, chunk: MarkdownChunk): string =>
-    `${profile.passageInstruction}${buildContextHeader(
-      p.doc.title,
-      chunk.headingPath,
-      opts.chunkingProfile.contextHeader.max,
-      opts.countTokens,
-    )}${chunk.text}`;
+    passageEmbedInput({
+      passageInstruction: profile.passageInstruction,
+      title: p.doc.title,
+      headingPath: chunk.headingPath,
+      text: chunk.text,
+      headerMaxTokens: opts.chunkingProfile.contextHeader.max,
+      countTokens: opts.countTokens,
+    });
 
   rmSync(opts.workDir, { recursive: true, force: true });
   mkdirSync(join(opts.workDir, 'index', 'shards'), { recursive: true });
@@ -1117,22 +1120,6 @@ function defaultLicenseNotice(opts: CompileKnowledgeCatalogOptions): string {
 
 function normalizeMarkdown(md: string): string {
   return md.replace(/\r\n/g, '\n').normalize('NFC');
-}
-
-/** `title\nheadingPath\n`, truncated to the header token budget (§5). */
-function buildContextHeader(
-  title: string,
-  headingPath: string[],
-  maxTokens: number,
-  countTokens: (text: string) => number,
-): string {
-  const path = headingPath.filter((h) => h !== title);
-  let header = path.length > 0 ? `${title}\n${path.join(' > ')}\n` : `${title}\n`;
-  if (countTokens(header) > maxTokens) {
-    header = `${title}\n`;
-    if (countTokens(header) > maxTokens) header = '';
-  }
-  return header;
 }
 
 /**

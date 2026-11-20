@@ -47,7 +47,8 @@
     "clean": "node ../../scripts/clean-dirs.mjs dist .turbo"
   },
   "dependencies": {
-    "@bendyline/gezel-knowledge": "workspace:*"
+    "@bendyline/gezel-knowledge": "workspace:*",
+    "@bendyline/gezk": "workspace:*"
   },
   "devDependencies": {
     "@sqlite.org/sqlite-wasm": "3.53.4-build2",

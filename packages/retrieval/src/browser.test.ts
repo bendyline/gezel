@@ -31,7 +31,7 @@ function reachableImports(entry: string): Set<string> {
 
 describe('browser safety', () => {
   for (const entry of ['index.ts', 'sqlite-wasm.ts']) {
-    it(`${entry} reaches only the knowledge package's browser entry`, () => {
+    it(`${entry} reaches only browser-safe entries`, () => {
       const external = [...reachableImports(resolve(here, entry))];
       expect(
         external.filter(
@@ -40,7 +40,7 @@ describe('browser safety', () => {
         ),
       ).toEqual([]);
       for (const specifier of external)
-        expect(specifier).toBe('@bendyline/gezel-knowledge/browser');
+        expect(['@bendyline/gezel-knowledge/browser', '@bendyline/gezk']).toContain(specifier);
     });
   }
 });

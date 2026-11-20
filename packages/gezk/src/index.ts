@@ -19,3 +19,4 @@ export * from './jcs.js';
 export * from './slug.js';
 export * from './spatial.js';
 export * from './query-stopwords.js';
+export * from './sha256.js';

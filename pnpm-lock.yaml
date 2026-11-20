@@ -737,6 +737,9 @@ importers:
       '@bendyline/gezel-knowledge':
         specifier: workspace:*
         version: link:../knowledge
+      '@bendyline/gezk':
+        specifier: workspace:*
+        version: link:../gezk
     devDependencies:
       '@sqlite.org/sqlite-wasm':
         specifier: 3.53.4-build2

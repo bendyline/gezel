@@ -45,51 +45,80 @@ function unitVector(raw: readonly number[], dimensions: number): Float32Array {
  * makes them: the profile's query instruction, the profile's own tokenizer
  * (the library transformers.js uses), the pinned ONNX graph mean-pooled and
  * normalized on the device's ONNX Runtime, then the profile's projection.
+ *
+ * `embedPassage` embeds text exactly as given, for an app that stores its own
+ * passages: their embed input (`passageEmbedInput` in gezel-knowledge)
+ * already carries the profile's passage instruction and context header.
  */
 export function createQueryEmbedder(plugin: GezelKnowledgePlugin, baseUrl: () => Promise<string>) {
+  const files = new Map<string, Promise<{ definition: string; config: string }>>();
   const tokenizers = new Map<string, Promise<Tokenizer>>();
-  const tokenizer = (model: MobileQueryModel) => {
-    let pending = tokenizers.get(model.id);
+  /** The tokenizer files as text, read once per model; a failed read is not kept. */
+  const tokenizerFiles = (model: MobileQueryModel) => {
+    let pending = files.get(model.id);
     if (!pending) {
       pending = (async () => {
         const base = await baseUrl();
         const store = `/${queryModelStoreId(model.id)}/`;
-        const json = (path: string) =>
-          readStoreFile(base, store + path).then(
-            (bytes) => JSON.parse(new TextDecoder().decode(bytes)) as object,
-          );
+        const text = (path: string) =>
+          readStoreFile(base, store + path).then((bytes) => new TextDecoder().decode(bytes));
         const [definition, config] = await Promise.all([
-          json(model.tokenizer),
-          json('tokenizer_config.json'),
+          text(model.tokenizer),
+          text('tokenizer_config.json'),
         ]);
-        return new Tokenizer(definition, config);
+        return { definition, config };
       })();
+      void pending.catch(() => files.delete(model.id));
+      files.set(model.id, pending);
+    }
+    return pending;
+  };
+  const tokenizer = (model: MobileQueryModel) => {
+    let pending = tokenizers.get(model.id);
+    if (!pending) {
+      pending = tokenizerFiles(model).then(
+        ({ definition, config }) =>
+          new Tokenizer(JSON.parse(definition) as object, JSON.parse(config) as object),
+      );
       // A failed load must not stay cached.
       void pending.catch(() => tokenizers.delete(model.id));
       tokenizers.set(model.id, pending);
     }
     return pending;
   };
+  const modelFor = (profileId: string) => {
+    const model = mobileQueryModels.find((entry) => entry.id === profileId);
+    if (!model) throw new Error(`No query model for ${profileId}`);
+    return model;
+  };
+  const embedText = async (model: MobileQueryModel, text: string): Promise<Float32Array> => {
+    const encoding = (await tokenizer(model)).encode(text.slice(0, MAX_CHARS));
+    // Truncate as the pipeline does: keep the closing special token.
+    const ids =
+      encoding.ids.length > model.maxTokens
+        ? [...encoding.ids.slice(0, model.maxTokens - 1), encoding.ids.at(-1)!]
+        : encoding.ids;
+    const { vector } = await plugin.embed({
+      model: queryModelStoreId(model.id),
+      file: model.model,
+      ids,
+    });
+    return unitVector(vector, model.dimensions);
+  };
   return {
     /** The query model for a profile, when this SDK knows how to fetch it. */
     model: (profileId: string) => mobileQueryModels.find((model) => model.id === profileId),
     async embed(profileId: string, query: string): Promise<Float32Array> {
-      const model = mobileQueryModels.find((entry) => entry.id === profileId);
-      if (!model) throw new Error(`No query model for ${profileId}`);
-      const encoding = (await tokenizer(model)).encode(
-        `${model.queryInstruction}${query}`.slice(0, MAX_CHARS),
-      );
-      // Truncate as the pipeline does: keep the closing special token.
-      const ids =
-        encoding.ids.length > model.maxTokens
-          ? [...encoding.ids.slice(0, model.maxTokens - 1), encoding.ids.at(-1)!]
-          : encoding.ids;
-      const { vector } = await plugin.embed({
-        model: queryModelStoreId(model.id),
-        file: model.model,
-        ids,
-      });
-      return unitVector(vector, model.dimensions);
+      const model = modelFor(profileId);
+      return embedText(model, `${model.queryInstruction}${query}`);
+    },
+    /** A stored passage's vector: its embed input exactly as given. */
+    async embedPassage(profileId: string, input: string): Promise<Float32Array> {
+      return embedText(modelFor(profileId), input);
+    },
+    /** The profile's `tokenizer.json` and `tokenizer_config.json`, as text. */
+    async tokenizerFiles(profileId: string): Promise<{ definition: string; config: string }> {
+      return tokenizerFiles(modelFor(profileId));
     },
   };
 }

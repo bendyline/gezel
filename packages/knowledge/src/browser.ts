@@ -8,6 +8,9 @@
  * imported.
  */
 export * from './chunking/markdown-chunker.js';
+export * from './chunking/embed-input.js';
+export * from './profiles/vector-floors.js';
+export { type AsymmetricHit, type ShardBitIndex, asymmetricTopK } from './reader/bit-scan.js';
 export * from './profiles/registry.js';
 export { compareScores, contentFtsQuery, selectiveFtsQuery } from './reader/fts-query.js';
 export { QUERY_STOP_WORDS } from './query-stopwords.js';
