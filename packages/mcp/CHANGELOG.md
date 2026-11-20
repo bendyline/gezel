@@ -1,3 +1,11 @@
+## @bendyline/gezel-mcp [1.3.4](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-mcp%401.3.3...%40bendyline%2Fgezel-mcp%401.3.4) (2026-11-20)
+
+
+### Dependencies
+
+* **@bendyline/gezel:** upgraded to 1.3.4
+* **@bendyline/gezel-client:** upgraded to 1.3.4
+
 ## @bendyline/gezel-mcp [1.3.3](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-mcp%401.3.2...%40bendyline%2Fgezel-mcp%401.3.3) (2026-11-14)
 
 
