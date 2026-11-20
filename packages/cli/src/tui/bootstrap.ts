@@ -112,6 +112,26 @@ export function nativeEngineUse(engine: NativeEngineName): string {
   }
 }
 
+/** The native engine `provider` chats through. MLX runs in a Python runtime that uv provides. */
+export function chatEngineFor(provider: BootstrapChatProvider): NativeEngineName {
+  return provider === 'mlx' ? 'uv' : 'llama-server';
+}
+
+/**
+ * Whether first-run setup offers the native toolkit before the model choices:
+ * only when chat's own engine is among the `missing` ones. With that engine
+ * installed the rest are optional, and the offer stood between a person and a
+ * chat that already worked. It returned on every launch, and Enter on its
+ * default started a 153 MB download (2026-11-20 npm ship audit). The model
+ * step's Complete set and `gezel native install` still install them.
+ */
+export function shouldOfferNativeToolkit(
+  missing: ReadonlyArray<NativeEngineName>,
+  provider: BootstrapChatProvider,
+): boolean {
+  return missing.includes(chatEngineFor(provider));
+}
+
 /**
  * The first-run heading for a toolkit with `missing` engines. It says chat
  * needs the toolkit only when the engine `provider` chats through is among
@@ -122,8 +142,7 @@ export function nativeToolkitTitle(
   missing: ReadonlyArray<NativeEngineName>,
   provider: BootstrapChatProvider,
 ): string {
-  // MLX runs in a Python runtime that uv provides.
-  return missing.includes(provider === 'mlx' ? 'uv' : 'llama-server')
+  return missing.includes(chatEngineFor(provider))
     ? 'The engine Gezel needs to run chat models on this computer is not installed yet'
     : 'Some optional Gezel engines are not installed yet';
 }

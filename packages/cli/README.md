@@ -51,7 +51,9 @@ for this device (recommended, and the smallest first download), an optional
 complete set of image, speech, reading, and video helpers that fit, or other
 compatible chat models. Downloads show live progress and take effect without a
 restart. A model you already have, in your own store or one the desktop app
-shares on this machine, is used without downloading another copy.
+shares on this machine, is used without downloading another copy. Once chat
+works, `gezel` opens straight into the app; the optional image and speech
+engines stay one command away with `gezel native install`.
 
 Gezel is local-first. Everything you create lives on your disk under
 `~/.gezel/` as ordinary files you can `cat` and `grep`, and talks to whichever

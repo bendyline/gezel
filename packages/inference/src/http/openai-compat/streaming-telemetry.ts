@@ -101,6 +101,17 @@ export function noteStreamingOutbound(
   if (kind === 'keepalive') diagnostics.keepalives += 1;
 }
 
+/**
+ * Whether the reply's final chunk (`finish_reason`) has gone out, so a client
+ * closing now already holds the whole reply. It counts from `finish`, not
+ * `done`: a write is recorded only once the reader takes it, so the client can
+ * read `[DONE]` and hang up a microtask before `done` is noted.
+ */
+export function streamingReplyFinished(diagnostics: StreamingDiagnostics): boolean {
+  const last = diagnostics.lastOutbound;
+  return last === 'finish' || last === 'usage' || last === 'done';
+}
+
 function relativeMs(value: number | undefined, startedAtMs: number): number | undefined {
   return value === undefined ? undefined : Math.max(0, value - startedAtMs);
 }

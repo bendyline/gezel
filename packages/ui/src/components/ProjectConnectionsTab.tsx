@@ -413,7 +413,7 @@ export function ProjectConnectionsTab({
         <div className="settings-subsection">
           <h4>Pending actions</h4>
           <p className="muted small">
-            Drafted by your gezels. Review each one, then commit it to send it. Anything a gezel
+            Drafted by your crew. Review each one, then commit it to send it. Anything your crew
             tried to send or post while you weren't directing it waits here.
           </p>
           <ul className="settings-list">

@@ -39,6 +39,7 @@ import { overlayOpenAiRequestTuning } from '../openai-compat/request-tuning.js';
 import {
   createStreamingDiagnostics,
   snapshotStreamingDiagnostics,
+  streamingReplyFinished,
 } from '../openai-compat/streaming-telemetry.js';
 import { runNonStreaming, runStreaming } from '../openai-compat/streaming.js';
 import { createToolCallScreen } from '../openai-compat/tool-call-screen.js';
@@ -614,22 +615,33 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
             ...snapshotStreamingDiagnostics(diagnostics),
           });
           let clientAborted = false;
+          let clientClosed = false;
           // Client disconnect (stop button, closed tab) must stop paying
           // for generation — tear the session down immediately rather
           // than letting sendAndWait run to completion against a peer
           // that's gone. Mirrors the ollama-compat facade's onAbort.
           stream.onAbort(() => {
-            if (!clientAborted) {
-              clientAborted = true;
+            if (!clientClosed) {
+              clientClosed = true;
+              // An OpenAI client hangs up as soon as it reads `[DONE]`, often
+              // while this handler is still committing the mirror and history.
+              // That is how a successful stream ends, not an abort: warning on
+              // it put a WARN after every streamed reply (DocBlocks 2.8 review).
+              clientAborted = !streamingReplyFinished(diagnostics);
               const signalReason = c.req.raw.signal.reason;
-              log.warn(
-                `streaming chat completion client-aborted: ${JSON.stringify({
-                  ...telemetry(),
-                  ...(signalReason !== undefined
-                    ? { abortReason: describeErrorChain(signalReason) }
-                    : {}),
-                })}`,
-              );
+              const detail = JSON.stringify({
+                ...telemetry(),
+                ...(signalReason !== undefined
+                  ? { abortReason: describeErrorChain(signalReason) }
+                  : {}),
+              });
+              if (clientAborted) {
+                log.warn(`streaming chat completion client-aborted: ${detail}`);
+              } else {
+                log.debug(
+                  `streaming chat completion closed by the client after the reply: ${detail}`,
+                );
+              }
             }
             void session!.disconnect().catch(() => {});
           });
