@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
+import { REPOSITORY_CONFIG_OVERRIDES, forcedDiffFlags } from './config-overrides.js';
 
 /**
  * Thin wrapper around the `git` CLI. Lives here (not in a library) so we
@@ -85,6 +86,23 @@ function relocateSecretGitConfig(args: string[]): {
   return { cleanedArgs, configEnv };
 }
 
+/**
+ * Index of the git subcommand in `args`, past leading global options (`-c`
+ * and `-C` take the next argument), or -1 when there is none (`--version`).
+ */
+export function subcommandIndex(args: readonly string[]): number {
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (arg === '-c' || arg === '-C') {
+      i++;
+      continue;
+    }
+    if (arg.startsWith('-')) continue;
+    return i;
+  }
+  return -1;
+}
+
 export async function runGit(args: string[], opts: RunGitOptions = {}): Promise<RunGitResult> {
   const { cleanedArgs, configEnv } = relocateSecretGitConfig(args);
   const env: Record<string, string> = {
@@ -102,19 +120,30 @@ export async function runGit(args: string[], opts: RunGitOptions = {}): Promise<
     GCM_GUI_PROMPT: '0',
   };
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-  // gezel only ever runs git against repos it created and manages,
-  // including the bare shared clones under `~/.gezel/git-clones/`. Trust
-  // them explicitly so a host whose global config sets
-  // `safe.bareRepository=explicit` doesn't make git refuse every
-  // bare-repo operation (clone idempotency check, worktree add/remove,
-  // remote set-url). Prepended as a `-c` override on each invocation, so
-  // it beats global config without mutating the user's gitconfig.
+  // `safe.bareRepository=all`: the bare shared clones under
+  // `~/.gezel/git-clones/` must keep working on a host whose global config
+  // sets `safe.bareRepository=explicit`. That is a statement about Gezel's
+  // own clones only. The service also runs git in folders the person added,
+  // in the shared library and in workspaces gezels write to, so the
+  // repository's config is never trusted to name programs: see
+  // REPOSITORY_CONFIG_OVERRIDES. Every `-c` here beats the user's and the
+  // repository's config without changing either.
+  const subcommandAt = subcommandIndex(cleanedArgs);
+  const withForcedFlags =
+    subcommandAt < 0
+      ? cleanedArgs
+      : [
+          ...cleanedArgs.slice(0, subcommandAt + 1),
+          ...forcedDiffFlags(cleanedArgs[subcommandAt]!),
+          ...cleanedArgs.slice(subcommandAt + 1),
+        ];
   const gitArgs = [
     '-c',
     'safe.bareRepository=all',
     '-c',
     'credential.interactive=false',
-    ...cleanedArgs,
+    ...REPOSITORY_CONFIG_OVERRIDES,
+    ...withForcedFlags,
   ];
   return new Promise<RunGitResult>((resolve, reject) => {
     const hasStdinPayload = opts.stdin !== undefined;

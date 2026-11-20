@@ -10,6 +10,7 @@ import { OutputRingBuffer } from '../fs/ring.js';
 import type { Store } from '../fs/store.js';
 import { denyNetBoundaryAvailable, runInSandbox } from '../sandbox/runner.js';
 import { WorkspaceWriteDeniedError } from './errors.js';
+import { restoreGitControl, snapshotGitControl } from './git-control-guard.js';
 import { restoreGatedManifestEdits, snapshotRootManifests } from './manifest-guard.js';
 
 /**
@@ -114,19 +115,26 @@ export async function runWorkspaceScript(
   const stdoutRing = new OutputRingBuffer(OUTPUT_CAP_BYTES);
   const stderrRing = new OutputRingBuffer(OUTPUT_CAP_BYTES);
   const manifests = await snapshotRootManifests(workspaceDir);
+  const gitControl = await snapshotGitControl(workspaceDir);
 
-  const res = await runInSandbox({
-    entry: scriptAbs,
-    cwd: workspaceDir,
-    input: '',
-    timeoutMs: timeout,
-    extraReadPaths: [artifactsDir],
-    stripTypes: true,
-    denyNet: await workspaceScriptDeniesNetwork(store),
-    scriptArgs: opts.args ?? [],
-    onStdout: (line) => stdoutRing.append(`${line}\n`),
-    onStderr: (line) => stderrRing.append(`${line}\n`),
-  });
+  let res: Awaited<ReturnType<typeof runInSandbox>>;
+  try {
+    res = await runInSandbox({
+      entry: scriptAbs,
+      cwd: workspaceDir,
+      input: '',
+      timeoutMs: timeout,
+      extraReadPaths: [artifactsDir],
+      stripTypes: true,
+      denyNet: await workspaceScriptDeniesNetwork(store),
+      scriptArgs: opts.args ?? [],
+      onStdout: (line) => stdoutRing.append(`${line}\n`),
+      onStderr: (line) => stderrRing.append(`${line}\n`),
+    });
+  } finally {
+    const gitNote = await restoreGitControl(gitControl);
+    if (gitNote) stderrRing.append(`${gitNote}\n`);
+  }
   const restoredNote = await restoreGatedManifestEdits(store, workspaceDir, manifests);
   if (restoredNote) stderrRing.append(`${restoredNote}\n`);
 

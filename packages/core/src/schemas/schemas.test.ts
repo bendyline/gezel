@@ -26,6 +26,7 @@ import {
   UpdateTaskRequestSchema,
   parseTaskRef,
   projectAllowsAmbientWork,
+  projectAllowsUnattendedWork,
   projectAllowsWorkspaceTables,
   taskRef,
 } from './index.js';
@@ -1023,6 +1024,18 @@ describe('Night Shift model defaults', () => {
       provider: 'llama-cpp',
       model: 'qwen-slow-but-thorough',
     });
+  });
+});
+
+describe('projectAllowsUnattendedWork', () => {
+  it('never starts work by itself in a machine-shared project', () => {
+    // Any local account can write its tasks; work there starts only when this
+    // account starts it.
+    expect(projectAllowsUnattendedWork({ status: 'active' })).toBe(true);
+    expect(projectAllowsUnattendedWork({ status: 'active', storageScope: 'machine-shared' })).toBe(
+      false,
+    );
+    expect(projectAllowsUnattendedWork({ status: 'inactive' })).toBe(false);
   });
 });
 

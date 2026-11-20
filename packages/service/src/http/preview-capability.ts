@@ -147,6 +147,15 @@ export class PreviewCapabilityStore {
     return { ok: true, path: normalized };
   }
 
+  /**
+   * End a lease now. For one-shot consumers such as page-check, whose page
+   * can read its own URL and write it, encoded however it likes, into what
+   * the caller gets back: once the run ends the capability opens nothing.
+   */
+  revoke(token: string): void {
+    this.records.delete(tokenDigest(token));
+  }
+
   private prune(now: number): void {
     for (const [digest, record] of this.records) {
       if (record.idleExpiresAtMs <= now || record.absoluteExpiresAtMs <= now) {

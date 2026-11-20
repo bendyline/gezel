@@ -11,7 +11,7 @@ import {
   isProactiveAllowed,
   isSchedulingAllowed,
   localDateKey,
-  projectAllowsAmbientWork,
+  projectAllowsUnattendedWork,
   projectManagedWorkspaceWritable,
   stepOwnerGezelId,
   workshopTempoDefaults,
@@ -655,7 +655,7 @@ export class TaskScheduler {
     const hit = cache.get(projectId);
     if (hit !== undefined) return hit;
     const project = await this.store?.getProject(projectId);
-    const allowed = project ? projectAllowsAmbientWork(project) : true;
+    const allowed = project ? projectAllowsUnattendedWork(project) : true;
     cache.set(projectId, allowed);
     return allowed;
   }
@@ -730,7 +730,7 @@ export class TaskScheduler {
       const cached = projectStatusCache.get(projectId);
       if (cached !== undefined) return cached;
       const project = await this.store?.getProject(projectId);
-      const allowed = project ? projectAllowsAmbientWork(project) : true;
+      const allowed = project ? projectAllowsUnattendedWork(project) : true;
       projectStatusCache.set(projectId, allowed);
       return allowed;
     };
@@ -846,7 +846,7 @@ export class TaskScheduler {
     // Read-only / inactive projects pause ambient work — no meester
     // nudges, no auto-step handoffs, no cron ticks. Chat still
     // works; this only gates scheduler-driven activity.
-    if (!projectAllowsAmbientWork(project)) {
+    if (!projectAllowsUnattendedWork(project)) {
       // Steady state for stable / read-only / inactive projects: they never
       // nudge, so this fires every tick forever and just restates the
       // project's known status. No diagnostic value — stay silent.

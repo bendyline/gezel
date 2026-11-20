@@ -1,4 +1,5 @@
 import { PageCheckRequestSchema, type PageCheckResponse, createLogger } from '@bendyline/gezel';
+import { redactPathSecrets } from '@bendyline/gezel-inference/internal/perf/redact-path';
 import { playwrightBrowsersDir } from '@bendyline/gezel/paths';
 import { Hono } from 'hono';
 import {
@@ -32,10 +33,11 @@ export function pageCheckRoutes(ctx: ServiceContext, capabilities: PreviewCapabi
 
   // Deliberately NOT requireFirstParty: the primary caller is the gezel's
   // MCP subprocess with a session-scoped token (scope-guard has already
-  // bound it to this project). Unlike the mint route, no capability ever
-  // reaches the caller — the lease is consumed by the headless browser and
-  // the response carries only ran/ok/errors, so a session credential gains
-  // no read authority it didn't already have through its workspace tools.
+  // bound it to this project). The response carries only ran/ok/errors, but
+  // the page under test can print its own capability URL into those errors,
+  // so the lease is revoked before the response leaves: whatever the caller
+  // reads, it opens nothing a session credential could not already read
+  // through its workspace tools.
   app.post('/:id/page-check', async (c) => {
     const projectId = c.req.param('id');
     const body = PageCheckRequestSchema.parse(await c.req.json());
@@ -67,11 +69,29 @@ export function pageCheckRoutes(ctx: ServiceContext, capabilities: PreviewCapabi
     const origin = new URL(c.req.url).origin;
     const url = `${origin}/preview/${encodeURIComponent(minted.token)}/workspace/${encodeURIComponent(projectId)}/${encodePreviewPath(entryPath)}`;
 
-    const outcome = await runPageCheck({
-      installPath,
-      browsersPath: playwrightBrowsersDir(ctx.home),
-      url,
-    });
+    // The page can read its own URL and print it, encoded however it likes,
+    // into the errors returned below; a gezel once learned a live preview
+    // capability that way and linked it in chat. Revoking the lease when the
+    // run ends is what makes that worthless; redacting the plain form only
+    // keeps the noise out of the model's context.
+    let outcome: Awaited<ReturnType<typeof runPageCheck>>;
+    try {
+      outcome = await runPageCheck({
+        installPath,
+        browsersPath: playwrightBrowsersDir(ctx.home),
+        url,
+      });
+    } finally {
+      capabilities.revoke(minted.token);
+    }
+    if (outcome.errors) {
+      outcome = {
+        ...outcome,
+        errors: outcome.errors.map((error) =>
+          redactPathSecrets(error.replaceAll(minted.token, '[capability]')),
+        ),
+      };
+    }
     if (outcome.ran) {
       log.info(
         `[page-check] ${projectId}/${entryPath} → ${outcome.ok ? 'clean' : `${outcome.errors?.length ?? 0} error(s)`}`,

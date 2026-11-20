@@ -10,6 +10,7 @@ import {
   buildDuckPrelude,
   duckBinaryMatchesPin,
   sqlLiteral,
+  untrustedSqlText,
 } from './duck.js';
 import {
   fakeDuckSpawn,
@@ -152,6 +153,38 @@ describe('DuckRunner — plumbing (fake CLI)', () => {
       new DuckRunner({ binaryPath: bin, spawnImpl: fakeDuckSpawn() }).runTrusted('SELECT 1', opts),
     ).rejects.toThrow(/not JSON/);
   });
+
+  it.each([
+    ['a command line', '.shell whoami'],
+    ['an indented command line', 'SELECT 1;\n   .output pwned.txt'],
+    ['a command after a CRLF', 'SELECT 1;\r\n.read other.sql'],
+    ['a NUL byte', "SELECT 'a\0b'"],
+  ])('refuses a script holding %s before starting the CLI', async (_label, sql) => {
+    const bin = await makeFakeDuckdb(join(dir, 'duckdb'), { envDumpPath: join(dir, 'ran.txt') });
+    const err = await new DuckRunner({ binaryPath: bin, spawnImpl: fakeDuckSpawn() })
+      .runTrusted(sql, opts)
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(DuckQueryError);
+    expect(String(err)).toMatch(/would run as a command/);
+    await expect(readFile(join(dir, 'ran.txt'), 'utf8')).rejects.toThrow();
+  });
+
+  it('lets a dot that does not start a line through', async () => {
+    const bin = await makeFakeDuckdb(join(dir, 'duckdb'), { stdout: '[{"x":1.5}]' });
+    await expect(
+      new DuckRunner({ binaryPath: bin, spawnImpl: fakeDuckSpawn() }).runTrusted(
+        'SELECT 1.5 AS x, t.a FROM (SELECT 1 AS a) t',
+        opts,
+      ),
+    ).resolves.toEqual([{ x: 1.5 }]);
+  });
+});
+
+describe('untrustedSqlText', () => {
+  it('leaves nothing the CLI could read as structure', () => {
+    const carried = untrustedSqlText("SELECT 1 /* /* */ $$ ' $$ ;\n.shell whoami\n' */");
+    expect(carried).toMatch(/^decode\(from_base64\('[A-Za-z0-9+/=]*'\)\)$/);
+  });
 });
 
 /**
@@ -176,6 +209,15 @@ describe.runIf(hasRealDuckdb())('DuckRunner — sandbox (real engine)', () => {
     await writeFile(join(corpus, 't.csv'), 'a,b\n1,x\n2,y\n');
     runner = new DuckRunner({ binaryPath: findRealDuckdb() as string });
     opts = { allowedDirectories: [corpus], timeoutMs: 30_000 };
+  });
+
+  it('decodes untrustedSqlText back to the exact text, quotes, newlines and all', async () => {
+    const text = "it's $$x$$ ; -- \n.shell no\né中";
+    const rows = await runner.runTrusted<{ v: string }>(
+      `SELECT ${untrustedSqlText(text)} AS v`,
+      opts,
+    );
+    expect(rows).toEqual([{ v: text }]);
   });
 
   it('allows reads inside the corpus — the whole point of the allow-list', async () => {

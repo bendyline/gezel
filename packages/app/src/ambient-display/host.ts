@@ -184,7 +184,10 @@ async function monitorAmbientEvents(client: GezelClient, signal: AbortSignal): P
 // ── Ambient display IPC ─────────────────────────────────────────────
 // Paths are computed main-side from GEZEL_HOME — the renderer never
 // supplies one (same posture as gezel:open-logs-folder).
-export function registerAmbientDisplayIpc(ipcMain: IpcMain, clientSource: AmbientClientSource) {
+export function registerAmbientDisplayIpc(
+  ipcMain: Pick<IpcMain, 'handle'>,
+  clientSource: AmbientClientSource,
+) {
   getClient = clientSource;
 
   ipcMain.handle('gezel:ambient:status', async () => {

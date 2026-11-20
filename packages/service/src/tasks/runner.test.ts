@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MAX_RESTART_RESUMES, type TaskCraftbook, type TaskCraftbookStep } from '@bendyline/gezel';
@@ -7,6 +7,7 @@ import type {
   LLMProvider,
   ProviderName,
 } from '@bendyline/gezel-inference/internal/providers/types';
+import { MACHINE_SHARED_MARKER } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import { TaskManager } from './manager.js';
@@ -2828,4 +2829,55 @@ it("only resumes rehydrate, and only the resumed task's subtree; completion and 
   await runner.reconcileStatusChange({ projectId: 'p1', status: 'active', ref: 'p1/7' });
   expect(hydrate).toHaveBeenCalledWith({ projectId: 'p1', rootTaskRef: 'p1/7' });
   expect(wake).toHaveBeenCalledTimes(4);
+});
+
+describe('TaskRunner — machine-shared projects', () => {
+  // Every local account can write a machine-shared project's task files, so
+  // an active task found there may be another account's plant. Resuming it
+  // here would run it with this account's credentials and providers.
+  it('never resumes an active task it finds in a project every local account can write', async () => {
+    const previous = process.env.GEZEL_MACHINE_SHARED_HOME;
+    const sharedHome = join(home, 'machine-shared');
+    const now = new Date().toISOString();
+    const activeTask = (projectId: string) => ({
+      projectId,
+      num: 1,
+      ref: `${projectId}/1`,
+      title: 'work',
+      status: 'active' as const,
+      assignee: { kind: 'gezel' as const, gezelId: 'bea' },
+      craftbook: fixtureCraftbook([
+        { id: 'plan', name: 'plan', assignee: { kind: 'gezel', gezelId: 'bea' }, createdAt: now },
+      ]),
+      activeStepId: 'plan',
+      createdAt: now,
+      updatedAt: now,
+      createdBy: { kind: 'user' as const },
+    });
+    try {
+      process.env.GEZEL_MACHINE_SHARED_HOME = join(home, 'inactive-shared');
+      const otherAccount = new Store({ home: sharedHome });
+      await otherAccount.ensureLayout();
+      await otherAccount.createProject({ name: 'Shared' });
+      await otherAccount.writeTask(activeTask('shared'));
+      await writeFile(
+        join(sharedHome, MACHINE_SHARED_MARKER),
+        `${JSON.stringify({ version: 1 })}\n`,
+      );
+      process.env.GEZEL_MACHINE_SHARED_HOME = sharedHome;
+
+      await store.createProject({ name: 'mine' });
+      await store.createGezel({ name: 'Bea' });
+      await store.writeTask(activeTask('mine'));
+      expect((await store.getProject('shared'))?.storageScope).toBe('machine-shared');
+
+      const dispatcher = new FakeDispatcher(new Map([['bea', 'copilot']]));
+      const runner = new TaskRunner({ store, dispatcher });
+      const result = await runner.rehydrateFromStore();
+      expect(result.taskRefs).toEqual(['mine/1']);
+    } finally {
+      if (previous === undefined) delete process.env.GEZEL_MACHINE_SHARED_HOME;
+      else process.env.GEZEL_MACHINE_SHARED_HOME = previous;
+    }
+  });
 });

@@ -13,7 +13,7 @@ import {
   nightShiftDayKey,
   nightShiftWindowBounds,
   nightShiftWindowKey,
-  projectAllowsAmbientWork,
+  projectAllowsUnattendedWork,
   spawnsChildren,
 } from '@bendyline/gezel';
 import type { NightShiftQuietReason } from '@bendyline/gezel';
@@ -725,7 +725,7 @@ export class NightShiftManager {
       let ok = allowsAmbient.get(projectId);
       if (ok === undefined) {
         const project = await this.store.getProject(projectId).catch(() => null);
-        ok = project ? projectAllowsAmbientWork(project) : true;
+        ok = project ? projectAllowsUnattendedWork(project) : true;
         allowsAmbient.set(projectId, ok);
       }
       return ok;

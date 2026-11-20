@@ -6084,6 +6084,11 @@ export const ArchiveExtractResponseSchema = z.object({
   format: z.enum(['zip', 'tar', 'tar.gz']),
   extractedCount: z.number().int().nonnegative(),
   destination: z.string(),
+  /**
+   * Entries left in the archive because they land in a `.git` folder, which
+   * is git's own configuration and can name commands for git to run.
+   */
+  skippedGitEntries: z.number().int().nonnegative().optional(),
 });
 export type ArchiveExtractResponse = z.infer<typeof ArchiveExtractResponseSchema>;
 

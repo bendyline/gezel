@@ -155,6 +155,13 @@ describe('computeHostEnvironment', () => {
     expect(variables.get('GEZEL_SDK_HOST_APP')).toBe('qualla');
   });
 
+  it("keeps the app's daemon out of the machine's shared projects and crew", () => {
+    // Every local account can write that tree; an app's isolated home must
+    // neither list it nor act on what other accounts put there.
+    const { variables } = computeHostEnvironment('qualla', base, { PATH: '/usr/bin' });
+    expect(variables.get('GEZEL_DISABLE_MACHINE_SHARED')).toBe('1');
+  });
+
   it('leaves the profile alone when the app does not declare one', () => {
     const { variables } = computeHostEnvironment('qualla', base, { PATH: '/usr/bin' });
     expect(variables.has('GEZEL_DISTRIBUTION_PROFILE')).toBe(false);

@@ -632,16 +632,28 @@ Deep dive: [secrets-security.md](secrets-security.md). Summary of the controls:
   bootstrap was externalized (`packages/ui/public/theme-init.js`) so `script-src 'self'` holds.
 - **Model-generated SVG icons** are sanitized (`icon/sanitize.ts`) before persist, but the CSP
   is the real guarantee — a regex SVG sanitizer is inherently best-effort.
-- **Navigation is locked down** — `will-navigate` pins the renderer to the daemon origin;
-  `setWindowOpenHandler` + `shell.openExternal` only accept an `https/http/mailto/tel`
-  allowlist (no `file://`, custom schemes, `javascript:`).
+- **Navigation is locked down** — the main frame only ever holds the app itself
+  (`isTrustedAppDocumentUrl`, `electron-boundaries.ts`): its routes on the daemon origin, or the
+  splash file. "Same origin" is not enough, because the daemon also serves model-written HTML
+  under `/preview/` (plus the Office pane and the APIs): a gezel once learned its page's preview
+  URL from page-check, linked it in chat, and one click made that page the main document, holding
+  the token. `will-navigate` cancels such a load without handing it to the system browser, and
+  `onBeforeRequest` cancels any main-frame request for one, redirects included. Paths are checked
+  percent-decoded, as the router reads them. `setWindowOpenHandler` + `shell.openExternal` only
+  accept an `https/http/mailto/tel` allowlist (no `file://`, custom schemes, `javascript:`).
 - **Cert pinning** — `session.setCertificateVerifyProc` accepts the custom loopback cert
   **only** for loopback hosts matching the current pin; all other origins defer to Chromium.
   Rotates with each daemon restart. It does **not** blanket-accept certs.
 - **Token to renderer** — surfaced via a synchronous `ipcMain` bridge + `window.__GEZEL__`.
   Any renderer XSS = token theft, which is exactly why the CSP/SVG/sandbox controls above
-  matter. The preload is minimal (per-channel `contextBridge`, no raw `ipcRenderer`/`fs`/
-  `shell`).
+  matter. The preload exposes about 45 functions through per-channel `contextBridge` calls (no
+  raw `ipcRenderer`/`fs`/`shell`), and runs in whatever document fills the main frame, so two
+  more layers sit behind the navigation lock. Every IPC channel registers through
+  `createTrustedIpc` (`trusted-ipc.ts`), which answers only the main window's main frame while it
+  shows the app (`isAppPageSender` in `main.ts`); a refused invoke rejects and a refused
+  synchronous message gets `null`. The preload itself exposes nothing in a non-app document.
+  Preview leases a gezel can read back are short: page-check revokes its lease when the run
+  ends, and preview-log entries reach the model with capabilities redacted.
 - **Bundle integrity** — the extracted service bundle's tarball is **sha256-verified against
   the shipped meta before extraction/execution** (`supervisor/extract-bundle.ts`). (This is
   integrity/corruption protection; the tarball + meta ship together inside the signed app.)
@@ -659,6 +671,8 @@ Deep dive: [secrets-security.md](secrets-security.md). Summary of the controls:
   and verifies the result stays inside `base`.
 - `resolveInside(base, rel)` — the end-to-end helper: `safeJoin` + reserved-Windows-name
   reject + `realpathContained`. Throws `PathSafetyError`.
+- `assertNotGitControlPath(base, rel)` — refuses a path inside a `.git` folder, by name and on
+  the real path (§12).
 
 **Writes** use `resolveInside`. **Reads** were hardened to do the same (`safeResolveRead` in
 `fs/store.ts`) so a symlink planted inside a workspace (trivially, via a cloned repo) can't be
@@ -761,9 +775,26 @@ unsandboxed Copilot) are not covered; see §14.
   option allowlist — not a denylist, because git accepts abbreviated long options and has
   several file-writing or file-reading flags (`--output`, `--no-index`, `--contents`). Positional
   arguments may not be absolute or contain a `..` segment, since `git diff` turns into
-  `--no-index` for a path outside the work tree. Every run disables fsmonitor and hooks, and the
-  diff family forces `--no-ext-diff --no-textconv`, because repository config is workspace
-  content. Clean/smudge filters in that config are not disabled.
+  `--no-index` for a path outside the work tree.
+- **Every git the service runs ignores programs a repository's config names.** Repository config
+  is content: a cloned repo, a folder the person adds, or a planted `.git/config` can name an
+  fsmonitor, hooks, an external diff or a textconv driver, and git runs each one. The indexer
+  runs `git ls-files` in every workspace and in the shared library on its own, so a
+  gezel-written `core.fsmonitor` once ran as the daemon's account with no click. `runGit`
+  (`git/git.ts`) and `run_git` share `git/config-overrides.ts`: `core.fsmonitor=false` and an
+  empty `core.hooksPath` on every call, `--no-ext-diff --no-textconv` for diff/log/show. A
+  consequence: a commit made from Gezel skips the repository's pre-commit hooks. Clean/smudge
+  filters are not switched off (that needs each driver's name), so they rest on the next rule.
+- **Gezel never writes inside a `.git` folder.** `assertNotGitControlPath` (`safe-paths.ts`)
+  refuses a `.git` segment in any case, with a trailing dot or space or an NTFS stream suffix,
+  and again on the real path, so a link or the Windows short name `GIT~1` cannot stand in for
+  it. It guards the Store's workspace gate (every caller, the person and applied proposals
+  included), the shared library and artifacts (`resolveOwnedMutationPath`), diffpack drafting,
+  `extract_archive` (`.git` entries are left in the archive and counted), and app seeds.
+  `run_nodejs_script` and `derive_file` write through Node's permission model instead, so
+  `workspace/git-control-guard.ts` snapshots each `.git` at the workspace root and two levels
+  down (config, `config.worktree`, `commondir`, `info/attributes`, hooks, pointer files) and
+  puts it back after the run. The person's own editor can still read a change during the run.
 - **`run_playwright_script`** runs outside the script sandbox. The security level strips it
   whenever external services are off (it is open-web egress, like `fetch_url`), and the route
   refuses it the same way. A run a gezel asks for needs the user's approval of that exact
@@ -878,6 +909,7 @@ privileged service identity or putting the daemon root token on disk.
 | Per-credential host binding for `http.authed` | DEFERRED | Today: https + `redirect:'manual'`; a granted script can still POST a credential to any public host it names. Needs a grant-schema decision (e.g. GitHub Enterprise custom hosts). |
 | `secrets.key` co-located with `secrets.enc` | DEFERRED | Same-dir, same `0600`; encryption ≈ file perms. Fix = bind the key to an OS keychain / machine-id KDF / passphrase. Treat `secrets.enc` as plaintext-equivalent for backup/sync purposes. |
 | Machine-shared client membership | PRODUCT CHOICE | Every local account that can read the shared runtime credential is a trusted first-party Gezel client and can access shared daemon data. A future installer choice should make shared-machine versus per-user/private hosting explicit. |
+| Machine-shared projects and crew | ENFORCED | The shared root is writable by every local account, so a shared `project.json`, `gezel.md` or task file is another account's text. The Store ignores and refuses a shared project's folder, links, GitHub link, connections, credential grants and agent permissions, and a shared gezel's sandbox and permission overrides; nothing starts there unattended (`projectAllowsUnattendedWork`); a task's CLI trust stamp grants nothing. Content (workspace, memory, task text) is still read as collaborative text. See [service-boundaries.md](service-boundaries.md#machine-wide-projects-and-gezels). |
 | Broker LAN-serving administration via `machine-models` | PRODUCT CHOICE | The broker's `/v1/remote/manage/serving` surface (enable LAN serving, show a connect code, approve/deny device pairings, revoke devices) is authorized by the same shared runtime credential — until installer membership exists, any local account can administer LAN serving for the machine. The scope stays never-grantable via `/v1/apps/register`, so LAN peers can never obtain it. |
 | Remote product UI/API access | INTERIM — tunnel recipe | The product `/api` + web UI stay loopback-only by three independent layers (bind, host guard, cert/auth). The supported interim is a loopback-preserving tunnel (SSH `-L` / Tailscale toward loopback) with the schema-declared `service:{url,token}` supervisor mode; first-class remote access is designed in `docs/remote-access.md` and gated on the accounts ADR (0004). |
 | External user working directories from a machine daemon | NEEDS BROKER/GRANT | Dedicated service identities cannot safely inherit arbitrary user-profile access. Add an explicit ACL grant or user-context broker when linking such a folder; do not restore a privileged daemon identity. |

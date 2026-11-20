@@ -11,6 +11,7 @@ import {
   isExactApprovedPath,
   isExternalRendererNetworkRequest,
   isPreviewDocumentUrl,
+  isTrustedAppDocumentUrl,
   normalizedDocumentUrl,
   previewExternalServicesForFrame,
 } from './electron-boundaries.js';
@@ -206,6 +207,39 @@ describe('Electron boundary policies', () => {
     expect(isAllowedTopLevelNavigation('file:///etc/passwd', origin, splash)).toBe(false);
     expect(isAllowedTopLevelNavigation('data:text/html,pwned', origin, splash)).toBe(false);
     expect(isAllowedTopLevelNavigation('https://example.com', origin, splash)).toBe(false);
+  });
+
+  it('lets only the app itself or the splash be the main document', () => {
+    // The preload hands the main document the bearer token and the IPC
+    // bridge. A gezel once wrote a page, learned its preview URL from
+    // page-check, and linked it in chat; one click made it the main frame.
+    const origin = 'https://127.0.0.1:4312';
+    const splash = 'file:///opt/gezel/splash.html';
+    const trusted = (url: string) => isTrustedAppDocumentUrl(url, [origin], splash);
+    expect(trusted(`${origin}/`)).toBe(true);
+    expect(trusted(`${origin}/settings`)).toBe(true);
+    expect(trusted(`${origin}/projects/demo?tab=chat#top`)).toBe(true);
+    expect(trusted(`${origin}/previews`)).toBe(true);
+    expect(trusted(splash)).toBe(true);
+    for (const url of [
+      `${origin}/preview/${'a'.repeat(43)}/workspace/p/report/index.html`,
+      `${origin}/preview`,
+      `${origin}/Preview/x/y.html`,
+      `${origin}/%70review/x/y.html`,
+      `${origin}//preview/x/y.html`,
+      `${origin}/office/taskpane.html`,
+      `${origin}/api/projects/p/artifacts/raw?path=x.html`,
+      `${origin}/v1/models`,
+      `${origin}/events/chat`,
+      'https://127.0.0.1:9999/',
+      'https://example.com/',
+      'file:///etc/passwd',
+      'data:text/html,pwned',
+      'not a url',
+    ]) {
+      expect(trusted(url), url).toBe(false);
+    }
+    expect(isTrustedAppDocumentUrl(`${origin}/`, [], splash)).toBe(false);
   });
 
   it('recognizes only preview URLs on the exact daemon origin', () => {

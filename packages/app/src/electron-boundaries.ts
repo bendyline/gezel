@@ -31,6 +31,47 @@ export function isAllowedTopLevelNavigation(
   }
 }
 
+/**
+ * Daemon paths that serve something other than the app: model- and
+ * app-written pages under `/preview/`, the Office task pane under `/office/`
+ * (which loads Microsoft's script), and the APIs.
+ */
+const NON_APP_DAEMON_PATH = /^\/+(?:preview|office|api|v1|events|ollama)(?:\/|$)/i;
+
+/**
+ * Whether `candidate` may be the main window's top-level document: the app
+ * itself on one of `appOrigins`, or the startup splash file.
+ *
+ * The preload runs in whatever document fills the main frame and hands it the
+ * bearer token and the IPC bridge. The daemon origin also serves
+ * model-written HTML under `/preview/`, so "same origin" was not enough: a
+ * gezel could write a page, learn its preview URL from page-check, and put a
+ * relative link to it in chat; one click made that page the main frame.
+ * The path is checked as the router reads it (percent-decoded) and as
+ * written, and in any case.
+ */
+export function isTrustedAppDocumentUrl(
+  candidate: string,
+  appOrigins: readonly string[],
+  startupFileUrl: string | null,
+): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    return false;
+  }
+  if (parsed.protocol === 'file:') return startupFileUrl !== null && parsed.href === startupFileUrl;
+  if (!appOrigins.includes(parsed.origin)) return false;
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(parsed.pathname);
+  } catch {
+    return false;
+  }
+  return !NON_APP_DAEMON_PATH.test(parsed.pathname) && !NON_APP_DAEMON_PATH.test(decoded);
+}
+
 /** True only for a capability-bearing preview document on this daemon. */
 export function isPreviewDocumentUrl(candidate: string, allowedOrigin: string | null): boolean {
   if (!allowedOrigin) return false;

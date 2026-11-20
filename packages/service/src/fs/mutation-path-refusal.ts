@@ -1,6 +1,7 @@
 import {
   type PathSafetyCode,
   PathSafetyError,
+  assertNotGitControlPath,
   resolveMutationPath,
 } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { HttpStatusError } from '@bendyline/gezel/runtime';
@@ -38,7 +39,12 @@ export async function resolveOwnedMutationPath(
   place: string,
 ): Promise<string> {
   try {
-    return await resolveMutationPath(base, relPath);
+    const full = await resolveMutationPath(base, relPath);
+    // The shared library is indexed with `git ls-files` like a workspace, so a
+    // `.git/config` written here would run its commands in every project's
+    // daemon. Artifacts get the same rule: nothing there is git's to keep.
+    await assertNotGitControlPath(base, relPath);
+    return full;
   } catch (err) {
     if (!(err instanceof PathSafetyError)) throw err;
     // Only a link can be met by someone using the app as intended: a person

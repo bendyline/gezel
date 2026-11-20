@@ -51,7 +51,7 @@ import {
   getEngagementMode,
   isTaskWorkAllowed,
   parseTaskRef,
-  projectAllowsAmbientWork,
+  projectAllowsUnattendedWork,
   taskEffectiveStatus,
 } from '@bendyline/gezel';
 import { isLocalProvider as isPooledLocalProvider } from '@bendyline/gezel-inference/internal/providers/native/engine-key';
@@ -685,7 +685,7 @@ export class TaskRunner {
       // Skip projects whose status gates ambient work. Prevents stale
       // pending handoffs from an inactive project auto-resuming after
       // the service restarts.
-      if (!projectAllowsAmbientWork(proj)) continue;
+      if (!projectAllowsUnattendedWork(proj)) continue;
       // Status-change hooks call this for every completion, not just boot.
       // Concurrent reconciliations must retain live work, not all history.
       const tasks: Task[] = [];

@@ -4,8 +4,8 @@ import {
   createLogger,
   isActiveDiffpackStatus,
   nightShiftDayKey,
-  projectAllowsAmbientWork,
   projectAllowsNightlyFixes,
+  projectAllowsUnattendedWork,
   projectHoldsCode,
   projectNightWorkEnabled,
 } from '@bendyline/gezel';
@@ -163,7 +163,7 @@ export async function planProjectNightFixes(
 
   const project = await deps.store.getProject(projectId).catch(() => null);
   if (!project) return skip('inactive');
-  if (!projectAllowsAmbientWork(project)) return skip('inactive');
+  if (!projectAllowsUnattendedWork(project)) return skip('inactive');
   if (!projectAllowsNightlyFixes(project) || !projectNightWorkEnabled(project)) {
     return skip('opted-out');
   }

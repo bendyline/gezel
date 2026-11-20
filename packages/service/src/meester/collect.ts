@@ -5,7 +5,7 @@ import {
   type Project,
   type Task,
   isSharedLibraryProject,
-  projectAllowsAmbientWork,
+  projectAllowsUnattendedWork,
 } from '@bendyline/gezel';
 import type { ActivityTracker } from '../fs/activity-tracker.js';
 import type { Store } from '../fs/store.js';
@@ -59,7 +59,9 @@ export async function collectProjectContexts(
   // voorman, no progress to chase, and an ambient check-in saying so
   // every idle period is pure noise. Deliberate task work filed there
   // still runs — only these ambient surveys skip it.
-  const ambient = projects.filter((p) => projectAllowsAmbientWork(p) && !isSharedLibraryProject(p));
+  const ambient = projects.filter(
+    (p) => projectAllowsUnattendedWork(p) && !isSharedLibraryProject(p),
+  );
   const from = new Date(opts.now.getTime() - EVENT_WINDOW_MS).toISOString();
   const out: ProjectContext[] = [];
   for (const project of ambient) {

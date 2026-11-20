@@ -25,6 +25,18 @@ describe('PreviewLogBuffer', () => {
     expect(buf.drain('p1')).toHaveLength(0);
   });
 
+  it('never passes a preview capability on to the model', () => {
+    // The page writes these entries itself, and they reach the next turn.
+    const buf = new PreviewLogBuffer();
+    const token = 'A'.repeat(43);
+    buf.record('p1', [
+      entry({ message: `see https://127.0.0.1:6228/preview/${token}/workspace/p1/index.html` }),
+    ]);
+    const [recorded] = buf.drain('p1');
+    expect(recorded?.message).not.toContain(token);
+    expect(recorded?.message).toContain('/preview/[capability]/workspace/p1/index.html');
+  });
+
   it('keeps projects isolated and enforces the cap by dropping oldest', () => {
     const buf = new PreviewLogBuffer({ cap: 3 });
     buf.record('p1', [entry({ message: 'a' }), entry({ message: 'b' })]);

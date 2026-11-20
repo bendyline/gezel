@@ -9,9 +9,26 @@ function readArg(prefix) {
   return hit ? hit.slice(prefix.length) : undefined;
 }
 
+// This preload runs in whatever document fills the main frame. Only the app
+// itself (or the startup splash) gets the token and the bridge; a daemon page
+// that is not the app, such as a model-written `/preview/` page, gets nothing.
+// Main refuses such a sender too and blocks the navigation; this is the third
+// layer. Keep the list in step with `NON_APP_DAEMON_PATH` in
+// electron-boundaries.ts.
+function isAppDocument() {
+  try {
+    if (location.protocol === 'file:') return true;
+    const nonApp = /^\/+(?:preview|office|api|v1|events|ollama)(?:\/|$)/i;
+    return !nonApp.test(location.pathname) && !nonApp.test(decodeURIComponent(location.pathname));
+  } catch {
+    return false;
+  }
+}
+const appDocument = isAppDocument();
+
 let conn = null;
 try {
-  conn = ipcRenderer.sendSync('gezel:current-connection');
+  if (appDocument) conn = ipcRenderer.sendSync('gezel:current-connection');
 } catch {
   // First-run or test harness — fall through to CLI args.
 }
@@ -23,7 +40,7 @@ const fallbackCode = conn?.fallbackCode ?? null;
 const mode = conn?.mode ?? null;
 let startupHome = null;
 try {
-  startupHome = ipcRenderer.sendSync('gezel:startup-home:read');
+  if (appDocument) startupHome = ipcRenderer.sendSync('gezel:startup-home:read');
 } catch {
   // Older hosts and standalone test windows have no startup surface.
 }
@@ -68,186 +85,189 @@ ipcRenderer.on('gezel:show-uninstall', () => {
   for (const callback of macUninstallShowCallbacks) callback();
 });
 
-contextBridge.exposeInMainWorld('__GEZEL__', {
-  startupHome: startupHome
-    ? {
-        ...startupHome,
-        save: (state) => ipcRenderer.sendSync('gezel:startup-home:save', state),
-        finish: (draft) => ipcRenderer.sendSync('gezel:startup-home:finish', draft),
-      }
-    : undefined,
-  token,
-  baseUrl,
-  platform: process.platform,
-  fallbackReason,
-  fallbackCode,
-  mode,
-  // Opens the native OS folder picker and resolves to the chosen absolute
-  // path, or null if the user cancelled.
-  selectDirectory: (opts) => ipcRenderer.invoke('dialog:selectDirectory', opts),
-  // Mailbox OAuth: `mailOAuthListen` stands up a loopback redirect listener and
-  // returns its URI; `mailOAuthAwait` opens the consent page and resolves the
-  // captured authorization code. Used by the New Project dialog's email kind.
-  // `opts.port` pins the listener to a fixed port for providers that match
-  // redirect URIs exactly (X, Meta); omitted, the OS picks an ephemeral one.
-  mailOAuthListen: (opts) => ipcRenderer.invoke('mail:oauth-listen', opts ?? null),
-  mailOAuthAwait: (requestId, authUrl) =>
-    ipcRenderer.invoke('mail:oauth-await', { requestId, authUrl }),
-  // Stop waiting for a sign-in: the person pressed Cancel, often because the
-  // provider showed an error page that never redirects back.
-  mailOAuthCancel: (requestId) => ipcRenderer.invoke('mail:oauth-cancel', { requestId }),
-  // Start the app hidden at login, so night work has a running app.
-  startAtLogin: {
-    get: () => ipcRenderer.invoke('gezel:start-at-login:get'),
-    set: (enabled) => ipcRenderer.invoke('gezel:start-at-login:set', enabled),
-  },
-  autostart: {
-    status: () => ipcRenderer.invoke('gezel:autostart:status'),
-    install: () => ipcRenderer.invoke('gezel:autostart:install'),
-    uninstall: () => ipcRenderer.invoke('gezel:autostart:uninstall'),
-  },
-  // Word / Excel / PowerPoint add-ins. The renderer passes only which apps;
-  // certificates, manifests, and paths come from the daemon.
-  officeHost: {
-    verify: () => ipcRenderer.invoke('gezel:office-host:verify'),
-    enable: (apps) => ipcRenderer.invoke('gezel:office-host:enable', apps),
-    repair: () => ipcRenderer.invoke('gezel:office-host:repair'),
-    disable: () => ipcRenderer.invoke('gezel:office-host:disable'),
-    clearCache: () => ipcRenderer.invoke('gezel:office-host:clear-cache'),
-  },
-  libreoffice: {
-    verify: () => ipcRenderer.invoke('gezel:libreoffice:verify'),
-    enable: () => ipcRenderer.invoke('gezel:libreoffice:enable'),
-    disable: () => ipcRenderer.invoke('gezel:libreoffice:disable'),
-  },
-  // Ambient display (wallpaper). The renderer never supplies paths — the
-  // main process resolves everything from GEZEL_HOME.
-  ambient: {
-    status: () => ipcRenderer.invoke('gezel:ambient:status'),
-    enable: () => ipcRenderer.invoke('gezel:ambient:enable'),
-    disable: () => ipcRenderer.invoke('gezel:ambient:disable'),
-    applyNow: () => ipcRenderer.invoke('gezel:ambient:apply-now'),
-    openFolder: () => ipcRenderer.invoke('gezel:ambient:open-folder'),
-  },
-  // macOS PKG uninstall. The renderer sends only boolean data-retention
-  // choices; the main process resolves the signed bundled script and owns the
-  // administrator prompt. The menu uses the push callback to open the same
-  // dialog as Settings → About.
-  uninstall: {
-    start: (selection) => ipcRenderer.invoke('gezel:uninstall:start', selection),
-    onShowRequested: (callback) => {
-      macUninstallShowCallbacks.add(callback);
-      if (pendingMacUninstallShow) {
-        pendingMacUninstallShow = false;
-        queueMicrotask(callback);
-      }
-      return () => macUninstallShowCallbacks.delete(callback);
+if (appDocument) {
+  contextBridge.exposeInMainWorld('__GEZEL__', {
+    startupHome: startupHome
+      ? {
+          ...startupHome,
+          save: (state) => ipcRenderer.sendSync('gezel:startup-home:save', state),
+          finish: (draft) => ipcRenderer.sendSync('gezel:startup-home:finish', draft),
+        }
+      : undefined,
+    token,
+    baseUrl,
+    platform: process.platform,
+    fallbackReason,
+    fallbackCode,
+    mode,
+    // Opens the native OS folder picker and resolves to the chosen absolute
+    // path, or null if the user cancelled.
+    selectDirectory: (opts) => ipcRenderer.invoke('dialog:selectDirectory', opts),
+    // Mailbox OAuth: `mailOAuthListen` stands up a loopback redirect listener and
+    // returns its URI; `mailOAuthAwait` opens the consent page and resolves the
+    // captured authorization code. Used by the New Project dialog's email kind.
+    // `opts.port` pins the listener to a fixed port for providers that match
+    // redirect URIs exactly (X, Meta); omitted, the OS picks an ephemeral one.
+    mailOAuthListen: (opts) => ipcRenderer.invoke('mail:oauth-listen', opts ?? null),
+    mailOAuthAwait: (requestId, authUrl) =>
+      ipcRenderer.invoke('mail:oauth-await', { requestId, authUrl }),
+    // Stop waiting for a sign-in: the person pressed Cancel, often because the
+    // provider showed an error page that never redirects back.
+    mailOAuthCancel: (requestId) => ipcRenderer.invoke('mail:oauth-cancel', { requestId }),
+    // Start the app hidden at login, so night work has a running app.
+    startAtLogin: {
+      get: () => ipcRenderer.invoke('gezel:start-at-login:get'),
+      set: (enabled) => ipcRenderer.invoke('gezel:start-at-login:set', enabled),
     },
-  },
-  // Content backups. The renderer only asks the OS where the file should go;
-  // the daemon does the reading and writing, so a multi-gigabyte archive
-  // never travels through the renderer.
-  backupFile: {
-    chooseSavePath: (defaultName) =>
-      ipcRenderer.invoke('gezel:backup:choose-save-path', defaultName ?? null),
-    chooseOpenPath: () => ipcRenderer.invoke('gezel:backup:choose-open-path'),
-  },
-  // Knowledge catalog install: pick a .gezk; the daemon does the reading.
-  selectKnowledgeArchive: async () => {
-    const result = await ipcRenderer.invoke('gezel:knowledge:choose-archive');
-    return result?.path ?? null;
-  },
-  // App updates. `state` is the pull for a freshly-mounted renderer;
-  // `onStateChanged` is the push for transitions while it is open. `install`
-  // opens the verified installer on macOS (Installer.app raises the admin
-  // prompt) and defers to the signed NSIS updater on Windows. Linux update
-  // states are notification-only and never invoke `install`. `restart`
-  // relaunches into a release that finished installing under this process.
-  update: {
-    state: () => ipcRenderer.invoke('gezel:update:state'),
-    install: () => ipcRenderer.invoke('gezel:update:install'),
-    restart: () => ipcRenderer.invoke('gezel:update:restart'),
-    onStateChanged: (callback) => {
-      ipcRenderer.on('gezel:update-state', (_event, state) => callback(state));
+    autostart: {
+      status: () => ipcRenderer.invoke('gezel:autostart:status'),
+      install: () => ipcRenderer.invoke('gezel:autostart:install'),
+      uninstall: () => ipcRenderer.invoke('gezel:autostart:uninstall'),
     },
-  },
-  // Open the service's `~/.gezel/logs/` folder in the OS file manager.
-  // Used by Settings → General. Returns an error string (empty on
-  // success) mirroring Electron's `shell.openPath` convention.
-  openLogsFolder: () => ipcRenderer.invoke('gezel:open-logs-folder'),
-  // Open an arbitrary folder in the OS file manager. Used by Settings →
-  // Folders. Returns an error string (empty on success) mirroring
-  // Electron's `shell.openPath` convention.
-  openPath: (target) => ipcRenderer.invoke('gezel:open-path', target),
-  // References-pane file actions stay behind main-process IPC: the renderer
-  // identifies a daemon-scoped file, while Electron owns native dialogs and
-  // OS file-manager integration. A save request may carry `suggestedName`,
-  // the name the dialog offers; main makes it safe again.
-  saveReferenceCopy: (request) => ipcRenderer.invoke('gezel:save-reference-copy', request),
-  showReferenceInFolder: (request) => ipcRenderer.invoke('gezel:show-reference-in-folder', request),
-  onNavigate: (callback) => {
-    ipcRenderer.on('gezel:navigate', (_event, view) => callback(view));
-  },
-  exportModelBundle: (engine, id, exportId) =>
-    ipcRenderer.invoke('gezel:export-model-bundle', { engine, id, exportId }),
-  cancelModelBundleExport: (exportId) =>
-    ipcRenderer.invoke('gezel:cancel-model-bundle-export', exportId),
-  skipModelBundleExportVerification: (exportId) =>
-    ipcRenderer.invoke('gezel:skip-model-bundle-export-verification', exportId),
-  onModelBundleExportProgress: (callback) => {
-    modelBundleExportProgressCallbacks.add(callback);
-    return () => modelBundleExportProgressCallbacks.delete(callback);
-  },
-  scanOpenedModelBundle: (requestId, scanId) =>
-    ipcRenderer.invoke('gezel:scan-opened-model-bundle', { requestId, scanId }),
-  cancelModelBundleImport: (scanId) =>
-    ipcRenderer.invoke('gezel:cancel-model-bundle-import', scanId),
-  onModelBundleImportProgress: (callback) => {
-    modelBundleImportProgressCallbacks.add(callback);
-    return () => modelBundleImportProgressCallbacks.delete(callback);
-  },
-  onOpenModelBundle: (callback) => {
-    modelBundleOpenCallback = callback;
-    while (pendingModelBundleOpens.length > 0) callback(pendingModelBundleOpens.shift());
-  },
-  onDeepLink: (callback) => {
-    deepLinkCallback = callback;
-    if (pendingDeepLink) {
-      const link = pendingDeepLink;
-      pendingDeepLink = null;
-      callback(link);
-    }
-    return () => {
-      if (deepLinkCallback === callback) deepLinkCallback = null;
-    };
-  },
-  // Restart the gezel service. Used by the Folders settings tab after a
-  // successful externalization move so the new path config takes
-  // effect. The supervisor handles embedded vs. spawned modes; the
-  // BrowserWindow auto-reloads via the existing supervisor-restart
-  // listener once the service is back.
-  restartService: (reason) => ipcRenderer.invoke('gezel:restart-service', reason),
-  // Push the latest config to the main process so the system tray stays
-  // in sync (engagement-mode radio) and is created/destroyed when the
-  // showSystemTray preference flips. The renderer calls this whenever it
-  // updates config; the main handler only mutates tray state (no echo
-  // back), so there's no loop with the mode-set channel below.
-  syncConfig: (cfg) => ipcRenderer.send('gezel:tray:sync-config', cfg),
-  // Push the theme preference down to Chromium's own colour-scheme setting.
-  // The sandboxed preview iframe is a null-origin document, so this is the
-  // only route by which a project-type page learns the user picked Dark.
-  setNativeTheme: (pref) => ipcRenderer.send('gezel:set-native-theme', pref),
-  // Fired when the tray menu changes the engagement mode, so the in-app
-  // header menu reflects it. Mirrors onNavigate's callback-proxy pattern
-  // (DOM CustomEvents don't cross the contextIsolation boundary, so the
-  // renderer registers a callback here instead).
-  onEngagementModeChanged: (callback) => {
-    ipcRenderer.on('gezel:tray:mode-set', (_event, mode) => callback(mode));
-  },
-  // Raise an OS notification on the renderer's behalf.
-  notify: (opts) => ipcRenderer.invoke('gezel:notify', opts),
-  // Screenshot a region of this page (CSS/DIP pixels) as a PNG data URL.
-  // The output pane uses this to grab its sandboxed preview iframe, which
-  // can't be rasterized from the renderer because it runs null-origin.
-  capturePageRegion: (rect) => ipcRenderer.invoke('gezel:capture-page-region', rect),
-});
+    // Word / Excel / PowerPoint add-ins. The renderer passes only which apps;
+    // certificates, manifests, and paths come from the daemon.
+    officeHost: {
+      verify: () => ipcRenderer.invoke('gezel:office-host:verify'),
+      enable: (apps) => ipcRenderer.invoke('gezel:office-host:enable', apps),
+      repair: () => ipcRenderer.invoke('gezel:office-host:repair'),
+      disable: () => ipcRenderer.invoke('gezel:office-host:disable'),
+      clearCache: () => ipcRenderer.invoke('gezel:office-host:clear-cache'),
+    },
+    libreoffice: {
+      verify: () => ipcRenderer.invoke('gezel:libreoffice:verify'),
+      enable: () => ipcRenderer.invoke('gezel:libreoffice:enable'),
+      disable: () => ipcRenderer.invoke('gezel:libreoffice:disable'),
+    },
+    // Ambient display (wallpaper). The renderer never supplies paths — the
+    // main process resolves everything from GEZEL_HOME.
+    ambient: {
+      status: () => ipcRenderer.invoke('gezel:ambient:status'),
+      enable: () => ipcRenderer.invoke('gezel:ambient:enable'),
+      disable: () => ipcRenderer.invoke('gezel:ambient:disable'),
+      applyNow: () => ipcRenderer.invoke('gezel:ambient:apply-now'),
+      openFolder: () => ipcRenderer.invoke('gezel:ambient:open-folder'),
+    },
+    // macOS PKG uninstall. The renderer sends only boolean data-retention
+    // choices; the main process resolves the signed bundled script and owns the
+    // administrator prompt. The menu uses the push callback to open the same
+    // dialog as Settings → About.
+    uninstall: {
+      start: (selection) => ipcRenderer.invoke('gezel:uninstall:start', selection),
+      onShowRequested: (callback) => {
+        macUninstallShowCallbacks.add(callback);
+        if (pendingMacUninstallShow) {
+          pendingMacUninstallShow = false;
+          queueMicrotask(callback);
+        }
+        return () => macUninstallShowCallbacks.delete(callback);
+      },
+    },
+    // Content backups. The renderer only asks the OS where the file should go;
+    // the daemon does the reading and writing, so a multi-gigabyte archive
+    // never travels through the renderer.
+    backupFile: {
+      chooseSavePath: (defaultName) =>
+        ipcRenderer.invoke('gezel:backup:choose-save-path', defaultName ?? null),
+      chooseOpenPath: () => ipcRenderer.invoke('gezel:backup:choose-open-path'),
+    },
+    // Knowledge catalog install: pick a .gezk; the daemon does the reading.
+    selectKnowledgeArchive: async () => {
+      const result = await ipcRenderer.invoke('gezel:knowledge:choose-archive');
+      return result?.path ?? null;
+    },
+    // App updates. `state` is the pull for a freshly-mounted renderer;
+    // `onStateChanged` is the push for transitions while it is open. `install`
+    // opens the verified installer on macOS (Installer.app raises the admin
+    // prompt) and defers to the signed NSIS updater on Windows. Linux update
+    // states are notification-only and never invoke `install`. `restart`
+    // relaunches into a release that finished installing under this process.
+    update: {
+      state: () => ipcRenderer.invoke('gezel:update:state'),
+      install: () => ipcRenderer.invoke('gezel:update:install'),
+      restart: () => ipcRenderer.invoke('gezel:update:restart'),
+      onStateChanged: (callback) => {
+        ipcRenderer.on('gezel:update-state', (_event, state) => callback(state));
+      },
+    },
+    // Open the service's `~/.gezel/logs/` folder in the OS file manager.
+    // Used by Settings → General. Returns an error string (empty on
+    // success) mirroring Electron's `shell.openPath` convention.
+    openLogsFolder: () => ipcRenderer.invoke('gezel:open-logs-folder'),
+    // Open an arbitrary folder in the OS file manager. Used by Settings →
+    // Folders. Returns an error string (empty on success) mirroring
+    // Electron's `shell.openPath` convention.
+    openPath: (target) => ipcRenderer.invoke('gezel:open-path', target),
+    // References-pane file actions stay behind main-process IPC: the renderer
+    // identifies a daemon-scoped file, while Electron owns native dialogs and
+    // OS file-manager integration. A save request may carry `suggestedName`,
+    // the name the dialog offers; main makes it safe again.
+    saveReferenceCopy: (request) => ipcRenderer.invoke('gezel:save-reference-copy', request),
+    showReferenceInFolder: (request) =>
+      ipcRenderer.invoke('gezel:show-reference-in-folder', request),
+    onNavigate: (callback) => {
+      ipcRenderer.on('gezel:navigate', (_event, view) => callback(view));
+    },
+    exportModelBundle: (engine, id, exportId) =>
+      ipcRenderer.invoke('gezel:export-model-bundle', { engine, id, exportId }),
+    cancelModelBundleExport: (exportId) =>
+      ipcRenderer.invoke('gezel:cancel-model-bundle-export', exportId),
+    skipModelBundleExportVerification: (exportId) =>
+      ipcRenderer.invoke('gezel:skip-model-bundle-export-verification', exportId),
+    onModelBundleExportProgress: (callback) => {
+      modelBundleExportProgressCallbacks.add(callback);
+      return () => modelBundleExportProgressCallbacks.delete(callback);
+    },
+    scanOpenedModelBundle: (requestId, scanId) =>
+      ipcRenderer.invoke('gezel:scan-opened-model-bundle', { requestId, scanId }),
+    cancelModelBundleImport: (scanId) =>
+      ipcRenderer.invoke('gezel:cancel-model-bundle-import', scanId),
+    onModelBundleImportProgress: (callback) => {
+      modelBundleImportProgressCallbacks.add(callback);
+      return () => modelBundleImportProgressCallbacks.delete(callback);
+    },
+    onOpenModelBundle: (callback) => {
+      modelBundleOpenCallback = callback;
+      while (pendingModelBundleOpens.length > 0) callback(pendingModelBundleOpens.shift());
+    },
+    onDeepLink: (callback) => {
+      deepLinkCallback = callback;
+      if (pendingDeepLink) {
+        const link = pendingDeepLink;
+        pendingDeepLink = null;
+        callback(link);
+      }
+      return () => {
+        if (deepLinkCallback === callback) deepLinkCallback = null;
+      };
+    },
+    // Restart the gezel service. Used by the Folders settings tab after a
+    // successful externalization move so the new path config takes
+    // effect. The supervisor handles embedded vs. spawned modes; the
+    // BrowserWindow auto-reloads via the existing supervisor-restart
+    // listener once the service is back.
+    restartService: (reason) => ipcRenderer.invoke('gezel:restart-service', reason),
+    // Push the latest config to the main process so the system tray stays
+    // in sync (engagement-mode radio) and is created/destroyed when the
+    // showSystemTray preference flips. The renderer calls this whenever it
+    // updates config; the main handler only mutates tray state (no echo
+    // back), so there's no loop with the mode-set channel below.
+    syncConfig: (cfg) => ipcRenderer.send('gezel:tray:sync-config', cfg),
+    // Push the theme preference down to Chromium's own colour-scheme setting.
+    // The sandboxed preview iframe is a null-origin document, so this is the
+    // only route by which a project-type page learns the user picked Dark.
+    setNativeTheme: (pref) => ipcRenderer.send('gezel:set-native-theme', pref),
+    // Fired when the tray menu changes the engagement mode, so the in-app
+    // header menu reflects it. Mirrors onNavigate's callback-proxy pattern
+    // (DOM CustomEvents don't cross the contextIsolation boundary, so the
+    // renderer registers a callback here instead).
+    onEngagementModeChanged: (callback) => {
+      ipcRenderer.on('gezel:tray:mode-set', (_event, mode) => callback(mode));
+    },
+    // Raise an OS notification on the renderer's behalf.
+    notify: (opts) => ipcRenderer.invoke('gezel:notify', opts),
+    // Screenshot a region of this page (CSS/DIP pixels) as a PNG data URL.
+    // The output pane uses this to grab its sandboxed preview iframe, which
+    // can't be rasterized from the renderer because it runs null-origin.
+    capturePageRegion: (rect) => ipcRenderer.invoke('gezel:capture-page-region', rect),
+  });
+}

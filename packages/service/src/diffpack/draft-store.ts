@@ -8,7 +8,11 @@ import {
   createLogger,
 } from '@bendyline/gezel';
 import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
-import { resolveInside, safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
+import {
+  assertNotGitControlPath,
+  resolveInside,
+  safeJoin,
+} from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import type { Store } from '../fs/store.js';
 import {
   type WorkspaceEditResult,
@@ -205,12 +209,23 @@ export class DiffpackDraftStore {
     return buildWorkspaceEditResult(path, oldContent, newContent);
   }
 
+  /**
+   * Refused while drafting, not only at apply: a proposal that touches `.git`
+   * could never be applied (the Store refuses it), and the gezel should hear
+   * so now rather than after the person reviewed it.
+   */
+  private async refuseGitControl(projectId: string, ...paths: string[]): Promise<void> {
+    const workspaceDir = await this.store.projectWorkspaceDir(projectId);
+    for (const path of paths) await assertNotGitControlPath(workspaceDir, path);
+  }
+
   private async commit(
     projectId: string,
     packId: string,
     path: string,
     content: string,
   ): Promise<void> {
+    await this.refuseGitControl(projectId, path);
     const landing = (await this.listOperations(projectId, packId)).find(
       (op) => op.to === normalizeDraftPath(path),
     );
@@ -257,6 +272,7 @@ export class DiffpackDraftStore {
    * the pack carries a deletion for a file nobody will ever find.
    */
   async delete(projectId: string, packId: string, path: string): Promise<void> {
+    await this.refuseGitControl(projectId, path);
     const normalized = normalizeDraftPath(path);
     const existsInWorkspace = (await this.store.readProjectWorkspaceFile(projectId, path)) !== null;
     const draftFull = await this.draftPath(projectId, packId, path, { create: false });
@@ -335,6 +351,7 @@ export class DiffpackDraftStore {
     if (!to || to === '.' || safeJoin('/w', to) === null) {
       throw new WorkspaceEditError(`invalid destination "${input.to}"`, 'invalid-range');
     }
+    await this.refuseGitControl(projectId, to, ...(from ? [from] : []));
     const current = await this.listOperations(projectId, packId);
     const drafted = await this.listDraftedPaths(projectId, packId);
     const deletions = await this.listDeletions(projectId, packId);

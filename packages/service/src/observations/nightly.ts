@@ -36,13 +36,13 @@ import {
   createLogger,
   nightShiftDayKey,
   nowIso,
-  projectAllowsAmbientWork,
+  projectAllowsUnattendedWork,
   projectNightWorkEnabled,
 } from '@bendyline/gezel';
 import { resolveInside } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import type { Store } from '../fs/store.js';
 import { compactCorpus } from './compactor.js';
-import { type DuckRunner, sqlLiteral } from './duck.js';
+import { type DuckRunner, sqlLiteral, untrustedSqlText } from './duck.js';
 import {
   listPartitionFiles,
   listPartitions,
@@ -157,7 +157,7 @@ export async function runProjectObservationNightly(
   if (!project) return skip('inactive');
   // The same ambient-work opt-out that gates every other background job. A
   // project the user has told to stay quiet stays quiet.
-  if (!projectAllowsAmbientWork(project)) return skip('inactive');
+  if (!projectAllowsUnattendedWork(project)) return skip('inactive');
   if (!projectNightWorkEnabled(project)) return skip('opted-out');
   if (!deps.duck.available()) return skip('engine-unavailable');
 
@@ -415,9 +415,11 @@ async function materializeOnePartition(
   await mkdir(join(rollupRoot, rollup.name, partitionDir), { recursive: true });
   await remove(tmp, { force: true });
 
+  // The rollup SQL passed the parser gate, but it is manifest text, so it
+  // reaches the script only as base64 the engine decodes (see duck.ts).
   await deps.duck.runTrusted(
     `CREATE OR REPLACE VIEW "${ROLLUP_SOURCE_VIEW}" AS ${sources};\n` +
-      `COPY (${statement}) TO '${sqlLiteral(tmp)}' (FORMAT parquet, COMPRESSION zstd);`,
+      `COPY (SELECT * FROM query(${untrustedSqlText(statement)})) TO '${sqlLiteral(tmp)}' (FORMAT parquet, COMPRESSION zstd);`,
     { allowedDirectories: [tableRoot, rollupRoot], timeoutMs: ROLLUP_TIMEOUT_MS },
   );
   await rename(tmp, target);

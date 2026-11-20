@@ -38,7 +38,10 @@ function errorText(err: unknown): string {
   return apiErrorMessage(err);
 }
 
-export function registerOfficeIntegrationIpc(ipcMain: IpcMain, clientSource: OfficeClientSource) {
+export function registerOfficeIntegrationIpc(
+  ipcMain: Pick<IpcMain, 'handle'>,
+  clientSource: OfficeClientSource,
+) {
   const run = async <T>(fn: (client: OfficeIntegrationClient) => Promise<T>) => {
     const client = clientSource();
     if (!client) return { ok: false as const, error: 'service is unavailable' };

@@ -19,7 +19,7 @@ import {
   seedParamDefaults,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
-import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
+import { isGitControlPath, safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { ALWAYS_REGISTERED_TOOLS, CONDITIONALLY_REGISTERED_TOOLS } from '@bendyline/gezel-mcp';
 import type { Store } from '../fs/store.js';
 import { installProjectTypeScripts } from '../scripts/install.js';
@@ -125,7 +125,9 @@ export async function preflightProjectType(
   }
 
   for (const rel of [...manifest.workspaceSeed, ...manifest.artifactsSeed]) {
-    if (!safeJoin('/gezel-project-type-preflight', rel)) {
+    // A seed in `.git` would be an app shipping git configuration, whose
+    // settings can run commands; no app needs one.
+    if (!safeJoin('/gezel-project-type-preflight', rel) || isGitControlPath(rel)) {
       throw new Error(`project type ${input.typeId}: unsafe seed path ${rel}`);
     }
     const file = await deps.catalog.readItemFile(
@@ -353,7 +355,7 @@ async function applyFresh(
       return;
     }
     const dest = safeJoin(baseDir, rel);
-    if (!dest) {
+    if (!dest || isGitControlPath(rel)) {
       log.warn(`[apply] project type ${typeId}: unsafe seed path ${rel} — skipping`);
       return;
     }

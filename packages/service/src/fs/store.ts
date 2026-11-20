@@ -135,6 +135,7 @@ import { copyFileAtomic, writeFileAtomic } from '@bendyline/gezel-inference/inte
 import { ensurePrivateUserHome } from '@bendyline/gezel-inference/internal/fs/home-permissions';
 import {
   assertNoTemplatePlaceholderPath,
+  assertNotGitControlPath,
   intoWorkspaceRelative,
   realpathNearest,
   resolveInside,
@@ -247,6 +248,12 @@ import {
 } from './default-project-docs.js';
 import { DocumentsStore } from './documents-store.js';
 import { FileSnapshotCache } from './file-snapshot-cache.js';
+import {
+  assertNoSharedGezelAuthority,
+  assertNoSharedProjectAuthority,
+  withoutSharedGezelAuthority,
+  withoutSharedProjectAuthority,
+} from './machine-shared-trust.js';
 import { extForMimeType, mimeTypeForFilename, safeBasename } from './media-types.js';
 import { MemoryStore } from './memory-store.js';
 import {
@@ -2175,6 +2182,7 @@ export class Store {
   ): Promise<GezelDetail> {
     const existing = await this.tryGetGezel(id);
     if (!existing) throw new Error(`agent ${id} not found`);
+    if (existing.storageScope === 'machine-shared') assertNoSharedGezelAuthority(patch);
     const frontmatter = { ...existing.parsed.frontmatter };
     if (patch.provider === null) delete frontmatter.provider;
     else if (patch.provider !== undefined) frontmatter.provider = patch.provider;
@@ -2375,6 +2383,8 @@ export class Store {
       aboutOverride?: string;
       scope?: 'project';
       storageScope?: 'machine-shared';
+      /** Read from the machine-shared tree, whatever `storageScope` says. */
+      inSharedTree?: boolean;
     },
   ): Promise<GezelDetail | null> {
     const mdPath = join(dir, 'gezel.md');
@@ -2383,7 +2393,13 @@ export class Store {
     const toolsPath = join(dir, 'tools.md');
     try {
       const [source, s] = await Promise.all([readFile(mdPath, 'utf8'), stat(mdPath)]);
-      const parsed = parseGezelMarkdown(source);
+      let parsed = parseGezelMarkdown(source);
+      if (opts.storageScope === 'machine-shared' || opts.inSharedTree) {
+        // Any local account can write a shared gezel.md; see machine-shared-trust.ts.
+        const trusted = withoutSharedGezelAuthority(parsed);
+        this.noteIgnoredSharedAuthority(`crew member ${id}`, trusted.ignored);
+        parsed = trusted.parsed;
+      }
       // about.md is read lazily; if it's missing (older agent) we fall back
       // to an empty string so older agents don't break. The canonical
       // `@project` gezel passes its prompt in via `aboutOverride` (read
@@ -2502,14 +2518,17 @@ export class Store {
     }
     const encodedId = encodeProjectGezelId(projectId, localId);
     const dir = projectLocalGezelDir(ws, localId);
+    // A shared project's workspace is in the machine-shared tree too.
+    const inSharedTree = projectStorageScope(this.home, projectId) === 'machine-shared';
     if (localId === PROJECT_GEZEL_LOCAL_ID) {
       const about = await this.readProjectInstructionAbout(ws);
       return this.hydrateGezelDetail(encodedId, dir, {
         aboutOverride: about ?? '',
         scope: 'project',
+        inSharedTree,
       });
     }
-    return this.hydrateGezelDetail(encodedId, dir, { scope: 'project' });
+    return this.hydrateGezelDetail(encodedId, dir, { scope: 'project', inSharedTree });
   }
 
   /** Read the `.gezel/project.json` about-source mapping, if present. */
@@ -3216,6 +3235,13 @@ export class Store {
             ? { managedWorkspaceWritePolicy: 'deny' }
             : {}),
     };
+    // Every project.json write passes here, so this is where a shared project
+    // refuses a folder, a credential grant or an agent permission, whichever
+    // method tried to set it. Reads never return them, so only a new value
+    // can trip this.
+    if (projectStorageScope(this.home, normalized.id) === 'machine-shared') {
+      assertNoSharedProjectAuthority(normalized);
+    }
     await writeFileAtomic(
       projectMetaFile(this.home, normalized.id),
       `${JSON.stringify(normalized, null, 2)}\n`,
@@ -4262,9 +4288,24 @@ export class Store {
       return null;
     }
     this.unreadableProjectMeta.delete(path);
-    return projectStorageScope(this.home, id) === 'machine-shared'
-      ? { ...result.data, storageScope: 'machine-shared' }
-      : result.data;
+    if (projectStorageScope(this.home, id) !== 'machine-shared') return result.data;
+    // Any local account can write a shared project.json; see machine-shared-trust.ts.
+    const { project, ignored } = withoutSharedProjectAuthority(result.data);
+    this.noteIgnoredSharedAuthority(`project ${id}`, ignored);
+    return { ...project, storageScope: 'machine-shared' };
+  }
+
+  /** Logged once per entity and field set, not on every read. */
+  private readonly loggedSharedAuthority = new Set<string>();
+
+  private noteIgnoredSharedAuthority(entity: string, ignored: string[]): void {
+    if (ignored.length === 0) return;
+    const key = `${entity}:${ignored.join(',')}`;
+    if (this.loggedSharedAuthority.has(key)) return;
+    this.loggedSharedAuthority.add(key);
+    log.warn(
+      `[store] ${entity} is machine-shared; ignoring ${ignored.join(', ')}, which any local account can write`,
+    );
   }
 
   /**
@@ -5000,6 +5041,13 @@ export class Store {
       for (const p of Array.isArray(opts.path) ? opts.path : [opts.path ?? '']) {
         assertNoTemplatePlaceholderPath(p);
       }
+    }
+    // `.git` is git's own configuration, and settings there run commands the
+    // next time git runs, from Gezel or from the person's editor. No caller
+    // writes it, the person's own edits and applied proposals included: a
+    // proposal is a gezel's text. Like the placeholder check, this throws.
+    for (const p of Array.isArray(opts?.path) ? opts.path : opts?.path ? [opts.path] : []) {
+      if (p) await assertNotGitControlPath(resolved.dir, p);
     }
     return {
       ok: true,

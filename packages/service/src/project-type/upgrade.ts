@@ -53,7 +53,7 @@ import {
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
 import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
-import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
+import { isGitControlPath, safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { projectScriptFile } from '@bendyline/gezel/paths';
 import { parseScriptMeta } from '../scripts/meta.js';
 import {
@@ -464,7 +464,7 @@ async function analyzeUpdate(
       return;
     }
     const dest = safeJoin(area === 'artifacts' ? artifactsDir : workspaceDir, rel);
-    if (!dest) return;
+    if (!dest || isGitControlPath(rel)) return;
     const rendered = renderProjectTypeTemplate(text, params);
     const prior = priorSeeds.get(recordPath);
     let state = classifySeed({

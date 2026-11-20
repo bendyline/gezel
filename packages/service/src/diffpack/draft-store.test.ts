@@ -221,3 +221,25 @@ describe('DiffpackDraftStore.readBinary', () => {
     expect(await drafts.readBinary(projectId, packId, 'img/logo.bin')).toBeNull();
   });
 });
+
+describe('DiffpackDraftStore and .git', () => {
+  // A proposal touching `.git` could never be applied, and the gezel should
+  // hear so while drafting rather than after the person reviewed it.
+  it('refuses to draft, delete or move anything inside a .git folder', async () => {
+    await seedWorkspace('.git/config', '[core]\n');
+    await seedWorkspace('a.txt', 'a');
+    await expect(drafts.write(projectId, packId, '.git/config', 'x')).rejects.toMatchObject({
+      code: 'git-control',
+    });
+    await expect(drafts.write(projectId, packId, 'sub/.Git/hooks/x', 'x')).rejects.toMatchObject({
+      code: 'git-control',
+    });
+    await expect(drafts.delete(projectId, packId, '.git/config')).rejects.toMatchObject({
+      code: 'git-control',
+    });
+    await expect(
+      drafts.proposeOperation(projectId, packId, { op: 'move', from: 'a.txt', to: '.git/x' }),
+    ).rejects.toMatchObject({ code: 'git-control' });
+    expect(await drafts.listDraftedPaths(projectId, packId)).toEqual([]);
+  });
+});
