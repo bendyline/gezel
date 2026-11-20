@@ -1,6 +1,6 @@
 {
   "name": "@bendyline/gezel-connectors-spectral",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Runs Gezel's Prismatic (Spectral) connector actions in a separate, sandboxed process.",
   "license": "MIT",
   "engines": {
