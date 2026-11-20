@@ -28,6 +28,7 @@ import { GezelIcon } from '../components/GezelIcon.js';
 import { PersonLabel } from '../components/PersonLabel.js';
 import { PromptDialog } from '../components/PromptDialog.js';
 import { ScheduleRunsTracker } from '../components/ScheduleRunsTracker.js';
+import { gezelEditorHost } from '../components/SquisqIntegration/editor-host.js';
 import { GEZEL_WRITE_CANVAS } from '../components/SquisqIntegration/write-canvas.js';
 import { TaskChatPane } from '../components/TaskChatPane.js';
 import { TaskOutputsList } from '../components/TaskOutputsList.js';
@@ -859,6 +860,7 @@ export function TaskDetail({
             <div className="task-description-editor gz-compact-editor">
               <EditorShell
                 {...GEZEL_WRITE_CANVAS}
+                {...gezelEditorHost()}
                 ariaLabel="Task description"
                 key={`description-${task.ref}-${descriptionKey}`}
                 initialMarkdown={task.description ?? ''}
@@ -916,6 +918,7 @@ export function TaskDetail({
               <div className="task-notes-editor gz-compact-editor">
                 <EditorShell
                   {...GEZEL_WRITE_CANVAS}
+                  {...gezelEditorHost()}
                   ariaLabel="Task note"
                   key={`composer-${composerKey}`}
                   initialMarkdown=""
@@ -1014,6 +1017,7 @@ export function TaskDetail({
                       {editing ? (
                         <EditorShell
                           {...GEZEL_WRITE_CANVAS}
+                          {...gezelEditorHost()}
                           ariaLabel="Task note"
                           key={`edit-${n.id}`}
                           initialMarkdown={n.text}

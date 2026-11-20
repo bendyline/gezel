@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { build, defineConfig } from 'tsup';
@@ -6,6 +6,43 @@ import { ensureHandboekGezk } from '../../scripts/handboek-gezk-lock.mjs';
 import { buildProjectPageTypography } from '../../scripts/project-page-typography.mjs';
 import { stageServiceFontLegalBundle } from '../../scripts/service-font-legal.mjs';
 import { stripSourcemapCommentsFromBuild } from '../../scripts/strip-sourcemap-comments.mjs';
+
+/**
+ * Gezel's own Google sign-in app (`src/connectors/builtin-oauth-clients.ts`).
+ * Google forbids committing client credentials to a public repository, so
+ * only the desktop release workflows supply them, from CI secrets, through
+ * GEZEL_BUILD_GOOGLE_OAUTH_CLIENT_ID / _SECRET. Google's token endpoint
+ * refuses a desktop client without its secret, so it takes both or neither.
+ * A build without them removes any copy an earlier build left, so the file
+ * never outlives the build that wrote it, and scripts/publish-package.mjs
+ * refuses to put it on npm.
+ */
+function builtinGoogleClient(): { clientId: string; clientSecret: string } | null {
+  const clientId = process.env.GEZEL_BUILD_GOOGLE_OAUTH_CLIENT_ID?.trim() ?? '';
+  const clientSecret = process.env.GEZEL_BUILD_GOOGLE_OAUTH_CLIENT_SECRET?.trim() ?? '';
+  if (Boolean(clientId) !== Boolean(clientSecret)) {
+    throw new Error(
+      'GEZEL_BUILD_GOOGLE_OAUTH_CLIENT_ID and GEZEL_BUILD_GOOGLE_OAUTH_CLIENT_SECRET must be set together',
+    );
+  }
+  return clientId ? { clientId, clientSecret } : null;
+}
+
+// Checked when the config loads, so a half-set pair stops the build before it
+// cleans dist/, not partway through onSuccess with the tree half staged.
+const BUILTIN_GOOGLE_CLIENT = builtinGoogleClient();
+
+function writeBuiltinOAuthClients(): void {
+  const file = 'dist/builtin-oauth-clients.json';
+  if (!BUILTIN_GOOGLE_CLIENT) {
+    rmSync(file, { force: true });
+    return;
+  }
+  writeFileSync(
+    file,
+    `${JSON.stringify({ GEZEL_GOOGLE_CLIENT_ID: BUILTIN_GOOGLE_CLIENT }, null, 2)}\n`,
+  );
+}
 
 /**
  * Compile the eval harness (`evals/`) into `dist/evals/`, so every install —
@@ -220,6 +257,7 @@ export default defineConfig({
       'dist/page-typography.css',
       buildProjectPageTypography(resolve(__dirname, '../ui')),
     );
+    writeBuiltinOAuthClients();
     // Handboek content: the hand-curated documentation tree lives at the
     // repo root (docs/handboek/) so humans author it next to the other
     // docs, and ships inside the service package so the engine can serve

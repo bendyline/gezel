@@ -2,6 +2,7 @@ import { EditorShell } from '@bendyline/squisq-editor-react';
 import '@bendyline/squisq-editor-react/styles';
 import { type FocusEvent, useCallback, useEffect, useRef } from 'react';
 import { useEffectiveTheme } from '../theme.js';
+import { gezelEditorHost } from './SquisqIntegration/editor-host.js';
 import { GEZEL_WRITE_CANVAS } from './SquisqIntegration/write-canvas.js';
 
 interface MarkdownFieldProps {
@@ -101,6 +102,7 @@ export function MarkdownField({
     <div className="markdown-field gz-compact-editor" onBlur={handleBlur}>
       <EditorShell
         {...GEZEL_WRITE_CANVAS}
+        {...gezelEditorHost()}
         ariaLabel={accessibleName ?? placeholder ?? 'Markdown'}
         initialMarkdown={value}
         initialView="wysiwyg"

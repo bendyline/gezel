@@ -354,20 +354,56 @@ call — and its UX (OAuth consent screens, IMAP passwords, revocation, error su
 binding's `lastError`) is the genuinely expensive 80% of every new type. The contract keeps
 that cost inside the adapter; it does not remove it.
 
-### Bring your own OAuth app
+### Sign-in apps: Gezel's own, or the person's
 
-Gezel is open source and ships **no OAuth client of its own** — an embedded client ID/secret
-would be public the moment it shipped, and for providers like X the API quota bills the app
-owner. Each install therefore registers its own developer app per provider. Resolution
-ladder (`resolveOAuthClient` in [connectors/oauth.ts](../packages/service/src/connectors/oauth.ts)):
+Google and Microsoft types that only read connect through **Gezel's own sign-in apps**, both
+named "Gezel (read-only)" and recorded in [assets/app-registrations/](../assets/app-registrations/).
+Every other provider (X, Meta, LinkedIn, whose API quotas bill the app owner), any type that
+asks for more than reading, and anyone who prefers it, uses a developer app of the person's
+own. Resolution ladder (`resolveOAuthClient` in
+[connectors/oauth.ts](../packages/service/src/connectors/oauth.ts)), first match wins:
 
-1. **Env override** — the env vars named by the type's `secretShape.clientIdEnv` /
-   `clientSecretEnv` (operator/dev path; wins when set).
-2. **Settings-registered app** — the client ID lives in `config.oauthClients[<clientIdEnv>]`
-   (config.json — client IDs are public identifiers) and the client secret in the
+1. **Env override**: the env vars named by the type's `secretShape.clientIdEnv` /
+   `clientSecretEnv` (operator/dev path).
+2. **Settings-registered app**: the client ID lives in `config.oauthClients[<clientIdEnv>]`
+   (config.json; client IDs are public identifiers) and the client secret in the
    SecretStore under the `oauth-client` toolset namespace, keyed by the same name. Managed
    through `/api/oauth-clients` (listings never reflect the secret back, only `hasSecret`)
    and registered in-product by the bind flow's setup panel in the project Connections tab.
+3. **Gezel's own app**
+   ([connectors/builtin-oauth-clients.ts](../packages/service/src/connectors/builtin-oauth-clients.ts)),
+   only for a bundled type and only when it may ask for **every** scope the type declares.
+   Each app's scope list lives in that file, never in the catalog, so a gilde entry cannot
+   widen what a verified app requests: asking Google's verified app for an unverified scope
+   would put it behind the "unverified app" warning for everyone. When the app exists but is
+   too narrow (Microsoft mail asks to send), the not-configured error says so.
+
+The two apps reach the code differently. Microsoft's is a public client with no secret, so
+its ID is in the source. Google's token endpoint refuses a desktop client without its secret,
+and Google forbids committing client credentials to a public repository. So
+`packages/service/tsup.config.ts` writes `dist/builtin-oauth-clients.json` only from
+`GEZEL_BUILD_GOOGLE_OAUTH_CLIENT_ID` / `_SECRET`, which only the desktop release workflows set
+(from the `GEZEL_GOOGLE_OAUTH_CLIENT_ID` / `_SECRET` repository secrets). A build without them
+removes the file, `scripts/publish-package.mjs` refuses to publish a package that has it, and
+an npm or source build connects Google through the person's own app. The secret is still
+extractable from a desktop build, as it is from every desktop app that signs in to Google
+(Google's own `gcloud` names its copy `CLOUDSDK_CLIENT_NOTSOSECRET`). What protects people is
+PKCE, a redirect that can only reach 127.0.0.1, and read-only scopes; the cost of a leak is
+someone spending the project's quota.
+
+The bind form asks `GET /api/projects/:id/connectors/oauth-app?type=` whether Gezel's app can
+connect a type, and says which app Connect will use. A saved app shows with Edit and, when
+Gezel's app could serve the type, "Use Gezel's app", which forgets the saved one.
+
+`GET /api/oauth-clients` lists both, marking each `source: 'settings' | 'environment'`; an
+environment client replaces a saved one with the same key, as it does at connect time. The
+setup panel then names the variable rather than offering a form whose entry would be ignored.
+It finds environment clients by the `GEZEL_<PROVIDER>_CLIENT_ID` / `_CLIENT_SECRET` pair every
+catalog manifest uses (`listEnvOAuthClients`).
+
+The bind flow can cancel a sign-in while it waits on the browser (`mail:oauth-cancel` in the
+desktop shell). A provider that refuses before its consent screen, such as a Google app in
+Testing that does not list the account, shows an error page and never redirects back.
 
 Keying by the manifest's `clientIdEnv` *name* means one registered provider app serves every
 type that names the same pair — `mail-gmail` and `calendar-google` share one Google app.

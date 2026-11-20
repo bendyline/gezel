@@ -26,6 +26,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { resolveRoleId } from '@bendyline/gezel';
 import { type ContinuityFacts, summarizeContinuityForRunDir } from '../continuity-facts.ts';
 import { type CraftbookDroveSummary, summarizeCraftbookDrove } from '../craftbook-drove.ts';
 import { summarizeKeurmeesterCasesSync } from '../keurmeester-metrics.ts';
@@ -736,10 +737,17 @@ export function sessionBehaviorRedFlags(
   return flags;
 }
 
+/**
+ * Roles are compared by canonical id as well as by name: the image role is
+ * titled Illustrator, which resolves to `image-generator` but never
+ * contains it, so a correct crew used to be reported as missing its role.
+ */
 export function missingScenarioRoles(scenarioId: string, rolesCreated: string[]): string[] {
   const normalize = (role: string) => role.toLowerCase().replace(/[\s_-]+/g, '');
   const created = rolesCreated.map(normalize);
+  const createdIds = new Set(rolesCreated.map((role) => resolveRoleId(role)));
   return (SCENARIO_EXPECTED_ROLES[scenarioId] ?? []).filter((role) => {
+    if (createdIds.has(resolveRoleId(role))) return false;
     const expected = normalize(role);
     return !created.some((item) => item === expected || item.includes(expected));
   });

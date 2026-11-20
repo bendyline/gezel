@@ -4,35 +4,49 @@ import { type OAuthAppRequirement, fixedRedirectUri } from './oauth-app-setup.js
 export interface RegisteredOAuthClient {
   clientId: string;
   hasSecret: boolean;
+  /**
+   * `environment`: the daemon's env vars supply this app and win over one
+   * saved here, so the panel names them and offers no Edit. Absent from
+   * daemons that predate the field, which list saved apps only.
+   */
+  source?: 'settings' | 'environment';
 }
 
 /**
- * Bring-your-own OAuth app panel for the connector bind flow. Gezel ships no
- * OAuth client of its own, so before an oauth2 connector can link, the
- * install needs the user's own developer app registered (client ID →
- * config, secret → OS keychain via the SecretStore).
+ * The sign-in app panel for the connector bind flow. Google and Microsoft
+ * types that only read connect through Gezel's own app (`builtin`); anything
+ * else, or anyone who prefers it, uses the person's own developer app
+ * (client ID → config, secret → OS keychain via the SecretStore). A saved app
+ * wins over Gezel's, and "Use Gezel's app" forgets it again.
  *
- * Collapsed by default: a one-line summary of the registered app (with Edit)
- * or a quiet "use your own app" affordance when none is registered — the
- * daemon may still have an env-var override the UI can't see, so Connect is
- * always worth attempting first. `forceOpenNonce` increments when that
- * attempt fails with the service's "OAuth is not configured" error and pops
- * the form open as the fallback.
+ * Collapsed by default: a one-line summary of the app Connect will use (a
+ * saved one with Edit, or one the daemon's environment sets, which wins and so
+ * has no Edit), or a quiet "use your own app" affordance when there is none.
+ * A daemon that predates environment listings can still hold an override the
+ * UI cannot see, so Connect is always worth attempting first.
+ * `forceOpenNonce` increments when that attempt fails with the service's
+ * "OAuth is not configured" error and pops the form open as the fallback.
  */
 export function OAuthAppSetup({
   requirement,
   registered,
+  builtin = false,
   forceOpenNonce,
   busy,
   onSave,
+  onUseBuiltin,
 }: {
   requirement: OAuthAppRequirement;
   registered: RegisteredOAuthClient | null;
+  /** Gezel's own app can connect this type; a saved or environment app still wins. */
+  builtin?: boolean;
   /** Increment to force the form open (failed connect); 0 = never forced. */
   forceOpenNonce?: number;
   busy?: boolean;
   /** Persist the app, then continue into the OAuth flow. Throws on save failure. */
   onSave: (body: { clientId: string; clientSecret?: string }) => Promise<void>;
+  /** Forget the saved app, so Connect goes back to Gezel's own. */
+  onUseBuiltin?: () => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
   const [clientId, setClientId] = useState('');
@@ -90,6 +104,17 @@ export function OAuthAppSetup({
     setOpen(false);
   };
 
+  if (!open && registered?.source === 'environment') {
+    return (
+      <div className="gz-oauth-app gz-oauth-app-summary">
+        <div className="gz-oauth-app-summary-text">
+          <span>Connects through the {requirement.providerLabel} app set by</span>
+          <code title={registered.clientId}>{requirement.clientKey}</code>
+        </div>
+      </div>
+    );
+  }
+
   if (!open) {
     return (
       <div className="gz-oauth-app gz-oauth-app-summary">
@@ -100,16 +125,24 @@ export function OAuthAppSetup({
               <code title={registered.clientId}>{registered.clientId}</code>
               {registered.hasSecret && <span>· secret saved</span>}
             </>
+          ) : builtin ? (
+            <span>
+              Connects through Gezel's own {requirement.providerLabel} app, which can only read.
+            </span>
           ) : (
             <span>
-              Gezel ships no built-in {requirement.providerLabel} client — connecting uses an app
-              you register once on this machine.
+              Connecting needs an app of your own, registered once with {requirement.providerLabel}.
             </span>
           )}
         </div>
         <button type="button" onClick={openForm} disabled={busy}>
           {registered ? 'Edit' : `Use your own ${requirement.providerLabel} app`}
         </button>
+        {registered && builtin && onUseBuiltin && (
+          <button type="button" onClick={() => void onUseBuiltin()} disabled={busy}>
+            Use Gezel's app
+          </button>
+        )}
       </div>
     );
   }

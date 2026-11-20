@@ -10,15 +10,20 @@
  * semantic-release runs this with cwd set to the package directory.
  */
 import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const manifestPath = resolve(process.cwd(), 'package.json');
+// A package's MCP Registry entry, re-stamped by sync-server-json.mjs and
+// committed beside package.json; it is serialized the same way.
+const serverJsonPath = resolve(process.cwd(), 'server.json');
+const targets = [manifestPath, ...(existsSync(serverJsonPath) ? [serverJsonPath] : [])];
 
 if (process.env.GEZEL_RELEASE_DRY_RUN === '1') {
-  console.log(`format-release-manifest: [dry run] would format ${manifestPath}`);
+  console.log(`format-release-manifest: [dry run] would format ${targets.join(', ')}`);
   process.exit(0);
 }
 
@@ -32,7 +37,7 @@ try {
 
 const result = spawnSync(
   process.execPath,
-  [biomeCli, 'format', '--write', '--config-path', repoRoot, manifestPath],
+  [biomeCli, 'format', '--write', '--config-path', repoRoot, ...targets],
   {
     cwd: repoRoot,
     stdio: 'inherit',

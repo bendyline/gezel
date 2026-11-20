@@ -3,6 +3,7 @@ import { EditorShell, useEditorContext } from '@bendyline/squisq-editor-react';
 import '@bendyline/squisq-editor-react/styles';
 import { useEffect, useMemo, useRef } from 'react';
 import { useEffectiveTheme } from '../../theme.js';
+import { gezelEditorHost } from '../SquisqIntegration/editor-host.js';
 import { GEZEL_WRITE_CANVAS } from '../SquisqIntegration/write-canvas.js';
 import { isPlainTextFile } from '../plain-text-file.js';
 
@@ -56,6 +57,7 @@ export function FileSourceView({
   return (
     <EditorShell
       {...GEZEL_WRITE_CANVAS}
+      {...gezelEditorHost()}
       key={path}
       initialMarkdown={content}
       fileName={path}

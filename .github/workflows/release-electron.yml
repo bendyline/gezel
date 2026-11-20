@@ -390,6 +390,12 @@ jobs:
         run: pnpm build:packaged
         env:
           GEZEL_REQUIRE_BUNDLE_PE_VERIFY: '1'
+          # Gezel's own Google sign-in app, written into the service build as
+          # dist/builtin-oauth-clients.json (packages/service/tsup.config.ts).
+          # Never in the repository or on npm: Google forbids committing it.
+          # Unset, Google connections use the person's own app.
+          GEZEL_BUILD_GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GEZEL_GOOGLE_OAUTH_CLIENT_ID }}
+          GEZEL_BUILD_GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GEZEL_GOOGLE_OAUTH_CLIENT_SECRET }}
 
       - name: Verify release version propagation
         shell: bash

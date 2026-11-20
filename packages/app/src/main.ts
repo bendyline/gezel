@@ -2036,6 +2036,25 @@ ipcMain.handle(
   },
 );
 
+// A provider that refuses before its consent screen (an app in testing that
+// does not list the account, a blocked organization) never redirects back,
+// so without this the renderer would wait out the whole timeout.
+ipcMain.handle('mail:oauth-cancel', (_event, args: { requestId: string }): { ok: true } => {
+  const session = oauthSessions.get(args?.requestId);
+  if (session) {
+    oauthSessions.delete(args.requestId);
+    // Nothing awaits `done` when the cancel lands before `mail:oauth-await`.
+    session.done.catch(() => {});
+    session.settle({ error: 'cancelled' });
+    try {
+      session.server.close();
+    } catch {
+      /* already closed */
+    }
+  }
+  return { ok: true };
+});
+
 /**
  * Open the service's `~/.gezel/logs/` folder in the OS file manager.
  * Used by Settings → General's "Open logs folder" button when debug

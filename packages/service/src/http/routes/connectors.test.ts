@@ -228,6 +228,32 @@ describe('/api/projects/:id/connectors', () => {
     ).toBe(404);
   });
 
+  it("says which catalog types Gezel's own sign-in app can connect", async () => {
+    const app = async (type: string) =>
+      (
+        await call<{ key: string | null; builtin: boolean }>(
+          'GET',
+          `/connectors/oauth-app?type=${type}`,
+        )
+      ).body;
+    const microsoft = 'GEZEL_MICROSOFT_CLIENT_ID';
+    for (const type of ['calendar-microsoft', 'files-onedrive', 'files-sharepoint']) {
+      expect(await app(type)).toEqual({ key: microsoft, builtin: true });
+    }
+    // Mail asks to send and edit; Gezel's app only reads.
+    expect(await app('mail-microsoft365')).toEqual({ key: microsoft, builtin: false });
+    // This build has no Google release file.
+    expect((await app('calendar-google')).builtin).toBe(false);
+    // A local type never gets Gezel's app, whatever it asks for.
+    expect(await app(OAUTH_TYPE_ID)).toEqual({
+      key: 'GEZEL_ROUTE_TEST_CLIENT_ID',
+      builtin: false,
+    });
+    // A type that does not sign in through OAuth has no app at all.
+    expect(await app(TYPE_ID)).toEqual({ key: null, builtin: false });
+    expect((await call('GET', '/connectors/oauth-app')).status).toBe(400);
+  });
+
   it('a project with no bindings reports unconfigured', async () => {
     const res = await call<{ configured: boolean; bindings: unknown[] }>('GET', '/connectors');
     expect(res.status).toBe(200);

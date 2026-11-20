@@ -40,6 +40,8 @@ export interface OAuthTokens {
   expiresAt: string;
   /** The OpenID Connect ID token, when `openid` was asked for. */
   idToken?: string;
+  /** The scopes the provider says it granted (space-separated), when it says. */
+  scope?: string;
 }
 
 /** Authorize/token endpoints + scopes for one source. */
@@ -151,6 +153,7 @@ async function postToken(
     ...(json.refresh_token ? { refreshToken: String(json.refresh_token) } : {}),
     expiresAt: expiresAtFrom(json.expires_in),
     ...(typeof json.id_token === 'string' ? { idToken: json.id_token } : {}),
+    ...(typeof json.scope === 'string' ? { scope: json.scope } : {}),
   };
 }
 
@@ -350,8 +353,8 @@ export interface OAuthClient {
 
 /**
  * Resolve an install's OAuth client from env vars named by the connector-type's
- * `secretShape` (`clientIdEnv` / `clientSecretEnv`). Each deployment registers
- * its own OAuth app — no client ids are shipped.
+ * `secretShape` (`clientIdEnv` / `clientSecretEnv`) alone. The connect flow
+ * uses {@link resolveOAuthClient}, which also tries saved and built-in apps.
  */
 export function resolveOAuthClientFromEnv(
   clientIdEnv: string,
@@ -382,6 +385,33 @@ function readOAuthClientEnv(clientIdEnv: string, clientSecretEnv?: string): OAut
   return { clientId, ...(clientSecret ? { clientSecret } : {}) };
 }
 
+/** An OAuth client supplied by environment variables, as `/api/oauth-clients` lists it. */
+export interface EnvOAuthClient {
+  key: string;
+  clientId: string;
+  hasSecret: boolean;
+}
+
+/**
+ * The OAuth clients this daemon's environment supplies. They win over apps
+ * saved in Settings ({@link resolveOAuthClient}), so the bind flow lists them
+ * rather than offering a form whose entry would be ignored. Reads the
+ * `GEZEL_<PROVIDER>_CLIENT_ID` / `_CLIENT_SECRET` pair every catalog manifest
+ * uses: a manifest naming its pair another way still connects through its env
+ * vars, it just goes unlisted here.
+ */
+export function listEnvOAuthClients(env: NodeJS.ProcessEnv = process.env): EnvOAuthClient[] {
+  const out: EnvOAuthClient[] = [];
+  for (const [key, value] of Object.entries(env)) {
+    if (!key.endsWith('_CLIENT_ID') || !OAUTH_CLIENT_ENV_NAME.test(key)) continue;
+    const clientId = value?.trim();
+    if (!clientId) continue;
+    const secret = env[`${key.slice(0, -'_CLIENT_ID'.length)}_CLIENT_SECRET`]?.trim();
+    out.push({ key, clientId, hasSecret: Boolean(secret) });
+  }
+  return out.sort((a, b) => a.key.localeCompare(b.key));
+}
+
 /** SecretStore namespace for install-registered OAuth app secrets. */
 export const OAUTH_CLIENT_TOOLSET_ID = 'oauth-client';
 
@@ -410,14 +440,25 @@ export interface ResolveOAuthClientOptions {
   getConfiguredClients?: () => Promise<Record<string, { clientId: string }> | undefined>;
   /** Secret lookup for the configured client's secret. */
   getSecret: (key: ReturnType<typeof oauthClientSecretKey>) => Promise<string | null>;
+  /**
+   * Gezel's own app, when it may serve this connection
+   * (`builtinOAuthClientFor`). Tried last, so an app the person or operator
+   * chose always wins.
+   */
+  builtin?: OAuthClient | null;
+  /**
+   * Gezel has an app for this provider, but not one that may ask for what
+   * this connection needs: the error says so instead of implying there is none.
+   */
+  builtinTooNarrow?: boolean;
 }
 
 /**
- * Resolve the OAuth app identity for a connector: environment variables
- * (the operator/dev override) win when set; otherwise the install's
- * Settings-registered client (`config.oauthClients` + SecretStore secret).
- * Gezel is open source and ships no OAuth client of its own — when neither
- * source is configured, the error names both remedies.
+ * Resolve the OAuth app identity for a connector, in this order: environment
+ * variables (the operator/dev override); the client the person saved under
+ * Settings (`config.oauthClients` + SecretStore secret); Gezel's own app
+ * (`builtin-oauth-clients.ts`) when it covers the connection's scopes. With
+ * none, the error names the remedies.
  */
 export async function resolveOAuthClient(opts: ResolveOAuthClientOptions): Promise<OAuthClient> {
   const clientIdEnv = opts.clientIdEnv ?? '';
@@ -430,9 +471,19 @@ export async function resolveOAuthClient(opts: ResolveOAuthClientOptions): Promi
     return { clientId: configured.clientId, ...(secret ? { clientSecret: secret } : {}) };
   }
 
+  if (opts.builtin) {
+    return {
+      clientId: opts.builtin.clientId,
+      ...(opts.builtin.clientSecret ? { clientSecret: opts.builtin.clientSecret } : {}),
+    };
+  }
+
+  const remedy = `your own app's client ID under Settings (Connections), or set ${clientIdEnv}${
+    opts.clientSecretEnv ? ` (and ${opts.clientSecretEnv})` : ''
+  }.`;
   throw new Error(
-    `OAuth is not configured for this connector — add your own app's client ID under Settings (Connections), or set ${clientIdEnv}${
-      opts.clientSecretEnv ? ` (and ${opts.clientSecretEnv})` : ''
-    }.`,
+    opts.builtinTooNarrow
+      ? `OAuth is not configured for this connector — Gezel's own app can only read, and this connection asks for more. Add ${remedy}`
+      : `OAuth is not configured for this connector — add ${remedy}`,
   );
 }

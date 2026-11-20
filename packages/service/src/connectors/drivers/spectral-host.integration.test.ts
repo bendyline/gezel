@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { homedir } from 'node:os';
+import { join, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   resolveSpectralRuntime,
@@ -18,17 +19,18 @@ const built = existsSync(require.resolve('@bendyline/gezel-connectors-spectral/r
  * runner that could not read its own SDK shipped unnoticed.
  */
 describe('the folders the Spectral runner is granted', () => {
+  // Real paths, so native separators: containment is judged on `sep`.
   it('keeps the node_modules that holds both runner and SDK in a flat install', () => {
-    const flat = '/srv/app/node_modules';
-    expect(spectralReadRoots(`${flat}/@bendyline/gezel-connectors-spectral`, [flat])).toEqual([
-      flat,
-    ]);
+    const flat = join('/srv', 'app', 'node_modules');
+    expect(
+      spectralReadRoots(join(flat, '@bendyline', 'gezel-connectors-spectral'), [flat]),
+    ).toEqual([flat]);
   });
 
   it('keeps the runner and the pnpm store apart when neither holds the other', () => {
-    expect(
-      spectralReadRoots('/repo/packages/connectors-spectral', ['/repo/node_modules/.pnpm']).sort(),
-    ).toEqual(['/repo/node_modules/.pnpm', '/repo/packages/connectors-spectral']);
+    const runner = join('/repo', 'packages', 'connectors-spectral');
+    const store = join('/repo', 'node_modules', '.pnpm');
+    expect(spectralReadRoots(runner, [store]).sort()).toEqual([store, runner]);
   });
 });
 
@@ -39,7 +41,7 @@ describe.runIf(built)('the Spectral runner under the sandbox', () => {
     expect(readRoots.length).toBeGreaterThanOrEqual(2);
     for (const root of readRoots) {
       expect(root).not.toBe(homedir());
-      expect(homedir().startsWith(`${root}/`)).toBe(false);
+      expect(homedir().startsWith(`${root}${sep}`)).toBe(false);
     }
   });
 

@@ -428,6 +428,38 @@ describe('GoogleCalendarAdapter', () => {
     expect(throttled.cursor).toEqual(first.cursor);
   });
 
+  it('says plainly to connect again when the sign-in lacks the calendar permission', async () => {
+    w = await world({ calendars: [PRIMARY] });
+    w.fake.http.failNext(
+      { url: `${GOOGLE_CALENDAR_API}/` },
+      status(403, {
+        error: {
+          code: 403,
+          message: 'Request had insufficient authentication scopes.',
+          errors: [
+            {
+              message: 'Insufficient Permission',
+              domain: 'global',
+              reason: 'insufficientPermissions',
+            },
+          ],
+          status: 'PERMISSION_DENIED',
+          details: [
+            {
+              '@type': 'type.googleapis.com/google.rpc.ErrorInfo',
+              reason: 'ACCESS_TOKEN_SCOPE_INSUFFICIENT',
+              domain: 'googleapis.com',
+            },
+          ],
+        },
+      }),
+    );
+    const r = await pass(w.adapter(), undefined);
+    expect(r.rateLimited).not.toBe(true);
+    expect(r.error).toMatch(/Remove this connection and connect it again/);
+    expect(r.error).not.toMatch(/PERMISSION_DENIED|\{/);
+  });
+
   it('keeps what a listing returned when a later page is throttled', async () => {
     w = await world({ calendars: [PRIMARY] });
     const now = Date.now();

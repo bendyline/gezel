@@ -18,7 +18,7 @@ import {
   DEFAULT_CAMERA_FORM,
   cameraConfigFromForm,
 } from './cameras/CameraSetupPanel.js';
-import { connectOAuth } from './connector-link.js';
+import { OAuthCancelledError, connectOAuth } from './connector-link.js';
 import { isOAuthNotConfiguredError, parseOAuthAppRequirement } from './oauth-app-setup.js';
 
 interface ConnManifest extends ConnectorFormManifest {
@@ -131,7 +131,9 @@ export function AddConnectionDialog({
   const [query, setQuery] = useState('');
   const [activeRail, setActiveRail] = useState<Rail>('all');
   const [selected, setSelected] = useState<ConnectorOption | null>(null);
-  const [busy, setBusy] = useState<'add' | 'oauth-app' | null>(null);
+  // `signin` is the wait on the browser, the one step the person can cancel.
+  const [busy, setBusy] = useState<'add' | 'signin' | 'oauth-app' | null>(null);
+  const signInRef = useRef<AbortController | null>(null);
   const [error, setError] = useState('');
   // A type that runs a published component downloads it when connected; the
   // form says so, or says why this build or security level cannot.
@@ -145,14 +147,17 @@ export function AddConnectionDialog({
   const [imapPort, setImapPort] = useState('');
   const [imapSecure, setImapSecure] = useState(true);
   const [cameraForm, setCameraForm] = useState<CameraForm>(DEFAULT_CAMERA_FORM);
-  // Bring-your-own OAuth apps registered on this install, keyed by the
-  // manifest's `clientIdEnv` name. The daemon may additionally hold env-var
-  // overrides the UI can't see, so an absent key never blocks Connect —
+  // OAuth apps this install connects through, keyed by the manifest's
+  // `clientIdEnv` name: saved ones and ones the daemon's environment sets. An
+  // older daemon lists saved ones only, so an absent key never blocks Connect;
   // it only drives the proactive "use your own app" affordance.
   const [oauthClients, setOauthClients] = useState<Record<string, RegisteredOAuthClient>>({});
   // Counts failed "OAuth is not configured" connects; each bump pops the
   // setup panel open as the error-driven fallback.
   const [oauthSetupNudge, setOauthSetupNudge] = useState(0);
+  // Gezel's own sign-in app can connect the selected type (read-only Google
+  // and Microsoft types). An app saved here, or set by the environment, wins.
+  const [builtinApp, setBuiltinApp] = useState(false);
   const galleryRef = useRef<HTMLDivElement>(null);
   const setupRef = useRef<HTMLElement>(null);
   const backRef = useRef<HTMLButtonElement>(null);
@@ -161,9 +166,26 @@ export function AddConnectionDialog({
     const res = await api.listOAuthClients();
     setOauthClients(
       Object.fromEntries(
-        (res.clients ?? []).map((c) => [c.key, { clientId: c.clientId, hasSecret: c.hasSecret }]),
+        (res.clients ?? []).map((c) => [
+          c.key,
+          {
+            clientId: c.clientId,
+            hasSecret: c.hasSecret,
+            ...(c.source ? { source: c.source } : {}),
+          },
+        ]),
       ),
     );
+  }, []);
+
+  // Leaving mid sign-in frees the shell's listener rather than its timeout.
+  useEffect(() => () => signInRef.current?.abort(), []);
+
+  const cancelSignIn = useCallback(() => {
+    signInRef.current?.abort();
+    signInRef.current = null;
+    setBusy(null);
+    setError('');
   }, []);
 
   useEffect(() => {
@@ -193,6 +215,23 @@ export function AddConnectionDialog({
       live = false;
     };
   }, [refreshOAuthClients]);
+
+  useEffect(() => {
+    setBuiltinApp(false);
+    if (!selected || selected.secretShape?.kind !== 'oauth2') return;
+    let live = true;
+    // Best effort: an older daemon has no such route, and the form offers the
+    // person's own app as it always did.
+    Promise.resolve()
+      .then(() => api.connectorOAuthApp(projectId, selected.id))
+      .then((r) => {
+        if (live) setBuiltinApp(r?.builtin === true);
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [projectId, selected]);
 
   useEffect(() => {
     setReadiness(null);
@@ -350,15 +389,25 @@ export function AddConnectionDialog({
     let added: { id: string } | undefined;
     try {
       if (kind === 'oauth2') {
-        added = await connectOAuth(
-          projectId,
-          selected.id,
-          built,
-          displayName.trim() || undefined,
-          oauthRequirement?.redirectPort !== undefined
-            ? { redirectPort: oauthRequirement.redirectPort }
-            : undefined,
-        );
+        const signIn = new AbortController();
+        signInRef.current = signIn;
+        setBusy('signin');
+        try {
+          added = await connectOAuth(
+            projectId,
+            selected.id,
+            built,
+            displayName.trim() || undefined,
+            {
+              ...(oauthRequirement?.redirectPort !== undefined
+                ? { redirectPort: oauthRequirement.redirectPort }
+                : {}),
+              signal: signIn.signal,
+            },
+          );
+        } finally {
+          if (signInRef.current === signIn) signInRef.current = null;
+        }
       } else {
         let cred: unknown;
         if (kind === 'imap') {
@@ -381,6 +430,8 @@ export function AddConnectionDialog({
         added = bound?.binding;
       }
     } catch (err) {
+      // Cancel already put the form back.
+      if (err instanceof OAuthCancelledError) return;
       const message = err instanceof Error ? err.message : String(err);
       // The service ships no OAuth client of its own; this rejection means
       // the install hasn't registered an app yet — open the setup panel
@@ -405,6 +456,24 @@ export function AddConnectionDialog({
     cameraForm,
     onAdded,
   ]);
+
+  /** Forget the saved app, so Connect goes back to Gezel's own. */
+  const handleUseBuiltinApp = useCallback(async () => {
+    if (!oauthRequirement) return;
+    const key = oauthRequirement.clientKey;
+    setError('');
+    setBusy('oauth-app');
+    try {
+      await api.deleteOAuthClient(key);
+      await refreshOAuthClients().catch(() => {
+        setOauthClients(({ [key]: _forgotten, ...rest }) => rest);
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(null);
+    }
+  }, [oauthRequirement, refreshOAuthClients]);
 
   /**
    * Save the user's OAuth app (client ID → config, secret → SecretStore),
@@ -466,6 +535,8 @@ export function AddConnectionDialog({
   const kind = selected?.secretShape?.kind;
   const submitLabel = kind === 'oauth2' ? 'Connect' : 'Add';
   const working = busy !== null;
+  const signingIn = busy === 'signin';
+  const providerLabel = oauthRequirement?.providerLabel ?? selected?.name ?? 'the service';
   const readinessNote =
     readiness?.needed && !readiness.installed
       ? readiness.downloadable
@@ -477,7 +548,9 @@ export function AddConnectionDialog({
     <Dialog.Root
       open
       onOpenChange={(next) => {
-        if (!next && !working) onClose();
+        if (next) return;
+        if (signingIn) cancelSignIn();
+        else if (!working) onClose();
       }}
     >
       <Dialog.Portal>
@@ -667,9 +740,11 @@ export function AddConnectionDialog({
                       key={selected.id}
                       requirement={oauthRequirement}
                       registered={oauthClients[oauthRequirement.clientKey] ?? null}
+                      builtin={builtinApp}
                       forceOpenNonce={oauthSetupNudge}
                       busy={working}
                       onSave={handleOAuthAppSave}
+                      onUseBuiltin={handleUseBuiltinApp}
                     />
                   )}
                 </section>
@@ -678,7 +753,12 @@ export function AddConnectionDialog({
                   never in the scrolling body, where it can land below the
                   fold and the key reads as dead. */}
               <div className="gz-npd-pane-footer gz-npd-detail-footer">
-                {error ? (
+                {signingIn ? (
+                  <p className="gz-npd-footnote" aria-live="polite">
+                    Finish signing in to {providerLabel} in your browser. If the browser shows an
+                    error instead, press Cancel.
+                  </p>
+                ) : error ? (
                   <p className="error small gz-npd-submit-error" role="alert">
                     {error}
                   </p>
@@ -692,7 +772,11 @@ export function AddConnectionDialog({
                   </p>
                 )}
                 <Dialog.Actions>
-                  <button type="button" onClick={onClose} disabled={working}>
+                  <button
+                    type="button"
+                    onClick={signingIn ? cancelSignIn : onClose}
+                    disabled={working && !signingIn}
+                  >
                     Cancel
                   </button>
                   <button
@@ -701,7 +785,7 @@ export function AddConnectionDialog({
                     onClick={() => void handleBind()}
                     disabled={working || cannotDownload}
                   >
-                    {busy === 'add' ? 'Working…' : submitLabel}
+                    {signingIn ? 'Waiting…' : busy === 'add' ? 'Working…' : submitLabel}
                   </button>
                 </Dialog.Actions>
               </div>

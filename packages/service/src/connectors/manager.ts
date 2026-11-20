@@ -58,6 +58,7 @@ import {
 import { type ObservationWriteSummary, ObservationWriter } from '../observations/writer.js';
 import type { PageCapturer } from '../page-capture/types.js';
 import { normalizeHttpsOrigin } from '../secrets/origins.js';
+import { builtinOAuthClientFor, hasBuiltinOAuthClient } from './builtin-oauth-clients.js';
 import { captureFetch } from './capture/capture-fetch.js';
 import { CassetteLeakError, scrubExchanges } from './capture/scrub.js';
 import { validateConnectorConfig } from './config-validate.js';
@@ -73,6 +74,7 @@ import {
   accountProviderFor,
   expectedAccountFrom,
   isExpectedAccount,
+  missingGrantedScopes,
   signedInAccounts,
   withAccountScopes,
 } from './oauth-account.js';
@@ -1417,6 +1419,29 @@ export class ConnectorManager {
     return { manifest: detail.manifest, sourceId: detail.sourceId };
   }
 
+  /**
+   * Whether Gezel's own sign-in app can connect this type, for the bind form:
+   * it names the app Connect will use and keeps "use your own app" as the
+   * alternative. Mirrors {@link startOAuth}: only a bundled type, and only
+   * when the app may ask for every scope the type needs.
+   */
+  async oauthAppFor(typeId: string): Promise<{ key: string | null; builtin: boolean }> {
+    const resolved = await this.loadType(typeId);
+    const shape = (resolved.manifest.secretShape ?? {}) as {
+      kind?: string;
+      scopes?: string;
+      clientIdEnv?: string;
+    };
+    if (shape.kind !== 'oauth2' || !shape.clientIdEnv) return { key: null, builtin: false };
+    const typeScopes = (shape.scopes ?? '').split(' ').filter(Boolean);
+    return {
+      key: shape.clientIdEnv,
+      builtin:
+        resolved.sourceId === 'bundled' &&
+        builtinOAuthClientFor(shape.clientIdEnv, typeScopes) !== null,
+    };
+  }
+
   /** Whether this install's catalog carries a connector type. */
   async typeAvailable(typeId: string): Promise<boolean> {
     return this.loadType(typeId).then(
@@ -1658,18 +1683,22 @@ export class ConnectorManager {
       throw new Error(`connector type '${input.type}' is not an OAuth type`);
     }
     // Env vars are the operator/dev override; the Settings-registered
-    // bring-your-own app (config.oauthClients + SecretStore secret) is the
-    // desktop path, read lazily only on an env miss. The resolved client
-    // rides the pending entry, is persisted into the credential blob at
-    // completion, and is never re-resolved at refresh time.
+    // bring-your-own app (config.oauthClients + SecretStore secret) comes
+    // next, read lazily only on an env miss; Gezel's own read-only app is
+    // last, and only when it may ask for every scope this type needs. The
+    // resolved client rides the pending entry, is persisted into the
+    // credential blob at completion, and is never re-resolved at refresh time.
+    const typeScopes = (shape.scopes ?? '').split(' ').filter(Boolean);
+    const builtin = builtinOAuthClientFor(shape.clientIdEnv, typeScopes);
     const { clientId, clientSecret } = await resolveOAuthClient({
       ...(shape.clientIdEnv ? { clientIdEnv: shape.clientIdEnv } : {}),
       ...(shape.clientSecretEnv ? { clientSecretEnv: shape.clientSecretEnv } : {}),
       getConfiguredClients: async () => (await this.opts.store.readConfig()).oauthClients,
       getSecret: (key) => this.opts.secrets.get(key),
+      builtin,
+      builtinTooNarrow: !builtin && hasBuiltinOAuthClient(shape.clientIdEnv),
     });
     const tokenAuth = parseTokenAuth(shape.tokenAuth);
-    const typeScopes = (shape.scopes ?? '').split(' ').filter(Boolean);
     // Google and Microsoft hand over whichever account the browser is signed
     // in to. Name the account this link is for (or make the person pick one),
     // and ask for the ID token that says which account signed in.
@@ -1749,6 +1778,17 @@ export class ConnectorManager {
         ...(this.opts.fetch ? { fetchImpl: this.opts.fetch } : {}),
       });
       const account = this.signedInAccount(pending, tokens.idToken, args.state);
+      const missing = pending.accountProvider
+        ? missingGrantedScopes(pending.accountProvider, pending.endpoints.scopes, tokens.scope)
+        : [];
+      if (missing.length > 0) {
+        log.warn(`${pending.type} sign-in did not grant: ${missing.join(' ')}`);
+        // Spent, like a wrong-account sign-in: connecting again starts a new link.
+        this.pendingOAuth.delete(args.state);
+        throw new Error(
+          'Google did not give Gezel all the access this connection needs, so nothing was saved. Connect again, and on Google’s screen allow everything Gezel asks for.',
+        );
+      }
       let credential: string;
       if (pending.longLivedExchange) {
         // Meta issues no refresh token: trade the short-lived token for the

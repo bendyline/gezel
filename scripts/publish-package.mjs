@@ -23,7 +23,7 @@
  * Env:
  *   GEZEL_RELEASE_DRY_RUN=1  print the command instead of running it.
  */
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnPnpmSync } from './pnpm-cli.mjs';
@@ -55,6 +55,17 @@ if (pkg.private) {
   clearReleasePackageState({ repoRoot, packageName: pkg.name });
   console.log(`publish-package: ${pkg.name} is private — skipping npm publish`);
   process.exit(0);
+}
+
+// Gezel's own Google sign-in app belongs only in desktop builds: Google
+// forbids publishing its client credentials, and npm is public. A service
+// built with the release secrets set (packages/service/tsup.config.ts) must
+// be rebuilt without them before it is published.
+if (existsSync(resolve(packageDir, 'dist', 'builtin-oauth-clients.json'))) {
+  console.error(
+    `publish-package: ${pkg.name} has dist/builtin-oauth-clients.json — rebuild without GEZEL_BUILD_GOOGLE_OAUTH_CLIENT_ID before publishing`,
+  );
+  process.exit(1);
 }
 
 const args = ['publish', '--no-git-checks', '--access', 'public', '--provenance'];

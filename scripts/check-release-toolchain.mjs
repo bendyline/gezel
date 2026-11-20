@@ -78,6 +78,7 @@ try {
 
 for (const relativePath of [
   'scripts/prepare-package.mjs',
+  'scripts/sync-server-json.mjs',
   'scripts/format-release-manifest.mjs',
   'scripts/publish-package.mjs',
   'scripts/release-package-state.mjs',
@@ -156,6 +157,19 @@ try {
   if (!/scripts\/format-release-manifest\.mjs/.test(exec.prepareCmd ?? '')) {
     failures.push(
       '.releaserc.json must format package.json after semantic-release stamps it and before the release commit',
+    );
+  }
+  // The MCP Registry publishes the version in server.json and checks that
+  // npm version's mcpName, so the release must move the two together.
+  if (!/scripts\/sync-server-json\.mjs \$\{nextRelease\.version\}/.test(exec.prepareCmd ?? '')) {
+    failures.push(
+      '.releaserc.json must run sync-server-json.mjs so a package MCP Registry server.json carries the version being released',
+    );
+  }
+  const gitAssets = config.plugins[gitIndex]?.[1]?.assets ?? [];
+  if (!gitAssets.includes('server.json')) {
+    failures.push(
+      '.releaserc.json must commit server.json with the release, or the MCP Registry entry keeps naming the previous version',
     );
   }
   if (npmIndex < 0 || npmIndex >= execIndex) {

@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { score, sessionBehaviorRedFlags } from './bin/score-trial.ts';
+import { missingScenarioRoles, score, sessionBehaviorRedFlags } from './bin/score-trial.ts';
 
 let tempRoot: string;
 
@@ -988,5 +988,17 @@ describe('prose-as-deliverable red flag', () => {
     expect(flagged(reply(report, [{ name: 'craftbook_write' }]))).toBe(false);
     expect(flagged(reply(report, [{ name: 'mcp__docblocks__save_artifact' }]))).toBe(false);
     expect(flagged(reply(report, [{ name: 'read_file' }]))).toBe(true);
+  });
+});
+
+describe('missingScenarioRoles', () => {
+  it('counts the Illustrator as the image role petshop expects', () => {
+    expect(missingScenarioRoles('petshop', ['Crew Lead', 'Builder', 'Illustrator'])).toEqual([]);
+    expect(missingScenarioRoles('tool-routing-image', ['Illustrator'])).toEqual([]);
+    expect(missingScenarioRoles('petshop', ['Image generator'])).toEqual([]);
+  });
+
+  it('still reports a crew with no image role', () => {
+    expect(missingScenarioRoles('petshop', ['Crew Lead', 'Builder'])).toEqual(['image-generator']);
   });
 });

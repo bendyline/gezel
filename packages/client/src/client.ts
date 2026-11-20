@@ -1905,10 +1905,17 @@ export class GezelClient {
   /**
    * Bring-your-own OAuth apps (Settings → Connections). Keys are the
    * connector manifest's `clientIdEnv` name; the secret is write-only —
-   * listings carry only `hasSecret`.
+   * listings carry only `hasSecret`. `source` says whether the daemon's
+   * environment supplies the client (it then wins over a saved one); daemons
+   * that predate it list saved apps only and omit the field.
    */
   listOAuthClients(): Promise<{
-    clients: Array<{ key: string; clientId: string; hasSecret: boolean }>;
+    clients: Array<{
+      key: string;
+      clientId: string;
+      hasSecret: boolean;
+      source?: 'settings' | 'environment';
+    }>;
   }> {
     return this.request('GET', '/api/oauth-clients');
   }
@@ -5191,6 +5198,19 @@ export class GezelClient {
     return this.request(
       'GET',
       `/api/projects/${encodeURIComponent(id)}/connectors/readiness?type=${encodeURIComponent(type)}`,
+    );
+  }
+
+  /**
+   * Whether Gezel's own sign-in app can connect an OAuth type (`builtin`),
+   * and the `clientIdEnv` key its apps are saved under. When it cannot, the
+   * person needs an app of their own. An app they saved, or one the daemon's
+   * environment sets, still wins at connect time.
+   */
+  connectorOAuthApp(id: string, type: string): Promise<{ key: string | null; builtin: boolean }> {
+    return this.request(
+      'GET',
+      `/api/projects/${encodeURIComponent(id)}/connectors/oauth-app?type=${encodeURIComponent(type)}`,
     );
   }
 
