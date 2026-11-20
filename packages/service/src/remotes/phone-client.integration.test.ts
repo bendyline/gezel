@@ -8,7 +8,7 @@ import {
 } from '@bendyline/gezel-inference/internal/remotes/pinned-fetch';
 import { type RemoteHttp, parseRemoteModelId, remoteChatFetch } from '@bendyline/gezel/remote';
 import { PortableRemoteServers, type PortableRemotes } from '@bendyline/gezel/runtime';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { type RunningService, startService } from '../service.js';
 
 /**
@@ -91,37 +91,50 @@ describe('a phone using a server’s models', () => {
 
   it('reads the server’s models and runs a turn on one', async () => {
     const remoteId = store.value.servers[0]!.remoteId;
-    // The server lists its own engines' models; the mock provider runs
-    // under `copilot`, which it serves but does not list.
-    expect((await phone.models(remoteId)).status).toBe('online');
-    const serverModel = parseRemoteModelId(`remote:${remoteId}/copilot:mock-fast`)!.modelId;
-    const paired = store.value.servers[0]!;
-    // The mock has no context window to report: the server is there, and the
-    // turn goes ahead on the window it gave last (or a default).
-    expect(await phone.admit(paired, serverModel)).toBeNull();
-    expect(phone.status(remoteId)).toBe('online');
+    // A paired server serves only its on-device engines, and mock mode seeds
+    // the mock under `copilot`. Route `ollama:` to that mock for this turn.
+    const chatManager = server.context.chat;
+    const mock = await chatManager.getProviderForModel('copilot', 'mock-fast');
+    const original = chatManager.getProviderForModel.bind(chatManager);
+    const onDevice = vi
+      .spyOn(chatManager, 'getProviderForModel')
+      .mockImplementation((name, model, opts) =>
+        name === 'ollama' ? Promise.resolve(mock) : original(name, model, opts),
+      );
+    try {
+      // The server lists its own engines' models; the mock is not one of them.
+      expect((await phone.models(remoteId)).status).toBe('online');
+      const serverModel = parseRemoteModelId(`remote:${remoteId}/ollama:mock-fast`)!.modelId;
+      const paired = store.value.servers[0]!;
+      // The mock has no context window to report: the server is there, and the
+      // turn goes ahead on the window it gave last (or a default).
+      expect(await phone.admit(paired, serverModel)).toBeNull();
+      expect(phone.status(remoteId)).toBe('online');
 
-    const chat = remoteChatFetch({
-      fetch: phone.fetchFor(paired),
-      baseUrl: paired.baseUrl,
-      token: paired.token,
-      model: serverModel,
-      serverName: paired.displayName,
-    });
-    const response = await chat('gezel-remote://server/v1/chat/completions', {
-      method: 'POST',
-      body: JSON.stringify({
-        stream: true,
-        messages: [
-          { role: 'system', content: 'You are a helpful gezel.' },
-          { role: 'user', content: 'Say hello.' },
-        ],
-      }),
-    });
-    expect(response.status).toBe(200);
-    const text = await response.text();
-    expect(text).toMatch(/"content":"[^"]+"/);
-    expect(text.trim().endsWith('data: [DONE]')).toBe(true);
+      const chat = remoteChatFetch({
+        fetch: phone.fetchFor(paired),
+        baseUrl: paired.baseUrl,
+        token: paired.token,
+        model: serverModel,
+        serverName: paired.displayName,
+      });
+      const response = await chat('gezel-remote://server/v1/chat/completions', {
+        method: 'POST',
+        body: JSON.stringify({
+          stream: true,
+          messages: [
+            { role: 'system', content: 'You are a helpful gezel.' },
+            { role: 'user', content: 'Say hello.' },
+          ],
+        }),
+      });
+      expect(response.status).toBe(200);
+      const text = await response.text();
+      expect(text).toMatch(/"content":"[^"]+"/);
+      expect(text.trim().endsWith('data: [DONE]')).toBe(true);
+    } finally {
+      onDevice.mockRestore();
+    }
   });
 
   it('notices the server going away', async () => {
