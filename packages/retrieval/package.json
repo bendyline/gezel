@@ -1,0 +1,59 @@
+{
+  "name": "@bendyline/gezel-retrieval",
+  "version": "0.0.0",
+  "description": "A mutable, browser-safe retrieval index for documents an app owns: heading-aware chunks and SQLite FTS5 over any synchronous SQLite handle (node:sqlite, or sqlite-wasm on origin-private storage).",
+  "license": "MIT",
+  "keywords": ["gezel", "retrieval", "search", "rag", "sqlite", "fts5", "opfs"],
+  "homepage": "https://github.com/bendyline/gezel",
+  "bugs": {
+    "url": "https://github.com/bendyline/gezel/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bendyline/gezel.git",
+    "directory": "packages/retrieval"
+  },
+  "author": {
+    "name": "Bendyline",
+    "email": "support@bendyline.com"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./sqlite-wasm": {
+      "types": "./dist/sqlite-wasm.d.ts",
+      "import": "./dist/sqlite-wasm.js"
+    }
+  },
+  "files": ["dist", "!dist/**/*.map"],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "clean": "node ../../scripts/clean-dirs.mjs dist .turbo"
+  },
+  "dependencies": {
+    "@bendyline/gezel-knowledge": "workspace:*"
+  },
+  "devDependencies": {
+    "@sqlite.org/sqlite-wasm": "3.53.4-build2",
+    "@types/node": "^24.10.1",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

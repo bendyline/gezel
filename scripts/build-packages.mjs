@@ -35,7 +35,7 @@ export const PACKAGE_BUILD_STAGES = [
     'gezel-knowledge',
     'gezel-connectors-spectral',
   ]),
-  stage('inference', ['gezel-inference']),
+  stage('inference and retrieval', ['gezel-inference', 'gezel-retrieval']),
   // Capacitor bundles inference's knowledge search from its built dist.
   stage('script runtime and Capacitor', ['gezel-script-runtime', 'gezel-capacitor']),
   stage('MCP', ['gezel-mcp']),

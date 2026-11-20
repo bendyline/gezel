@@ -17,7 +17,10 @@ documentation.
 
 Each generation creates a fresh role-preserving `Transcript` from persisted
 messages. Apple admission is capped at 64 messages, 32 KiB UTF-8 input, 4096
-context tokens, 1024 output tokens, 64 KiB output, and one minute. iOS 26.4+ uses
+context tokens, 1024 output tokens, and 64 KiB output. A reply that produces no
+new text for a minute of model time (tool execution excluded) is stalled: what
+streamed before the stall finishes as `length`, and a stall before any text is a
+`TIMEOUT` error. There is no limit on total reply time. iOS 26.4+ uses
 the SDK tokenizer with an output/formatting reserve; earlier versions use a
 conservative byte-based admission estimate. History is rejected when too long,
 never silently truncated. SDK stream snapshots must extend the prior prefix.
