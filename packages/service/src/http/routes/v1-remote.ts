@@ -163,6 +163,26 @@ function effectiveLane(
 /** Local chat engines B can serve to paired clients. */
 const REMOTE_CHAT_PROVIDERS = ['llama-cpp', 'mlx', 'ds4', 'ollama'] as const;
 
+/**
+ * `/models` lists only these, but `/admit` and `/infer` ran whatever provider
+ * the model string named: a paired device could spend this computer's OpenAI,
+ * Anthropic and Copilot quota, or drive its Codex agent.
+ */
+function isRemoteChatProvider(provider: string): boolean {
+  return (REMOTE_CHAT_PROVIDERS as readonly string[]).includes(provider);
+}
+
+function remoteProviderRefusal(c: Context, model: string): Response {
+  return c.json(
+    {
+      error: 'provider_not_served',
+      model,
+      hint: 'a paired server serves only its on-device models',
+    },
+    403,
+  );
+}
+
 function residentBaseUrl(provider: LLMProvider): string | null {
   if (provider.name === 'llama-cpp' || provider.name === 'mlx') {
     return (
@@ -488,6 +508,7 @@ export function v1RemoteRoutes(ctx: EngineContext): Hono {
     if (!target || !target.model) {
       return c.json({ error: 'invalid_model', hint: 'expected <provider>:<model>' }, 400);
     }
+    if (!isRemoteChatProvider(target.provider)) return remoteProviderRefusal(c, body.model);
 
     const auth = c.get('auth') as { appId: string; scopes?: readonly string[] } | undefined;
     const originDeviceId = auth?.appId ?? 'unknown';
@@ -567,6 +588,7 @@ export function v1RemoteRoutes(ctx: EngineContext): Hono {
     if (!target) {
       return c.json({ error: 'invalid_model', hint: 'expected <provider>:<model>' }, 400);
     }
+    if (!isRemoteChatProvider(target.provider)) return remoteProviderRefusal(c, body.model);
 
     const auth = c.get('auth') as { appId: string; scopes?: readonly string[] } | undefined;
     const originDeviceId = auth?.appId ?? 'unknown';

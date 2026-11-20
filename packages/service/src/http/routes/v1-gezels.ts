@@ -1,5 +1,6 @@
 import { externalGezelModelId } from '@bendyline/gezel';
 import type { ProviderName } from '@bendyline/gezel';
+import { servesCallerOwnedTurns } from '@bendyline/gezel-inference/internal/http/openai-compat/caller-providers';
 import { Hono } from 'hono';
 import { resolveDefaultProviderName } from '../../providers/default-provider.js';
 import type { ServiceContext } from '../context.js';
@@ -83,7 +84,13 @@ export function v1GezelsRoutes(ctx: ServiceContext): Hono {
     );
     const effectiveById = new Map(effective.map((e) => [e.id, e]));
 
-    const data: PublicGezelEntry[] = list.map((g) => {
+    // A gezel on an agent CLI is refused by the chat routes, so an app is
+    // not offered it.
+    const servable = list.filter((g) => {
+      const provider = effectiveById.get(g.id)?.provider ?? g.provider ?? fallbackProvider;
+      return servesCallerOwnedTurns(provider as ProviderName);
+    });
+    const data: PublicGezelEntry[] = servable.map((g) => {
       const eff = effectiveById.get(g.id);
       return {
         id: g.id,

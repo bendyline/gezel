@@ -14,14 +14,21 @@ import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/ty
 import type { OAuthTokens } from './oauth.js';
 import type { AdapterFactory, ConnectorBindingRef } from './types.js';
 
+/** Every connector credential's name, and its secret's toolset id, starts with this. */
+export const CONNECTOR_CREDENTIAL_PREFIX = 'connector-';
+
 /** SecretStore key holding a binding's credential blob. */
 export function connectorSecretKey(type: string, bindingId: string) {
-  return { kind: 'toolset' as const, toolsetId: `connector-${type}`, fieldId: bindingId };
+  return {
+    kind: 'toolset' as const,
+    toolsetId: `${CONNECTOR_CREDENTIAL_PREFIX}${type}`,
+    fieldId: bindingId,
+  };
 }
 
 /** Named-credential alias used by ingest scripts for this binding's secret. */
 export function connectorCredentialName(type: string, bindingId: string): string {
-  return `connector-${type}.${bindingId}`;
+  return `${CONNECTOR_CREDENTIAL_PREFIX}${type}.${bindingId}`;
 }
 
 /** A re-persist callback for a rotated OAuth credential, bound to a secret key. */
@@ -49,6 +56,12 @@ export interface NativeAdapterExtras {
    * manifest's schema passes. Empty when the config is fine.
    */
   validateConfig?(config: Record<string, unknown>): string[];
+  /**
+   * Config keys that say where the binding sends its credential (a server
+   * address, an API base, a host). Changing one is changing who receives the
+   * sign-in, so only the person's own app may do it.
+   */
+  destinationKeys?: readonly string[];
   /**
    * One short line for the Connections row (`Saved 40 of about 150 pages`).
    * Read from the adapter's private state; must not touch the network.

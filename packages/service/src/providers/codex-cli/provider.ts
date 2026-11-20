@@ -1,3 +1,5 @@
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 import { createLogger, normalizeCodexPermissionMode } from '@bendyline/gezel';
 import {
   type CodexReasoningEffort,
@@ -23,6 +25,9 @@ import { RUNTIME_SWEEP_INTERVAL_MS, sweepCodexHomes } from './runtime-sweep.js';
 import { CodexCliSession, type CodexSessionDeps } from './session.js';
 
 const DEFAULT_MODEL = HOSTED_PROVIDER_DEFAULT_MODELS['codex-cli'];
+
+/** An always-empty folder under the runtime dir; the home sweep sees no sessions in it. */
+const ONE_SHOT_CWD = 'oneshot-cwd';
 
 const log = createLogger('codex-cli');
 
@@ -238,16 +243,12 @@ export class CodexCliProvider implements LLMProvider {
     this.scheduleRuntimeSweep();
     // Like the Anthropic CLI provider, ChatManager always populates
     // `codexCliContext` for normal session builds; one-shot completions
-    // (icon/about generation, summarization) call `createSession` without
-    // it. Synthesize a transient context so those still work — runtime
-    // files land under a `oneshot/` bucket, which the runtime sweep
-    // empties like every other project's homes.
-    const ctx: NonNullable<SessionOpts['codexCliContext']> = opts.codexCliContext ?? {
-      sessionId: `oneshot-${Math.random().toString(36).slice(2, 10)}`,
-      gezelId: 'oneshot',
-      projectId: 'oneshot',
-      cwd: process.cwd(),
-    };
+    // (icon/about generation, summarization, a script's `llm.oneShot`) call
+    // `createSession` without it. Runtime files land under a `oneshot/`
+    // bucket, which the runtime sweep empties like every other project's
+    // homes.
+    const ctx: NonNullable<SessionOpts['codexCliContext']> =
+      opts.codexCliContext ?? (await this.oneShotContext());
     const reasoningEffort = pickReasoningEffort(
       opts.reasoningEffort,
       ctx.reasoningEffortOverride,
@@ -285,6 +286,25 @@ export class CodexCliProvider implements LLMProvider {
       ...(opts.codexCliThreadId ? { initialResumeId: opts.codexCliThreadId } : {}),
     };
     return new CodexCliSession(deps);
+  }
+
+  /**
+   * A one-shot only writes text, often about untrusted content. It used to
+   * run in the daemon's own folder with the install's mode and Codex's shell,
+   * so a prompt could have it print `runtime/auth-token`. It gets an empty
+   * folder, the read-only sandbox and no shell instead.
+   */
+  private async oneShotContext(): Promise<NonNullable<SessionOpts['codexCliContext']>> {
+    const cwd = join(this.runtimeDir, ONE_SHOT_CWD);
+    await mkdir(cwd, { recursive: true });
+    return {
+      sessionId: `oneshot-${Math.random().toString(36).slice(2, 10)}`,
+      gezelId: 'oneshot',
+      projectId: 'oneshot',
+      cwd,
+      permissionModeOverride: 'plan',
+      shellTool: false,
+    };
   }
 
   /**

@@ -18,6 +18,7 @@ import type {
   WorkspaceIndexStatus,
 } from '@bendyline/gezel';
 import type { ChatManager } from '../chat/manager.js';
+import { CONNECTOR_CREDENTIAL_PREFIX, connectorCredentialName } from '../connectors/registry.js';
 import type { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { resolveCredentialOriginPolicy } from '../secrets/origins.js';
@@ -72,6 +73,36 @@ export interface DispatcherContext {
   gezelId?: string;
   /** That chat's session: its turn is waiting on this run. */
   sessionId?: string;
+  /**
+   * The connector binding whose sync started this run. Only that run may
+   * spend the binding's credential; see {@link assertConnectorCredentialUse}.
+   */
+  connector?: { typeId: string; bindingId: string };
+}
+
+/**
+ * A `script` connector's credential sits in the project's grants so its fetch
+ * script can reach it parent-side, but nothing tied it to that script: at
+ * `free`, a gezel steered by a synced issue added a step script declaring
+ * `credential:connector-github-issues.<id>` and called api.github.com with
+ * the person's token, past draft review and the recipient allowlist. A
+ * connector credential now serves only its own binding's sync runs.
+ */
+export function assertConnectorCredentialUse(
+  credentialName: string,
+  connector: DispatcherContext['connector'],
+): void {
+  if (!credentialName.startsWith(CONNECTOR_CREDENTIAL_PREFIX)) return;
+  if (
+    connector &&
+    credentialName === connectorCredentialName(connector.typeId, connector.bindingId)
+  )
+    return;
+  throw new CapabilityDeniedError(
+    `credential:${credentialName}`,
+    'http.authed',
+    "a connector's credential is used only by that connector's own sync",
+  );
 }
 
 /**
@@ -587,6 +618,7 @@ export function buildDispatcher(deps: DispatcherDeps): {
             ctx.strippedCapabilities?.get(requiredCap),
           );
         }
+        assertConnectorCredentialUse(credentialName, ctx.connector);
         // With no value stored there is nothing to protect: say so first, so
         // a script's anonymous fallback works whatever host it calls. Checking
         // the destination first made a type with no declared origins fail

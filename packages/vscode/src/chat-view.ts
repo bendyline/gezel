@@ -116,7 +116,9 @@ export class ChatViewProvider implements vscode.WebviewViewProvider {
       "default-src 'none'",
       `script-src 'nonce-${nonce}' ${webview.cspSource}`,
       `style-src 'unsafe-inline' ${webview.cspSource}`,
-      `img-src ${webview.cspSource} data: https:`,
+      // No remote images: a model-written `![](https://…?d=…)` was fetched
+      // as soon as the message rendered. Same rule as the app's own CSP.
+      `img-src ${webview.cspSource} data: blob:`,
       `font-src ${webview.cspSource} data:`,
       `worker-src ${webview.cspSource} blob:`,
     ].join('; ');

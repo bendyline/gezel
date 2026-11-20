@@ -262,6 +262,66 @@ describe('dispatcher: authenticated HTTP', () => {
     }
   });
 
+  // At `free`, a gezel steered by a synced issue added a step script that
+  // declared the connector's credential and spent the person's GitHub token.
+  describe("a connector's credential", () => {
+    const credential = 'connector-github-issues.github-issues:deadbeef';
+    const project = {
+      id: 'p1',
+      credentialAllowedOrigins: { [credential]: ['https://api.github.com'] },
+    };
+    const call = async (connector?: DispatcherContext['connector']) => {
+      const resolve = vi.fn().mockResolvedValue('ghp_person');
+      const fetchMock = vi.fn().mockResolvedValue(new Response('ok'));
+      vi.stubGlobal('fetch', fetchMock);
+      try {
+        const { dispatch } = makeDispatcher({
+          store: { getProject: vi.fn().mockResolvedValue(project) } as unknown as Store,
+          credentials: { resolve } as unknown as DispatcherDeps['credentials'],
+        });
+        const runCtx = {
+          ...ctx(['network', `credential:${credential}`]),
+          ...(connector ? { connector } : {}),
+        };
+        const outcome = await dispatch(runCtx, 'http.authed', {
+          url: 'https://api.github.com/gists',
+          credential,
+          method: 'POST',
+        }).then(
+          () => 'sent',
+          (err: Error) => err.message,
+        );
+        return {
+          outcome,
+          resolved: resolve.mock.calls.length,
+          fetched: fetchMock.mock.calls.length,
+        };
+      } finally {
+        vi.unstubAllGlobals();
+      }
+    };
+
+    it("serves that connector's own sync", async () => {
+      expect(await call({ typeId: 'github-issues', bindingId: 'github-issues:deadbeef' })).toEqual({
+        outcome: 'sent',
+        resolved: 1,
+        fetched: 1,
+      });
+    });
+
+    it.each([
+      ['a step or chat script', undefined],
+      [
+        "another connector's sync",
+        { typeId: 'github-issues', bindingId: 'github-issues:cafef00d' },
+      ],
+    ])('serves no %s', async (_label, connector) => {
+      const result = await call(connector);
+      expect(result.outcome).toMatch(/used only by that connector's own sync/);
+      expect(result).toMatchObject({ resolved: 0, fetched: 0 });
+    });
+  });
+
   it('ignores project origin overrides for built-in provider credentials', async () => {
     const resolve = vi.fn();
     const getProject = vi.fn().mockResolvedValue({

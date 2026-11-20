@@ -47,6 +47,7 @@ import {
 import { ReviewInProgressError } from '../../git/reviews.js';
 import { parseGitHubUrl } from '../../github/url.js';
 import type { ServiceContext } from '../context.js';
+import { modelGitRefusal } from '../model-git-gate.js';
 
 /**
  * Local-git routes, host-agnostic in behavior (status, changes, commits,
@@ -103,6 +104,8 @@ export function gitRoutes(ctx: ServiceContext, segment: 'git' | 'github' = 'git'
   });
 
   app.post(`/:id/${segment}/clone`, async (c) => {
+    const refusal = await modelGitRefusal(c, ctx);
+    if (refusal) return refusal;
     const project = await ctx.store.getProject(c.req.param('id'));
     if (!project) return c.json({ error: 'not found' }, 404);
     if (!project.github) return c.json({ error: 'project has no github link' }, 400);
@@ -124,6 +127,8 @@ export function gitRoutes(ctx: ServiceContext, segment: 'git' | 'github' = 'git'
   });
 
   app.post(`/:id/${segment}/pull`, async (c) => {
+    const refusal = await modelGitRefusal(c, ctx);
+    if (refusal) return refusal;
     const project = await ctx.store.getProject(c.req.param('id'));
     if (!project) return c.json({ error: 'not found' }, 404);
     if (!project.github) return c.json({ error: 'project has no github link' }, 400);
@@ -164,6 +169,8 @@ export function gitRoutes(ctx: ServiceContext, segment: 'git' | 'github' = 'git'
   });
 
   app.post(`/:id/${segment}/fetch`, async (c) => {
+    const refusal = await modelGitRefusal(c, ctx);
+    if (refusal) return refusal;
     const project = await ctx.store.getProject(c.req.param('id'));
     if (!project) return c.json({ error: 'not found' }, 404);
     if (!project.github) return c.json({ error: 'project has no github link' }, 400);
@@ -198,6 +205,8 @@ export function gitRoutes(ctx: ServiceContext, segment: 'git' | 'github' = 'git'
   });
 
   app.post(`/:id/${segment}/push`, async (c) => {
+    const refusal = await modelGitRefusal(c, ctx);
+    if (refusal) return refusal;
     const project = await ctx.store.getProject(c.req.param('id'));
     if (!project) return c.json({ error: 'not found' }, 404);
     if (!project.github) return c.json({ error: 'project has no github link' }, 400);
@@ -318,6 +327,8 @@ export function gitRoutes(ctx: ServiceContext, segment: 'git' | 'github' = 'git'
   // ── sync + merge ──────────────────────────────────────────────────
 
   app.post(`/:id/${segment}/sync`, async (c) => {
+    const refusal = await modelGitRefusal(c, ctx);
+    if (refusal) return refusal;
     const project = await ctx.store.getProject(c.req.param('id'));
     if (!project) return c.json({ error: 'not found' }, 404);
     if (!project.github) return c.json({ error: 'project has no github link' }, 400);

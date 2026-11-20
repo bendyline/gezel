@@ -70,6 +70,11 @@ import { ProjectDeleteError } from '../../fs/store.js';
 import { isOfficeLockName } from '../../fs/sync-junk.js';
 import { resolveProjectBoekwachter } from '../../gezels/autonomous-roles.js';
 import { GitError, runGit } from '../../git/git.js';
+import {
+  type ModelCloneRefusal,
+  isModelCloneRefusal,
+  planModelClone,
+} from '../../git/model-clone-policy.js';
 import { buildEnrichDeps } from '../../index-store/enrich.js';
 import {
   albumMediaDeps,
@@ -163,7 +168,7 @@ function mapWorkspaceError(err: unknown): { status: number; body: Record<string,
 export function projectRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
 
-  /** History for a gezel-written script the runner refused before it ran. */
+  /** History for a gezel-written script or clone the tripwire refused before it ran. */
   const recordBlockedScript = (
     c: Context,
     projectId: string,
@@ -181,6 +186,13 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     });
     log.warn(`${entry.summary} (project ${projectId})`);
     void ctx.history?.log(entry).catch(() => undefined);
+  };
+
+  /** The response for a clone `planModelClone` refused, with History for a tripwire hit. */
+  const refuseModelClone = (c: Context, tool: string, refusal: ModelCloneRefusal) => {
+    if ('indicators' in refusal)
+      recordBlockedScript(c, c.req.param('id') ?? '', tool, refusal.indicators);
+    return c.json({ error: refusal.error }, refusal.status);
   };
 
   app.get('/', async (c) => {
@@ -2008,19 +2020,13 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     });
     if (!gate.ok) return c.json({ error: 'workspace writes are disabled', ...gate }, 403);
 
-    // URL guard: HTTPS only, drop SSH / non-http schemes outright so the
-    // service never depends on the host's SSH agent setup. Also reject
-    // file:// because that would let a chat-driven tool exfiltrate
-    // arbitrary local paths into the workspace.
-    let parsedUrl: URL;
-    try {
-      parsedUrl = new URL(body.url);
-    } catch {
-      return c.json({ error: 'invalid URL' }, 400);
-    }
-    if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
-      return c.json({ error: 'only http(s) URLs are allowed' }, 400);
-    }
+    // http(s) only (no SSH agent, no file:// into the workspace), then the
+    // security level, the egress tripwire and the SSRF guard.
+    const clone = await planModelClone(
+      body.url,
+      resolveSecurityPolicy(await ctx.store.readConfig()),
+    );
+    if (isModelCloneRefusal(clone)) return refuseModelClone(c, 'fetch_repo', clone);
 
     let workspaceDir: string;
     try {
@@ -2102,7 +2108,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       // directly — for those, the caller would need a separate
       // `git fetch <sha> && git checkout <sha>` step, which we don't
       // expose today. Surface a clear error if the user passed a hex SHA.
-      const cloneArgs = ['clone', '--depth', '1'];
+      const cloneArgs = ['clone', ...clone.cloneOptions, '--depth', '1'];
       if (body.branch) {
         if (/^[0-9a-f]{7,40}$/i.test(body.branch)) {
           return c.json(
@@ -2212,15 +2218,11 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     });
     if (!gate.ok) return c.json({ error: 'workspace writes are disabled', ...gate }, 403);
 
-    let parsedUrl: URL;
-    try {
-      parsedUrl = new URL(body.url);
-    } catch {
-      return c.json({ error: 'invalid URL' }, 400);
-    }
-    if (parsedUrl.protocol !== 'https:' && parsedUrl.protocol !== 'http:') {
-      return c.json({ error: 'only http(s) URLs are allowed' }, 400);
-    }
+    const clone = await planModelClone(
+      body.url,
+      resolveSecurityPolicy(await ctx.store.readConfig()),
+    );
+    if (isModelCloneRefusal(clone)) return refuseModelClone(c, 'fetch_diff', clone);
 
     let workspaceDir: string;
     try {
@@ -2286,7 +2288,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     // Partial clone — pull commit graph + trees but no blobs until needed.
     // Modern git (2.19+) + GitHub support this. Fast for a diff use case.
     try {
-      await runGit(['clone', '--filter=blob:none', body.url, destAbs], {
+      await runGit(['clone', ...clone.cloneOptions, '--filter=blob:none', body.url, destAbs], {
         timeoutMs: 5 * 60 * 1000,
       });
     } catch (err) {

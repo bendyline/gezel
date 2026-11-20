@@ -27,6 +27,7 @@ import {
 import type { InferenceContext as ServiceContext } from '../inference-context.js';
 import { appendCallerOwnedActionLedger } from '../openai-compat/action-ledger.js';
 import { profileForCallerOwnedInference } from '../openai-compat/caller-owned-profile.js';
+import { callerOwnedTargetRefusal } from '../openai-compat/caller-providers.js';
 import {
   resolveChatTarget,
   resolveFallbackGezelId,
@@ -346,6 +347,15 @@ export function v1ChatRoutes(ctx: ServiceContext, opts: V1ChatRoutesOptions = {}
             code: 'provider_not_allowed',
             message: 'This host only serves on-device models.',
           },
+        },
+        403,
+      );
+    }
+    const refusal = callerOwnedTargetRefusal(target);
+    if (refusal) {
+      return c.json(
+        {
+          error: { code: 'provider_not_allowed', type: 'invalid_request_error', message: refusal },
         },
         403,
       );

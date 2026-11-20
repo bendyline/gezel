@@ -147,6 +147,14 @@ export class NodeScriptHost {
         ...(context.trigger.kind === 'chat'
           ? { gezelId: context.trigger.gezelId, sessionId: context.trigger.sessionId }
           : {}),
+        ...(context.trigger.kind === 'connector'
+          ? {
+              connector: {
+                typeId: context.trigger.typeId,
+                bindingId: context.trigger.bindingId,
+              },
+            }
+          : {}),
       },
       method,
       params,

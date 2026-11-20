@@ -1,4 +1,9 @@
-import { PageCheckRequestSchema, type PageCheckResponse, createLogger } from '@bendyline/gezel';
+import {
+  PageCheckRequestSchema,
+  type PageCheckResponse,
+  createLogger,
+  resolveSecurityPolicy,
+} from '@bendyline/gezel';
 import { redactPathSecrets } from '@bendyline/gezel-inference/internal/perf/redact-path';
 import { playwrightBrowsersDir } from '@bendyline/gezel/paths';
 import { Hono } from 'hono';
@@ -15,6 +20,16 @@ import {
 } from '../preview-capability.js';
 
 const log = createLogger('http');
+
+/** The preview's own rule (`previewAllowsExternalNetwork`), failing closed. */
+async function pageMayReachNetwork(ctx: ServiceContext): Promise<boolean> {
+  try {
+    const policy = resolveSecurityPolicy(await ctx.store.readConfig());
+    return policy.allowExternalServices && policy.allowAppNetwork;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Headless runtime smoke check of a workspace HTML page. The MCP write
@@ -80,6 +95,7 @@ export function pageCheckRoutes(ctx: ServiceContext, capabilities: PreviewCapabi
         installPath,
         browsersPath: playwrightBrowsersDir(ctx.home),
         url,
+        allowExternalNetwork: await pageMayReachNetwork(ctx),
       });
     } finally {
       capabilities.revoke(minted.token);

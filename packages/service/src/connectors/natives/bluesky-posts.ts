@@ -963,6 +963,8 @@ function parseConfig(raw: Record<string, unknown> | undefined): BlueskyConfig {
     typeof raw?.service === 'string' && raw.service.trim()
       ? raw.service.trim().replace(/\/+$/, '')
       : DEFAULT_SERVICE;
+  const serviceProblem = blueskyServiceProblem(service);
+  if (serviceProblem) throw new Error(serviceProblem);
   const num = (value: unknown, fallback: number, min: number, max: number): number =>
     typeof value === 'number' && Number.isFinite(value)
       ? Math.min(max, Math.max(min, value))
@@ -977,6 +979,24 @@ function parseConfig(raw: Record<string, unknown> | undefined): BlueskyConfig {
     metricsHistory: raw?.metricsHistory !== false,
     allowPublish: raw?.allowPublish === true,
   };
+}
+
+/**
+ * Sign-in sends the app password to `service`. It took any address, plain
+ * http included, so whoever could edit the setting received the password on
+ * the next sync. A self-hosted server is fine; an unencrypted one is not.
+ */
+export function blueskyServiceProblem(service: string): string | null {
+  let url: URL;
+  try {
+    url = new URL(service);
+  } catch {
+    return `Bluesky server "${service}" is not a web address.`;
+  }
+  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
+    return `Bluesky server "${service}" must be an https:// address without a password or query.`;
+  }
+  return null;
 }
 
 /** The stored secret is a plain app password or `{"appPassword": "..."}`. */
@@ -1511,7 +1531,16 @@ export function profileToStatsRecord(
 
 /** Register the Bluesky native adapter. */
 export function registerBlueskyAdapters(): void {
-  registerNativeAdapter('bluesky-posts', async (binding, deps) =>
-    Promise.resolve(new BlueskyPostsAdapter(binding, deps)),
+  registerNativeAdapter(
+    'bluesky-posts',
+    async (binding, deps) => Promise.resolve(new BlueskyPostsAdapter(binding, deps)),
+    {
+      destinationKeys: ['service'],
+      validateConfig(config) {
+        const service = typeof config.service === 'string' ? config.service.trim() : '';
+        const problem = service ? blueskyServiceProblem(service.replace(/\/+$/, '')) : null;
+        return problem ? [problem] : [];
+      },
+    },
   );
 }

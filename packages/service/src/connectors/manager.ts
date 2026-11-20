@@ -1065,6 +1065,43 @@ export interface PatchConnectorInput {
   config?: Record<string, unknown>;
   /** Pause (true) or resume (false). Resuming clears an emergency stop. */
   disabled?: boolean;
+  /**
+   * The person's own app made the request (`isFirstPartyCaller`). Only it may
+   * change a destination field (see {@link connectorDestinationKeys}).
+   */
+  firstParty?: boolean;
+}
+
+/**
+ * The config keys that say where a binding sends its credential: those a
+ * script type's `allowedOrigins` reads through `$config.`, plus a native's
+ * declared `destinationKeys`. Editing one needed no credential, so an
+ * approved app could point Bluesky's server, or a GitHub Enterprise base, at
+ * itself and receive the sign-in on the next sync.
+ */
+export function connectorDestinationKeys(
+  manifest: Pick<ConnectorTypeManifest, 'allowedOrigins' | 'driver' | 'source'>,
+): string[] {
+  const keys = new Set<string>();
+  for (const entry of manifest.allowedOrigins ?? []) {
+    if (entry.startsWith('$config.')) keys.add(entry.slice('$config.'.length).split('.')[0]!);
+  }
+  if (manifest.driver === 'native') {
+    const adapterId = String((manifest.source as { adapterId?: string }).adapterId ?? '');
+    for (const key of NATIVE_ADAPTER_EXTRAS.get(adapterId)?.destinationKeys ?? []) keys.add(key);
+  }
+  return [...keys];
+}
+
+/** The destination keys whose value differs between two configs. */
+export function changedDestinationKeys(
+  keys: readonly string[],
+  before: Record<string, unknown> | undefined,
+  after: Record<string, unknown>,
+): string[] {
+  return keys.filter(
+    (key) => JSON.stringify(before?.[key] ?? null) !== JSON.stringify(after[key] ?? null),
+  );
 }
 
 export interface BindConnectorInput {
@@ -1535,12 +1572,14 @@ export class ConnectorManager {
   ): Promise<ProjectConnectorBinding> {
     const before = (await this.reread(project)).connectors?.find((b) => b.id === bindingId);
     if (!before) throw new Error(`no connector binding ${bindingId}`);
+    let manifest: ConnectorTypeManifest | undefined;
     if (patch.config) {
       const resolved = await this.loadType(
         before.type,
         before.version,
         before.sourceId ?? 'bundled',
       );
+      manifest = resolved.manifest;
       const errors = validateConnectorConfig(resolved.manifest.configSchema, patch.config);
       if (errors.length === 0)
         errors.push(...nativeConfigProblems(resolved.manifest, patch.config));
@@ -1551,6 +1590,15 @@ export class ConnectorManager {
       const current = await this.reread(project);
       const binding = (current.connectors ?? []).find((b) => b.id === bindingId);
       if (!binding) throw new Error(`no connector binding ${bindingId}`);
+      const destinationsMoved =
+        patch.config && manifest
+          ? changedDestinationKeys(connectorDestinationKeys(manifest), binding.config, patch.config)
+          : [];
+      if (destinationsMoved.length > 0 && !patch.firstParty) {
+        throw new ConnectorPolicyError(
+          `Only the Gezel app can change where ${binding.displayName ?? binding.type} sends its sign-in (${destinationsMoved.join(', ')}).`,
+        );
+      }
       const updated: ProjectConnectorBinding = { ...binding };
       if (patch.displayName !== undefined) {
         const name = patch.displayName.trim();
@@ -1575,9 +1623,33 @@ export class ConnectorManager {
         delete updated.disabled;
         delete updated.disabledReason;
       }
+      // The credential's origins follow the destination the person just set;
+      // a sync never re-derives them (see ensureDeclaredOrigins).
+      const credName = connectorCredentialName(binding.type, binding.id);
+      const origins =
+        destinationsMoved.length > 0 && manifest?.driver === 'script'
+          ? resolveDeclaredOrigins(manifest, updated.config)
+          : null;
       await this.opts.store.updateProject(project.id, {
         connectors: (current.connectors ?? []).map((b) => (b.id === bindingId ? updated : b)),
+        ...(origins
+          ? {
+              credentialAllowedOrigins: {
+                ...(current.credentialAllowedOrigins ?? {}),
+                [credName]: origins,
+              },
+            }
+          : {}),
       });
+      if (destinationsMoved.length > 0) {
+        await this.opts.store.historyManager
+          ?.log({
+            kind: 'project.connector.updated',
+            projectId: project.id,
+            summary: `Connector destination changed: ${binding.displayName ?? binding.type} (${destinationsMoved.join(', ')})`,
+          })
+          .catch(() => {});
+      }
       if (patch.disabled !== undefined && patch.disabled !== Boolean(binding.disabled)) {
         await this.opts.store.historyManager
           ?.log({
@@ -2450,6 +2522,11 @@ export class ConnectorManager {
    * before their type declared `allowedOrigins` (or before this write path
    * existed) get the entry on their next sync, with no migration step.
    * Called under the project lock.
+   *
+   * Once an entry exists it only gains the type's literal origins (catalog
+   * content) and loses what the type no longer declares. A `$config` origin
+   * is added only by bind and by the person's own edit: re-deriving it here
+   * let a config changed without the credential widen where it was sent.
    */
   private async ensureDeclaredOrigins(
     project: ProjectDetail,
@@ -2457,10 +2534,20 @@ export class ConnectorManager {
     manifest: ConnectorTypeManifest,
   ): Promise<void> {
     if (manifest.driver !== 'script' || !manifest.allowedOrigins?.length) return;
-    const expected = resolveDeclaredOrigins(manifest, binding.config);
-    if (expected.length === 0) return;
+    const declared = resolveDeclaredOrigins(manifest, binding.config);
     const credName = connectorCredentialName(binding.type, binding.id);
     const existing = project.credentialAllowedOrigins?.[credName];
+    const literal = resolveDeclaredOrigins(
+      {
+        id: manifest.id,
+        allowedOrigins: manifest.allowedOrigins.filter((e) => !e.startsWith('$config.')),
+      },
+      undefined,
+    );
+    const expected = existing
+      ? declared.filter((origin) => existing.includes(origin) || literal.includes(origin))
+      : declared;
+    if (expected.length === 0) return;
     if (existing && JSON.stringify([...existing].sort()) === JSON.stringify([...expected].sort())) {
       return;
     }

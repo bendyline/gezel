@@ -698,13 +698,16 @@ function nonNegativeInt(value: unknown, label: string): number {
 export function registerGitHubReleasesAdapters(): void {
   // The transport comes from the deps like every other native adapter's, so
   // tests and the provider simulator reach this one too.
-  registerNativeAdapter('github-releases', async (binding, deps) =>
-    Promise.resolve(
-      new GitHubReleasesAdapter(
-        binding,
-        deps,
-        deps.fetch ? { ...defaultRuntime, fetch: deps.fetch } : defaultRuntime,
+  registerNativeAdapter(
+    'github-releases',
+    async (binding, deps) =>
+      Promise.resolve(
+        new GitHubReleasesAdapter(
+          binding,
+          deps,
+          deps.fetch ? { ...defaultRuntime, fetch: deps.fetch } : defaultRuntime,
+        ),
       ),
-    ),
+    { destinationKeys: ['apiBaseUrl'] },
   );
 }

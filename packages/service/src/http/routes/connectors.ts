@@ -233,9 +233,11 @@ export function connectorRoutes(ctx: ServiceContext): Hono {
         ...(body.data.displayName !== undefined ? { displayName: body.data.displayName } : {}),
         ...(body.data.config ? { config: body.data.config } : {}),
         ...(body.data.disabled !== undefined ? { disabled: body.data.disabled } : {}),
+        firstParty: isFirstPartyCaller(c),
       });
       return c.json({ ok: true, binding });
     } catch (err) {
+      if (err instanceof ConnectorPolicyError) return c.json({ error: err.message }, 403);
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
     }
   });
