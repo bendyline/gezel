@@ -1,4 +1,4 @@
-import type { UnifiedSearchResult } from '@bendyline/gezel';
+import { type UnifiedSearchResult, parseKnowledgeUri } from '@bendyline/gezel';
 import {
   AppKnowledgeActionSchema,
   AppKnowledgeQuerySchema,
@@ -30,11 +30,27 @@ function appCatalog(entry: { source?: string }): boolean {
   return entry.source !== 'bundled';
 }
 
+/** `first[0], second[0], first[1], second[1], …` — an order for passages with no shared score. */
+function interleave(first: readonly Passage[], second: readonly Passage[]): Passage[] {
+  const merged: Passage[] = [];
+  for (let index = 0; index < Math.max(first.length, second.length); index++) {
+    if (index < first.length) merged.push(first[index]!);
+    if (index < second.length) merged.push(second[index]!);
+  }
+  return merged;
+}
+
+/**
+ * Room for a query and its candidates (up to 24,000 characters of passage text
+ * plus references and titles) in multi-byte UTF-8 and JSON escaping.
+ */
+const MAX_BODY_BYTES = 192_000;
+
 /** Public app surface: registered catalogs and reference passages only. */
 export function v1KnowledgeRoutes(ctx: Pick<ServiceContext, 'knowledge' | 'relevance'>): Hono {
   const app = new Hono();
   let active = 0;
-  app.use('*', bodyLimit({ maxSize: 40_000 }));
+  app.use('*', bodyLimit({ maxSize: MAX_BODY_BYTES }));
   app.use('*', async (c, next) => {
     if (!ctx.knowledge)
       return c.json(
@@ -239,6 +255,15 @@ export function v1KnowledgeRoutes(ctx: Pick<ServiceContext, 'knowledge' | 'relev
   app.post('/retrieve', async (c) => {
     const query = AppKnowledgeQuerySchema.parse(await c.req.json());
     const required = query.rerank === 'required';
+    // The app's own passages (a person's notes), already past the app's bar.
+    const own: Passage[] = (query.candidates ?? []).map((candidate) => ({
+      uri: candidate.uri,
+      title: candidate.title,
+      text: candidate.text,
+      // The schema admits only well-formed knowledge://local/ references.
+      catalogId: parseKnowledgeUri(candidate.uri)!.catalogId,
+      version: 'local',
+    }));
     const manager = ctx.knowledge!;
     const installed = await manager.list();
     const enabled = installed.filter((entry) => entry.enabled && appCatalog(entry));
@@ -252,7 +277,8 @@ export function v1KnowledgeRoutes(ctx: Pick<ServiceContext, 'knowledge' | 'relev
         },
         409,
       );
-    if (enabled.length === 0) return c.json({ reranked: true as const, passages: [] });
+    if (enabled.length === 0 && own.length === 0)
+      return c.json({ reranked: true as const, passages: [] });
     const activeModel = await ctx.relevance.forSurface('search', {
       enabled: true,
     });
@@ -267,17 +293,19 @@ export function v1KnowledgeRoutes(ctx: Pick<ServiceContext, 'knowledge' | 'relev
         409,
       );
     c.req.raw.signal.throwIfAborted();
-    const hits = await manager.searchUnified(query.query, {
-      vector: null,
-      localModelsOnly: true,
-      maxResults: 24,
-      queryEmbedBudgetMs: 5000,
-      catalogs: enabled.map((entry) => entry.ref.catalogId),
-      // Let the reranker choose among an article's sections: one passage per
-      // article, picked by embedding similarity, sent an infobox in place of
-      // the history the person asked about.
-      chunksPerDocument: 3,
-    });
+    const hits = !enabled.length
+      ? []
+      : await manager.searchUnified(query.query, {
+          vector: null,
+          localModelsOnly: true,
+          maxResults: 24,
+          queryEmbedBudgetMs: 5000,
+          catalogs: enabled.map((entry) => entry.ref.catalogId),
+          // Let the reranker choose among an article's sections: one passage per
+          // article, picked by embedding similarity, sent an infobox in place of
+          // the history the person asked about.
+          chunksPerDocument: 3,
+        });
     c.req.raw.signal.throwIfAborted();
     const candidates: Array<{ hit: UnifiedSearchResult; passage: Passage }> = [];
     for (const hit of hits.slice(0, 24)) {
@@ -310,31 +338,37 @@ export function v1KnowledgeRoutes(ctx: Pick<ServiceContext, 'knowledge' | 'relev
       }
       return selected;
     };
-    // `auto` without a usable model: Gezel's own bar, in fused order.
+    // `auto` without a usable model: Gezel's own bar, in fused order, taking
+    // turns with the app's passages (the two share no score).
     const unjudged = () =>
       c.json(
         AppKnowledgeRetrievalSchema.parse({
           reranked: false,
           passages: fit(
-            candidates
-              .filter(({ hit }) => admitsUnjudgedKnowledge(hit))
-              .map(({ passage }) => passage),
+            interleave(
+              candidates
+                .filter(({ hit }) => admitsUnjudgedKnowledge(hit))
+                .map(({ passage }) => passage),
+              own,
+            ),
           ),
         }),
       );
     if (!activeModel) return unjudged();
-    if (!candidates.length) return c.json({ reranked: true as const, passages: [] });
+    // One judgement over catalog and app passages, held to the same bar.
+    const pool = [...candidates.map(({ passage }) => passage), ...own];
+    if (!pool.length) return c.json({ reranked: true as const, passages: [] });
     const result = await ctx.relevance.scorer.score({
       model: activeModel.model,
       query: query.query,
-      passages: candidates.map(({ passage }) => passage.text),
+      passages: pool.map((passage) => passage.text),
       waitForLoad: true,
       budgetMs: 30_000,
     });
     c.req.raw.signal.throwIfAborted();
     if (
       result.status !== 'scored' ||
-      result.scores?.length !== candidates.length ||
+      result.scores?.length !== pool.length ||
       result.scores.some((score) => score === null || !Number.isFinite(score))
     ) {
       if (!required) return unjudged();
@@ -348,8 +382,8 @@ export function v1KnowledgeRoutes(ctx: Pick<ServiceContext, 'knowledge' | 'relev
         409,
       );
     }
-    const ordered = candidates
-      .map(({ passage }, index) => ({ passage, score: result.scores![index]! }))
+    const ordered = pool
+      .map((passage, index) => ({ passage, score: result.scores![index]! }))
       .filter(({ score }) => !activeModel.thresholds || score >= activeModel.thresholds.keep)
       .sort((a, b) => b.score - a.score);
     return c.json(

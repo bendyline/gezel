@@ -175,7 +175,9 @@ const connection = { ...(await connectEmbeddingRuntime()), knowledge };
   match the desktop's. Without the relevance model, `retrieve` admits only what
   Gezel's bar for unjudged passages admits, which is vector evidence; until the
   query model is installed a catalog is searched by keyword and contributes no
-  passages. `rerank: 'required'` and `prepare-reranker` are refused.
+  passages. `rerank: 'required'` and `prepare-reranker` are refused. An app's
+  own `candidates` take turns with the catalog passages, as on a desktop
+  without the relevance model, and are returned even with no catalog enabled.
 - **Licenses.** The worker and the tokenizer compile third-party code into
   `dist/`; the build stages their license texts in `dist/licenses/npm/`.
 

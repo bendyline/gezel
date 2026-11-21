@@ -280,6 +280,33 @@ describe('createMobileKnowledge', () => {
     });
   });
 
+  it("takes turns with the app's own passages, and offers them with no catalog", async () => {
+    vi.stubGlobal('fetch', serveTokenizer(MODEL_ID));
+    const { knowledge } = subject({
+      [CATALOG.id]: [ARCHIVE],
+      [MODEL_ID]: MODEL.files.map((file) => file.name),
+    });
+    const candidate = {
+      uri: 'knowledge://local/ws-0123456789abcdef/seattle/hotels.md#line=2-6',
+      title: 'Hotels',
+      text: 'The Panama Hotel keeps a tea house.',
+    };
+    const own = { ...candidate, catalogId: 'ws-0123456789abcdef', version: 'local' };
+    const result = await knowledge.retrieve({ ...query, candidates: [candidate] });
+    expect(result.reranked).toBe(false);
+    expect(result.passages.map((passage) => passage.title)).toEqual(['Panama Hotel', 'Hotels']);
+    expect(result.passages[1]).toEqual(own);
+
+    await knowledge.update({ action: 'disable', catalogId: CATALOG.id });
+    expect(await knowledge.retrieve({ ...query, candidates: [candidate] })).toEqual({
+      reranked: false,
+      passages: [own],
+    });
+    await expect(
+      knowledge.retrieve({ ...query, rerank: 'required', candidates: [candidate] }),
+    ).rejects.toMatchObject({ code: 'reranker_required' });
+  });
+
   it('admits nothing from keyword search alone', async () => {
     const { knowledge, host } = subject({ [CATALOG.id]: [ARCHIVE] });
     expect(await knowledge.retrieve(query)).toEqual({ reranked: false, passages: [] });

@@ -12,6 +12,13 @@ export interface KnowledgeUri {
   fragment?: { chunk: string } | { lineStart: number; lineEnd?: number };
 }
 
+/**
+ * The publisher of passages an app found in its own content, such as a
+ * person's notes: `knowledge://local/<collection>/<path>`. Apps hand these to
+ * retrieval beside catalog passages; no catalog may publish under it.
+ */
+export const LOCAL_KNOWLEDGE_PUBLISHER = 'local';
+
 const KNOWLEDGE_URI_PREFIX = 'knowledge://';
 const MAX_ENCODED_DOCUMENT_ID = 512;
 
@@ -79,4 +86,9 @@ export function parseKnowledgeUri(raw: string): KnowledgeUri | null {
     };
   }
   return null;
+}
+
+/** True for a well-formed `knowledge://local/…` reference (see {@link LOCAL_KNOWLEDGE_PUBLISHER}). */
+export function isLocalKnowledgeUri(raw: string): boolean {
+  return parseKnowledgeUri(raw)?.publisherId === LOCAL_KNOWLEDGE_PUBLISHER;
 }

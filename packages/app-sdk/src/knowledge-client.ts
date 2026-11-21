@@ -11,6 +11,7 @@ import {
   AppKnowledgeStateSchema,
 } from '@bendyline/gezel-client/app-models';
 import { GezelSdkError, errorFromResponse } from './errors.js';
+import { interleaveKnowledgeCandidates } from './knowledge-candidates.js';
 import type { RequestOptions } from './types.js';
 
 /** What `retrieve` takes. `rerank` defaults to `auto`. */
@@ -87,6 +88,8 @@ export class KnowledgeClient {
   }
   /** Set once a Gezel rejects `rerank: 'auto'`; it predates the mode. */
   private autoUnsupported = false;
+  /** Set once a Gezel rejects `candidates`; it predates them. */
+  private candidatesUnsupported = false;
 
   async state(opts: RequestOptions = {}): Promise<KnowledgeState> {
     const [raw, relevance] = await Promise.all([
@@ -140,12 +143,40 @@ export class KnowledgeClient {
    * relevance model when it is installed, and otherwise returns only what
    * Gezel's own bar for unranked passages admits — never an error for the
    * missing model. `required` refuses without it.
+   *
+   * `candidates` are the app's own passages (`knowledge://local/…`), ranked
+   * with the catalogs' under one judgement. A Gezel that predates them gets
+   * the query without them, and they take turns with its passages here.
    */
   async retrieve(
     input: KnowledgeRetrieveInput,
     opts: RequestOptions = {},
   ): Promise<AppKnowledgeRetrieval> {
     const query = AppKnowledgeQuerySchema.parse({ ...input, rerank: input.rerank ?? 'auto' });
+    const { candidates, ...catalogs } = query;
+    if (!candidates?.length) return this.retrieveCatalogs(catalogs, opts);
+    if (!this.candidatesUnsupported) {
+      try {
+        return await this.send(query, opts);
+      } catch (error) {
+        // The query passed this schema, so an older Gezel can only be
+        // rejecting `candidates` (or `auto`, which is older still).
+        if (!(error instanceof GezelSdkError && (error.status === 400 || error.status === 422)))
+          throw error;
+        this.candidatesUnsupported = true;
+      }
+    }
+    return interleaveKnowledgeCandidates(
+      await this.retrieveCatalogs(catalogs, opts),
+      candidates,
+      query,
+    );
+  }
+
+  private async retrieveCatalogs(
+    query: AppKnowledgeQuery,
+    opts: RequestOptions,
+  ): Promise<AppKnowledgeRetrieval> {
     if (query.rerank === 'auto' && this.autoUnsupported)
       return this.retrieveLegacyAuto(query, opts);
     try {

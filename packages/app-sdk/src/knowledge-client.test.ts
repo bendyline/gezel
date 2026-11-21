@@ -96,6 +96,50 @@ describe('knowledge SDK', () => {
     // The second call goes straight to the mode that Gezel understands.
     expect(sent).toEqual(['auto', 'required', 'required']);
   });
+  it('sends candidates for one ranking, and takes turns with them on a Gezel that predates them', async () => {
+    const candidate = {
+      uri: 'knowledge://local/ws-0123456789abcdef/garden/roses.md#line=3-9',
+      title: 'Rose bed',
+      text: 'Aphids cluster on new growth.',
+    };
+    const catalog = {
+      uri: 'knowledge://pub/science/aphids',
+      title: 'Aphid',
+      text: 'Aphids are sap-sucking insects.',
+      catalogId: 'science',
+      version: '1',
+    };
+    const bodies: Array<Record<string, unknown>> = [];
+    const gezel = (understandsCandidates: boolean) =>
+      new GezelApp({
+        baseUrl: 'http://127.0.0.1',
+        token: 'test',
+        fetch: async (_url, init) => {
+          const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+          bodies.push(body);
+          return 'candidates' in body && !understandsCandidates
+            ? Response.json({ error: 'Unrecognized key: candidates' }, { status: 422 })
+            : Response.json({ reranked: true, passages: [catalog] });
+        },
+      });
+    const query = { query: 'pests', maxResults: 4, maxCharacters: 4000, candidates: [candidate] };
+    expect(await gezel(true).knowledge.retrieve(query)).toEqual({
+      reranked: true,
+      passages: [catalog],
+    });
+    expect(bodies).toEqual([{ ...query, rerank: 'auto' }]);
+
+    bodies.length = 0;
+    const older = gezel(false);
+    const expected = {
+      reranked: false,
+      passages: [catalog, { ...candidate, catalogId: 'ws-0123456789abcdef', version: 'local' }],
+    };
+    expect(await older.knowledge.retrieve(query)).toEqual(expected);
+    expect(await older.knowledge.retrieve(query)).toEqual(expected);
+    // Only the first call offers candidates; later ones go straight to what Gezel understands.
+    expect(bodies.map((body) => 'candidates' in body)).toEqual([true, false, false]);
+  });
   it('offers the improvement download only when a catalog would use it', async () => {
     const catalog = {
       id: 'science',

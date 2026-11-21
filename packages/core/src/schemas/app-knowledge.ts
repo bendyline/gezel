@@ -1,4 +1,4 @@
-import { KnowledgeIdSchema } from '@bendyline/gezk';
+import { KnowledgeIdSchema, isLocalKnowledgeUri } from '@bendyline/gezk';
 import { z } from 'zod';
 
 const label = z.string().min(1).max(256);
@@ -41,6 +41,27 @@ export const AppKnowledgeActionSchema = z.union([
     .strict(),
   z.object({ action: z.literal('prepare-reranker') }).strict(),
 ]);
+/**
+ * A passage the app found in its own content, such as one of the person's
+ * notes, offered for ranking beside catalog passages. With the relevance
+ * model both are judged together and held to the same bar; without it the
+ * app's passages count as admitted (the app applied its own bar) and are
+ * interleaved with the catalog passages, a catalog passage first. A chosen
+ * candidate comes back as a passage whose `catalogId` is its reference's
+ * collection and whose `version` is `local`.
+ */
+export const AppKnowledgeCandidateSchema = z
+  .object({
+    uri: z
+      .string()
+      .min(1)
+      .max(2048)
+      .refine(isLocalKnowledgeUri, 'A candidate must be a knowledge://local/ reference'),
+    title: label,
+    text: z.string().min(1).max(6000),
+  })
+  .strict();
+const MAX_CANDIDATE_CHARACTERS = 24000;
 export const AppKnowledgeQuerySchema = z
   .object({
     query: z.string().min(1).max(8192),
@@ -52,6 +73,17 @@ export const AppKnowledgeQuerySchema = z
     rerank: z.enum(['required', 'auto']),
     maxResults: z.number().int().min(1).max(8),
     maxCharacters: z.number().int().min(1).max(24000),
+    /** Optional; a Gezel that predates them refuses the query (400/422). */
+    candidates: z
+      .array(AppKnowledgeCandidateSchema)
+      .max(8)
+      .refine(
+        (candidates) =>
+          candidates.reduce((sum, candidate) => sum + candidate.text.length, 0) <=
+          MAX_CANDIDATE_CHARACTERS,
+        `Candidates may carry at most ${MAX_CANDIDATE_CHARACTERS} characters`,
+      )
+      .optional(),
   })
   .strict();
 export const AppKnowledgeRetrievalSchema = z
@@ -91,4 +123,5 @@ export type AppKnowledgeState = z.infer<typeof AppKnowledgeStateSchema>;
 export type AppKnowledgeRelevance = z.infer<typeof AppKnowledgeRelevanceSchema>;
 export type AppKnowledgeAction = z.infer<typeof AppKnowledgeActionSchema>;
 export type AppKnowledgeQuery = z.infer<typeof AppKnowledgeQuerySchema>;
+export type AppKnowledgeCandidate = z.infer<typeof AppKnowledgeCandidateSchema>;
 export type AppKnowledgeRetrieval = z.infer<typeof AppKnowledgeRetrievalSchema>;

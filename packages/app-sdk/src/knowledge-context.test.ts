@@ -73,6 +73,45 @@ describe('optional knowledge context', () => {
     expect(await withKnowledgeContext(knowledge, messages, budget)).toEqual(messages);
     expect(await withKnowledgeContext(undefined, messages, budget)).toEqual(messages);
   });
+  it("offers the app's own passages for ranking, and keeps them when the catalogs cannot", async () => {
+    const candidate = {
+      uri: 'knowledge://local/ws-0123456789abcdef/sea/notes.md#line=1-3',
+      title: 'Sea notes',
+      text: 'Spring tides follow the full Moon.',
+    };
+    const own = { ...candidate, catalogId: 'ws-0123456789abcdef', version: 'local' };
+    const knowledge = client({ reranked: true, passages: [own, result.passages[0]] });
+    const ranked = await knowledgeContext(knowledge, messages, {
+      ...budget,
+      candidates: [candidate],
+    });
+    expect(knowledge.retrieve).toHaveBeenCalledWith(
+      { query: 'Describe tides.', maxResults: 4, maxCharacters: 12000, candidates: [candidate] },
+      { signal: undefined },
+    );
+    expect(ranked.passages.map((passage) => passage.title)).toEqual(['Sea notes', 'Tides']);
+
+    const onUnavailable = vi.fn();
+    vi.mocked(knowledge.retrieve).mockRejectedValue(new Error('offline'));
+    for (const source of [knowledge, null]) {
+      const alone = await knowledgeContext(source, messages, {
+        ...budget,
+        candidates: [candidate],
+        onUnavailable,
+      });
+      expect(alone.status).toBe('used');
+      expect(alone.passages).toEqual([{ n: 1, ...own }]);
+      expect(alone.messages[0]?.content).toContain('Spring tides follow the full Moon.');
+    }
+    expect(onUnavailable).not.toHaveBeenCalled();
+
+    await expect(
+      knowledgeContext(knowledge, messages, {
+        ...budget,
+        candidates: [{ ...candidate, uri: 'knowledge://science/1/tides' }],
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_request' });
+  });
   it('does not retrieve when the prompt, context, or message count leaves no room', async () => {
     const knowledge = client();
     for (const options of [
