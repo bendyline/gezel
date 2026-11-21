@@ -406,7 +406,7 @@ entry.
 | Binary | Carried by | Version | License |
 |---|---|---|---|
 | **ONNX Runtime** (`onnxruntime.dll`, `libonnxruntime.*`) | `onnxruntime-node` | `1.30.0` | MIT, with ONNX Runtime's third-party notices |
-| **ONNX Runtime CUDA and TensorRT execution providers** (`libonnxruntime_providers_*.so`, Linux x64 only; fetched by `onnxruntime-node`'s install script) | `onnxruntime-node` | `1.30.0` | MIT, with ONNX Runtime's third-party notices |
+| **ONNX Runtime CUDA and TensorRT execution providers** (`libonnxruntime_providers_*.so`, Linux x64 only; fetched by `onnxruntime-node`'s install script when an npm install runs it, so never in Gezel's own builds) | `onnxruntime-node` | `1.30.0` | MIT, with ONNX Runtime's third-party notices |
 | **ONNX Runtime Web** (`ort-wasm-simd-threaded*.wasm`) | `onnxruntime-web` | commit `8d85527a` | MIT, with ONNX Runtime's third-party notices |
 | **DirectML** (`DirectML.dll`, Windows only) | `onnxruntime-node` | `1.15.4` | **Proprietary** — Microsoft DirectML license terms |
 | **DirectX Shader Compiler** (`dxcompiler.dll`, `dxil.dll`, Windows only) | `onnxruntime-node` | `1.8.2502` | NCSA |

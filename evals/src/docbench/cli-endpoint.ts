@@ -172,9 +172,11 @@ function runProcess(
     child.stderr.on('data', (chunk: Buffer) => {
       stderr += chunk.toString('utf8');
     });
+    // A CLI that cannot start (not installed, wrong path) is an endpoint
+    // failure like any other, not an internal error of this server.
     child.on('error', (error) => {
       clearTimeout(timer);
-      reject(error);
+      reject(new CliFailure(`${command} could not start: ${error.message}`));
     });
     child.on('close', (code) => {
       clearTimeout(timer);

@@ -53,7 +53,34 @@ describe('flattenMessages', () => {
   });
 });
 
-describe('startCliEndpoint', () => {
+describe('a CLI that cannot start', () => {
+  it('is reported as an endpoint failure, not an internal error', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'docbench-cli-missing-'));
+    const endpoint = await startCliEndpoint({
+      modelId: 'claude-test-1',
+      reference: { cli: 'claude', model: 'claude-test-1' },
+      contextWindow: 32_768,
+      claudeBin: join(dir, 'no-such-claude'),
+      codexBin: 'codex',
+    });
+    try {
+      const response = await fetch(`${endpoint.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ messages: [{ role: 'user', content: 'Hi' }] }),
+      });
+      expect(response.status).toBe(502);
+      const body = (await response.json()) as { error: { message: string } };
+      expect(body.error.message).toContain('could not start');
+    } finally {
+      await endpoint.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// The stand-in CLI is a `#!/bin/sh` script, which Windows cannot execute directly.
+describe.skipIf(process.platform === 'win32')('startCliEndpoint', () => {
   let dir: string;
 
   beforeEach(async () => {

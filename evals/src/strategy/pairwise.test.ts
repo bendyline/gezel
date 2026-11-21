@@ -45,18 +45,22 @@ describe('pairwise judge', () => {
     expect(prompt).toContain('Deliverable 1 (markdown): The report: version B\n\nnew text');
   });
 
-  it('maps A and B back to before and after across alternating orders', () => {
-    const better = judgePairwise(bundle('bad'), bundle('GOOD'), { cliPath: cli, samples: 4 });
-    expect(better.errors).toEqual([]);
-    expect(better.samples.map((s) => s.order)).toEqual([
-      'before-first',
-      'after-first',
-      'before-first',
-      'after-first',
-    ]);
-    expect(better.samples.every((s) => s.better === 'after')).toBe(true);
-    expect(better.score).toBe(1);
-    const worse = judgePairwise(bundle('GOOD'), bundle('bad'), { cliPath: cli, samples: 2 });
-    expect(worse.score).toBe(-1);
-  });
+  // The stand-in CLI is a shebang script, which Windows cannot execute directly.
+  it.skipIf(process.platform === 'win32')(
+    'maps A and B back to before and after across alternating orders',
+    () => {
+      const better = judgePairwise(bundle('bad'), bundle('GOOD'), { cliPath: cli, samples: 4 });
+      expect(better.errors).toEqual([]);
+      expect(better.samples.map((s) => s.order)).toEqual([
+        'before-first',
+        'after-first',
+        'before-first',
+        'after-first',
+      ]);
+      expect(better.samples.every((s) => s.better === 'after')).toBe(true);
+      expect(better.score).toBe(1);
+      const worse = judgePairwise(bundle('GOOD'), bundle('bad'), { cliPath: cli, samples: 2 });
+      expect(worse.score).toBe(-1);
+    },
+  );
 });

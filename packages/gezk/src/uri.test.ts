@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatKnowledgeUri, parseKnowledgeUri } from './uri.js';
+import { formatKnowledgeUri, isLocalKnowledgeUri, parseKnowledgeUri } from './uri.js';
 
 describe('knowledge:// references', () => {
   it('round-trips a publisher-qualified document with a nested id and a chunk fragment', () => {
@@ -44,5 +44,16 @@ describe('knowledge:// references', () => {
     `knowledge://me/notes/${'a'.repeat(513)}`,
   ])('rejects %s', (raw) => {
     expect(parseKnowledgeUri(raw)).toBeNull();
+  });
+});
+
+describe('local knowledge references', () => {
+  it('names passages an app found in its own content', () => {
+    expect(
+      isLocalKnowledgeUri('knowledge://local/ws-0123456789abcdef/notes/a%20b.md#line=3-5'),
+    ).toBe(true);
+    expect(isLocalKnowledgeUri('knowledge://bendyline/wiki/doc')).toBe(false);
+    expect(isLocalKnowledgeUri('knowledge://local/ws-1/')).toBe(false);
+    expect(isLocalKnowledgeUri('https://local/ws-1/a.md')).toBe(false);
   });
 });

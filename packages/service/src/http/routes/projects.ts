@@ -1673,7 +1673,22 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         playwright = installed.find((t) => t.toolsetId === '@playwright/mcp');
       }
     }
-    if (!playwright?.installPath) {
+    // Registered is not runnable: Chromium downloads after the toolset is
+    // registered (minutes on a slow first run), and a failed download leaves
+    // the toolset without it. The script then died on Playwright's own
+    // "Executable doesn't exist … run npx playwright install", an instruction
+    // no gezel can follow. An install whose Playwright cannot be read is left
+    // to report for itself.
+    const { playwrightBrowserRequirement, playwrightBrowsersInstalled } = await import(
+      '../../system-toolsets/playwright-browsers.js'
+    );
+    const browserRequirement = playwright?.installPath
+      ? playwrightBrowserRequirement(playwright.installPath)
+      : null;
+    const browserMissing =
+      browserRequirement !== null &&
+      !playwrightBrowsersInstalled(playwrightBrowsersDir(ctx.home), browserRequirement);
+    if (!playwright?.installPath || browserMissing) {
       // Genuine "not installed yet". Kick off bootstrap in the
       // background if nothing's currently running — this covers the
       // case where the startup bootstrap crashed or was skipped
@@ -1707,7 +1722,10 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       return c.json({
         ok: false,
         log: '',
-        error: formatPlaywrightNotReadyError(ctx.systemStatus.current),
+        error: formatPlaywrightNotReadyError(
+          ctx.systemStatus.current,
+          browserMissing ? 'browser' : 'toolset',
+        ),
       });
     }
 
@@ -2857,8 +2875,12 @@ export function projectRoutes(ctx: ServiceContext): Hono {
  */
 function formatPlaywrightNotReadyError(
   status: import('../../system-toolsets/status-bus.js').SystemBootstrapStatus,
+  missing: 'toolset' | 'browser' = 'toolset',
 ): string {
-  const base = '@playwright/mcp is not installed yet, so browser automation is unavailable.';
+  const base =
+    missing === 'browser'
+      ? 'The Chromium browser that Playwright scripts launch is not installed yet, so browser automation is unavailable.'
+      : '@playwright/mcp is not installed yet, so browser automation is unavailable.';
   const guidance =
     'Consider a different approach for this turn — e.g. fetch a JSON API instead of scraping HTML, or acknowledge the limitation and offer alternatives.';
   switch (status.phase) {
@@ -2883,10 +2905,11 @@ function formatPlaywrightNotReadyError(
         status.error ? `: ${status.error}` : ''
       }. ${guidance}`;
     case 'ready':
-      // Shouldn't reach here — status says ready but the Store
-      // says not installed. Tell the caller something informative
-      // anyway.
-      return `${base} State mismatch between the Store and bootstrap — restart the app to re-sync. ${guidance}`;
+      // Setup skipped (a store build, a one-shot `gezel run`) or the browser
+      // was removed after it finished. The next app start installs it.
+      return missing === 'browser'
+        ? `${base} Gezel installs it the next time the app starts. ${guidance}`
+        : `${base} State mismatch between the Store and bootstrap — restart the app to re-sync. ${guidance}`;
     default:
       return `${base} ${guidance}`;
   }

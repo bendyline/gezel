@@ -452,6 +452,13 @@ export interface BuildInstructionsOptions {
    */
   inAppWebPreview?: boolean;
   /**
+   * This host can never run browser automation: a phone, or a store build,
+   * which may not download the Playwright toolset. The fallback line then
+   * says so, instead of sending the person to a desktop setup screen that
+   * does not exist here.
+   */
+  browserAutomationUnavailable?: boolean;
+  /**
    * True when this session can surface untrusted, externally-sourced content
    * (mail-enabled projects). Drives the {@link UNTRUSTED_CONTENT_GUIDANCE}
    * provenance-framing block. Off by default so non-mail sessions stay
@@ -680,6 +687,7 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     browserAutomationRoleExcluded,
     browserLocalPreviewOnly,
     inAppWebPreview,
+    browserAutomationUnavailable,
     appSubject,
     craftbookFocus,
   } = opts;
@@ -1358,9 +1366,14 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
   // loops, outside McpBridge's argument-wrapper layer. Do not advertise the
   // file-URL alias there until those native loops gain an equivalent proxy.
   const browserUsesManagedBridge = providerUsesManagedMcpBridge(providerName);
+  // `validate` is named only where the turn has it: a build step without it
+  // was told to call it (`directive-missing-tool tool=validate`, 2026-11-21).
+  const canValidate = availableToolNameSet.has('validate');
   const workspaceHtmlBrowserGuidance = browserUsesManagedBridge
-    ? 'For interactive testing of workspace HTML, call `browser_navigate({ url: "file:///workspace/index.html" })` with the real workspace-relative path. Gezel automatically rewrites it to the active project\'s capability-scoped preview server; never install a separate static server. Call `validate({ path: "index.html" })` for the HTML/JavaScript lint plus headless-load gate.'
-    : 'For workspace HTML, call `validate({ path: "index.html" })`; it runs the HTML/JavaScript lint plus a headless load through Gezel\'s scoped preview server. This provider\'s native MCP loop cannot rewrite `file:` navigation, so do not pass `file://` to `browser_navigate` and do not install a separate static server.';
+    ? `For interactive testing of workspace HTML, call \`browser_navigate({ url: "file:///workspace/index.html" })\` with the real workspace-relative path. Gezel automatically rewrites it to the active project's capability-scoped preview server; never install a separate static server.${canValidate ? ' Call `validate({ path: "index.html" })` for the HTML/JavaScript lint plus headless-load gate.' : ''}`
+    : canValidate
+      ? 'For workspace HTML, call `validate({ path: "index.html" })`; it runs the HTML/JavaScript lint plus a headless load through Gezel\'s scoped preview server. This provider\'s native MCP loop cannot rewrite `file:` navigation, so do not pass `file://` to `browser_navigate` and do not install a separate static server.'
+      : "This provider's native MCP loop cannot rewrite `file:` navigation, so do not pass `file://` to `browser_navigate` for workspace HTML, and do not install a separate static server.";
   const browsingGuidance = inAppWebPreview
     ? IN_APP_WEB_PREVIEW_GUIDANCE
     : browserLocalPreviewOnly
@@ -1370,8 +1383,10 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
         : hasPlaywright
           ? `**Web work.** ${workspaceHtmlBrowserGuidance} Use the \`browser_*\` tools on your function schema for one-shot web reads. Scripted browsing is not part of your kit this turn — if the job needs a re-runnable script, hand it to a teammate who can run one. Don't emit fake \`<browser_*>\` markup.`
           : browserAutomationRoleExcluded
-            ? '**Browser tools are not part of this role\'s kit** (they are installed on this machine). Workspace HTML is runtime-checked automatically after each write; call `validate({ path: "index.html" })` for an explicit HTML/JavaScript lint plus headless-load gate. If the user needs live browsing or scraping, suggest a web-focused teammate (Web Developer, Researcher, Designer) or ask them to retag your role. Don\'t emit fake `<browser_*>` markup.'
-            : "**Browser automation is not installed.** If the user asks you to browse or scrape, tell them the Playwright toolset hasn't been bootstrapped (Settings → Daemon). Don't emit fake `<browser_*>` markup.";
+            ? `**Browser tools are not part of this role's kit** (they are installed on this machine). Workspace HTML is runtime-checked automatically after each write${canValidate ? '; call `validate({ path: "index.html" })` for an explicit HTML/JavaScript lint plus headless-load gate' : ''}. If the user needs live browsing or scraping, suggest a web-focused teammate (Web Developer, Researcher, Designer) or ask them to retag your role. Don't emit fake \`<browser_*>\` markup.`
+            : browserAutomationUnavailable
+              ? "**No browser tools here.** You can't open, browse or scrape web pages in this app. If the person asks for that, say so plainly. Don't emit fake `<browser_*>` markup."
+              : "**Browser automation is not installed.** If the user asks you to browse or scrape, tell them the Playwright toolset hasn't been bootstrapped (Settings → Daemon). Don't emit fake `<browser_*>` markup.";
 
   // Is the active step a "gate" — a phase the model must hold at until its
   // exit criteria are met, rather than advance past on its first attempt?

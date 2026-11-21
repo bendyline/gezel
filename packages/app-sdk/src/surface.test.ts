@@ -20,6 +20,7 @@ const shared = [
   'createHttpModelManager',
   'createModelManager',
   'describeModel',
+  'interleaveKnowledgeCandidates',
   'knowledgeContext',
   'notify',
   'sdkError',

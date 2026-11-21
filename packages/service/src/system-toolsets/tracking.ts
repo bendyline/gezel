@@ -22,7 +22,7 @@ export interface SystemTrackingEntry {
 export interface SystemTrackingRecord {
   /** The bundled pnpm version at the time of the last install (if any). */
   pnpmVersion?: string;
-  /** Chromium revision currently on disk (matches `CHROMIUM_REVISION` when fresh). */
+  /** Chromium revision last verified on disk. Informational: the bootstrap re-checks the disk every boot. */
   chromiumRevision?: string;
   /** Per-toolset record, keyed by toolsetId. */
   toolsets: Record<string, SystemTrackingEntry>;

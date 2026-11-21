@@ -80,6 +80,13 @@ runs:
       shell: bash
       run: pnpm check:local-links
 
+    # pnpm never runs onnxruntime-node's install script (allowBuilds in
+    # pnpm-workspace.yaml). This keeps the job's later npm installs from running
+    # its unverified CUDA download from NuGet as well.
+    - name: Skip the ONNX Runtime CUDA download
+      shell: bash
+      run: echo "ONNXRUNTIME_NODE_INSTALL=skip" >> "$GITHUB_ENV"
+
     # Retries in-process because the pnpm store persists on the runner between
     # attempts: whatever the first attempt downloaded before timing out is
     # already on disk, so a retry pays only for the remainder. This step never

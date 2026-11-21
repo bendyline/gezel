@@ -6,7 +6,8 @@
  * path. Playwright then wants one specific browser revision under
  * `PLAYWRIGHT_BROWSERS_PATH`, and that revision is not the one the managed
  * `@playwright/mcp` installs: squisq-cli 2.9.5 pins playwright-core 1.63
- * (headless shell 1243) while the MCP's Playwright uses 1228. With nothing
+ * (headless shell 1243) while the MCP's Playwright uses another revision
+ * (`playwrightBrowserRequirement` in system-toolsets). With nothing
  * installed for it, every `preview_document` failed with "Executable doesn't
  * exist" and models retried it a dozen times a step (2026-10-21 sweep).
  *

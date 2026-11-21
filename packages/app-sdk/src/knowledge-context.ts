@@ -1,5 +1,10 @@
-import { AppKnowledgeRetrievalSchema } from '@bendyline/gezel-client/app-models';
+import {
+  AppKnowledgeQuerySchema,
+  type AppKnowledgeRetrieval,
+  AppKnowledgeRetrievalSchema,
+} from '@bendyline/gezel-client/app-models';
 import { GezelSdkError } from './errors.js';
+import { type KnowledgeCandidate, interleaveKnowledgeCandidates } from './knowledge-candidates.js';
 import type { KnowledgeClient } from './knowledge-client.js';
 import { notify } from './model-manager.js';
 import type { ChatMessage, RequestOptions } from './types.js';
@@ -24,6 +29,12 @@ export interface KnowledgeContextOptions extends RequestOptions {
    * app can check citations and name its sources.
    */
   citations?: 'numbered';
+  /**
+   * The app's own passages for this request (at most 8, `knowledge://local/…`),
+   * ranked with catalog passages. They still ground the request when there is
+   * no client or catalog retrieval fails; nothing is reported unavailable then.
+   */
+  candidates?: readonly KnowledgeCandidate[];
   onUnavailable?(reason: string): void;
 }
 
@@ -91,6 +102,12 @@ export async function knowledgeContext(
     (options.citations !== undefined && options.citations !== 'numbered')
   )
     throw new GezelSdkError('Invalid knowledge context budget', { code: 'invalid_request' });
+  const parsedCandidates = AppKnowledgeQuerySchema.shape.candidates.safeParse(
+    options.candidates === undefined ? undefined : [...options.candidates],
+  );
+  if (!parsedCandidates.success)
+    throw new GezelSdkError('Invalid knowledge candidates', { code: 'invalid_request' });
+  const candidates = parsedCandidates.data ?? [];
   const skipped = (reason: string): KnowledgeContext => ({
     messages: [...messages],
     status: 'skipped',
@@ -103,7 +120,7 @@ export async function knowledgeContext(
     return skipped(reason);
   };
   signal?.throwIfAborted();
-  if (!client) return unavailable('knowledge_unavailable');
+  if (!client && !candidates.length) return unavailable('knowledge_unavailable');
   // A character budget cannot account for multimodal or tool-call payloads.
   if (messages.some((message) => typeof message.content !== 'string'))
     return unavailable('unsupported_content');
@@ -124,10 +141,33 @@ export async function knowledgeContext(
       : Math.max(0, (options.contextWindow - outputTokens) * 3 - size);
   const maxCharacters = Math.min(passageLimit, remaining - 3000, contextRoom - 3000);
   if (maxCharacters < 1 || messages.length >= maxMessages) return skipped('no_room');
+  // The app's own passages alone, when the catalogs cannot add theirs.
+  const ownOnly = (): AppKnowledgeRetrieval =>
+    interleaveKnowledgeCandidates({ reranked: false, passages: [] }, candidates, {
+      maxResults,
+      maxCharacters,
+    });
   try {
-    const result = AppKnowledgeRetrievalSchema.parse(
-      await client.retrieve({ query, maxResults, maxCharacters }, { signal }),
-    );
+    let result: AppKnowledgeRetrieval;
+    try {
+      result = client
+        ? AppKnowledgeRetrievalSchema.parse(
+            await client.retrieve(
+              {
+                query,
+                maxResults,
+                maxCharacters,
+                ...(candidates.length ? { candidates } : {}),
+              },
+              { signal },
+            ),
+          )
+        : ownOnly();
+    } catch (error) {
+      signal?.throwIfAborted();
+      if (!candidates.length) throw error;
+      result = ownOnly();
+    }
     signal?.throwIfAborted();
     if (
       result.passages.length > maxResults ||

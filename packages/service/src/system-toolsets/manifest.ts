@@ -82,22 +82,10 @@ export interface PinnedSystemToolset {
   additionalDependencies?: Record<string, string>;
 }
 
-/**
- * Playwright's Chromium revision is determined by the Playwright version
- * we pin. We record it separately so the bootstrap can tell at a glance
- * whether the on-disk browser dir matches expectations without shelling
- * out to Playwright's CLI.
- *
- * Bump when `@playwright/mcp`'s transitive Playwright dep changes. Quick
- * lookup: `cat node_modules/playwright-core/browsers.json` after install,
- * or check the Playwright release notes.
- */
-// Typed as `string` rather than letting TS narrow to a literal — the
-// bootstrap compares this against an on-disk tracking record, and a
-// literal type would turn future bumps into "no overlap" TS errors at
-// every comparison site.
-export const CHROMIUM_REVISION: string = '1232';
-
+// The Chromium revision is not pinned here: the bootstrap reads it from the
+// installed toolset's `playwright-core/browsers.json`
+// (`playwrightBrowserRequirement` in playwright-browsers.ts), so a version
+// bump below needs no second edit.
 export const SYSTEM_TOOLSETS: PinnedSystemToolset[] = [
   {
     toolsetId: '@playwright/mcp',

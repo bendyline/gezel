@@ -1,12 +1,16 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PNPM_MANAGED_TREE_EXEC_CONFIG, createLogger } from '@bendyline/gezel';
 import { playwrightBrowsersDir } from '@bendyline/gezel/paths';
 import type { Store } from '../fs/store.js';
 import { resolvePnpmCommand, spawnPnpm } from '../packages/pnpm.js';
+import {
+  playwrightBrowserRequirement,
+  playwrightBrowsersInstalled,
+} from '../system-toolsets/playwright-browsers.js';
 
 const log = createLogger('page-check');
 
@@ -90,10 +94,17 @@ const push = (kind, message) => {
   if (errors.length < 20) errors.push(kind + ': ' + String(message));
 };
 let browser;
+// A browser that cannot start says nothing about the page, so it is reported
+// apart from what the page did; the caller treats it as no verdict.
 try {
   const require = createRequire(process.cwd() + '/');
   const { chromium } = require('playwright');
   browser = await chromium.launch({ headless: true, ...contained });
+} catch (err) {
+  clearTimeout(hardCap);
+  finish({ ok: false, launchError: String(err && err.message ? err.message : err) });
+}
+try {
   const context = await browser.newContext({
     ignoreHTTPSErrors: true,
     ...(allowExternal ? {} : { serviceWorkers: 'block' }),
@@ -144,23 +155,16 @@ export async function resolvePlaywrightInstall(store: Store): Promise<string | n
 }
 
 /**
- * Whether the managed Chromium finished downloading. Mirrors the marker
- * check `ensureChromiumInstalled` performs before skipping its download —
- * Playwright's own runtime consults the same `INSTALLATION_COMPLETE` file.
+ * Whether the headless shell this toolset's Playwright launches finished
+ * downloading: its exact revision, not any Chromium folder. A leftover
+ * build from an earlier pin once answered yes here, and every page check
+ * then reported "Executable doesn't exist" as an error in the person's page.
  */
-export async function isChromiumReady(home: string): Promise<boolean> {
-  try {
-    const browsersDir = playwrightBrowsersDir(home);
-    const entries = await readdir(browsersDir, { withFileTypes: true });
-    return entries.some(
-      (e) =>
-        e.isDirectory() &&
-        e.name.startsWith('chromium') &&
-        existsSync(join(browsersDir, e.name, 'INSTALLATION_COMPLETE')),
-    );
-  } catch {
-    return false;
-  }
+export async function isChromiumReady(home: string, installPath: string): Promise<boolean> {
+  const requirement = playwrightBrowserRequirement(installPath);
+  return requirement
+    ? playwrightBrowsersInstalled(playwrightBrowsersDir(home), requirement, 'headless-shell')
+    : false;
 }
 
 export interface RunPageCheckOptions {
@@ -265,7 +269,14 @@ async function runPageCheckInner(opts: RunPageCheckOptions): Promise<PageCheckOu
     ) as {
       ok: boolean;
       errors?: string[];
+      launchError?: string;
     };
+    if (parsed.launchError !== undefined) {
+      // The detail names local paths and Playwright's install banner; the
+      // log keeps it, the model gets a reason it cannot mistake for its page.
+      log.warn(`[page-check] browser did not start: ${parsed.launchError.slice(0, 600)}`);
+      return { ran: false, reason: 'browser-did-not-start' };
+    }
     const errors = (parsed.errors ?? [])
       .slice(0, MAX_ERRORS)
       .map((e) => (e.length > MAX_ERROR_CHARS ? `${e.slice(0, MAX_ERROR_CHARS)}…` : e));
