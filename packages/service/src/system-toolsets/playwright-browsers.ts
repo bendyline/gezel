@@ -1,11 +1,120 @@
-import { existsSync } from 'node:fs';
-import { readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { PNPM_MANAGED_TREE_EXEC_CONFIG, type PnpmInvocation } from '@bendyline/gezel';
+import { isPathInside } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { playwrightBrowsersDir } from '@bendyline/gezel/paths';
 import { resolvePnpmCommand, spawnPnpm } from '../packages/pnpm.js';
 import { killProcessTree } from '../utils/kill-process-tree.js';
 import type { SystemStatusBus } from './status-bus.js';
+
+/**
+ * The Chromium builds a Playwright install launches. Playwright looks for one
+ * exact revision under `PLAYWRIGHT_BROWSERS_PATH`, read from the
+ * `playwright-core` it loads; a browser folder of any other revision is
+ * invisible to it, however complete.
+ */
+export interface PlaywrightBrowserRequirement {
+  /** Root of the `playwright-core` package the install resolves. */
+  playwrightCoreDir: string;
+  /** Chromium revision from that package's `browsers.json`. */
+  revision: string;
+  /** Folders that hold Chrome for Testing, used by a headed launch. */
+  chromium: string[];
+  /** Folders that hold the headless shell, used by every `headless: true` launch. */
+  headlessShell: string[];
+}
+
+interface BrowsersJsonEntry {
+  name?: string;
+  revision?: string;
+  revisionOverrides?: Record<string, string>;
+}
+
+/**
+ * The `playwright-core` that `import 'playwright'` reaches from the install,
+ * which is what the page check and `run_playwright_script` both load. Only a
+ * package inside the install counts: `require` also searches ancestor
+ * folders and `NODE_PATH` (which pnpm sets), and under a dev launch that
+ * found the repo's own Playwright for an install that had none.
+ */
+function resolvePlaywrightCore(installPath: string): string | null {
+  try {
+    const root = realpathSync(installPath);
+    const inside = (file: string) => isPathInside(realpathSync(file), root);
+    const fromInstall = createRequire(join(root, 'package.json'));
+    let fromPlaywright = fromInstall;
+    try {
+      const playwright = fromInstall.resolve('playwright');
+      if (inside(playwright)) fromPlaywright = createRequire(playwright);
+    } catch {
+      /* an install that depends on playwright-core alone */
+    }
+    const core = fromPlaywright.resolve('playwright-core/package.json');
+    return inside(core) ? dirname(core) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Playwright names a browser folder `<name with _ for ->-<revision>`. */
+function browserFolders(
+  browsers: BrowsersJsonEntry[],
+  name: string,
+): { revision: string; folders: string[] } | null {
+  const entry = browsers.find((browser) => browser.name === name);
+  if (!entry?.revision) return null;
+  // Playwright picks a per-platform override when one is listed; any of them
+  // is a folder it may look in on this machine.
+  const revisions = new Set([entry.revision, ...Object.values(entry.revisionOverrides ?? {})]);
+  return {
+    revision: entry.revision,
+    folders: [...revisions].map((revision) => `${name.replaceAll('-', '_')}-${revision}`),
+  };
+}
+
+/** The browsers the install's Playwright launches, or null when it does not resolve one. */
+export function playwrightBrowserRequirement(
+  installPath: string,
+): PlaywrightBrowserRequirement | null {
+  const playwrightCoreDir = resolvePlaywrightCore(installPath);
+  if (!playwrightCoreDir) return null;
+  let browsers: BrowsersJsonEntry[];
+  try {
+    const parsed = JSON.parse(readFileSync(join(playwrightCoreDir, 'browsers.json'), 'utf8')) as {
+      browsers?: BrowsersJsonEntry[];
+    };
+    browsers = parsed.browsers ?? [];
+  } catch {
+    return null;
+  }
+  const chromium = browserFolders(browsers, 'chromium');
+  const headlessShell = browserFolders(browsers, 'chromium-headless-shell');
+  if (!chromium || !headlessShell) return null;
+  return {
+    playwrightCoreDir,
+    revision: chromium.revision,
+    chromium: chromium.folders,
+    headlessShell: headlessShell.folders,
+  };
+}
+
+/**
+ * Whether the required browsers finished downloading. Playwright writes
+ * `INSTALLATION_COMPLETE` last, and its runtime trusts the same marker.
+ */
+export function playwrightBrowsersInstalled(
+  browsersDir: string,
+  requirement: PlaywrightBrowserRequirement,
+  which: 'all' | 'headless-shell' = 'all',
+): boolean {
+  const complete = (folders: string[]) =>
+    folders.some((folder) => existsSync(join(browsersDir, folder, 'INSTALLATION_COMPLETE')));
+  return (
+    complete(requirement.headlessShell) &&
+    (which === 'headless-shell' || complete(requirement.chromium))
+  );
+}
 
 /**
  * Download Chromium using Playwright's own CLI, redirected to our
@@ -31,25 +140,19 @@ export async function ensureChromiumInstalled(args: {
   signal?: AbortSignal;
   /** Test seam: the pnpm launch to run in place of `playwright install chromium`. */
   invocation?: PnpmInvocation;
-}): Promise<{ ok: boolean; error?: string; cancelled?: boolean }> {
+}): Promise<{ ok: boolean; error?: string; cancelled?: boolean; revision?: string }> {
   if (args.signal?.aborted) return { ok: false, cancelled: true, error: 'install was cancelled' };
   const browsersDir = playwrightBrowsersDir(args.home);
 
-  // If a chromium-* subdir already has Playwright's completion marker,
-  // skip. The marker is `INSTALLATION_COMPLETE` and Playwright's runtime
-  // checks the same file, so our skip is equivalent to Playwright's own
-  // "already installed" decision.
-  if (existsSync(browsersDir)) {
-    try {
-      const entries = await readdir(browsersDir, { withFileTypes: true });
-      const chromium = entries.find((e) => e.isDirectory() && e.name.startsWith('chromium-'));
-      if (chromium) {
-        const marker = join(browsersDir, chromium.name, 'INSTALLATION_COMPLETE');
-        if (existsSync(marker)) return { ok: true };
-      }
-    } catch {
-      /* fall through to install */
-    }
+  // Only the revision this toolset's Playwright launches counts. Any
+  // complete `chromium-*` folder used to: after the pin moved to 1232, the
+  // previous pin's chromium-1217 satisfied the check, nothing was
+  // downloaded, and every launch failed with "Executable doesn't exist"
+  // (2026-11-21). With no requirement to read, Playwright's own installer
+  // decides; it skips a download that is already in place.
+  const requirement = playwrightBrowserRequirement(args.playwrightInstallPath);
+  if (requirement && playwrightBrowsersInstalled(browsersDir, requirement)) {
+    return { ok: true, revision: requirement.revision };
   }
 
   args.statusBus.publish({
@@ -86,7 +189,12 @@ export async function ensureChromiumInstalled(args: {
     // downloader running as an orphan after the app quit.
     const onAbort = () => killProcessTree(child);
     args.signal?.addEventListener('abort', onAbort, { once: true });
-    const settle = (result: { ok: boolean; error?: string; cancelled?: boolean }) => {
+    const settle = (result: {
+      ok: boolean;
+      error?: string;
+      cancelled?: boolean;
+      revision?: string;
+    }) => {
       args.signal?.removeEventListener('abort', onAbort);
       resolve(
         args.signal?.aborted
@@ -112,12 +220,26 @@ export async function ensureChromiumInstalled(args: {
       settle({ ok: false, error: err.message });
     });
     child.on('close', (code) => {
-      if (code === 0) settle({ ok: true });
-      else
+      if (code !== 0) {
         settle({
           ok: false,
           error: `playwright install chromium exited with ${code}: ${stderrTail.trim()}`,
         });
+        return;
+      }
+      if (!requirement) {
+        settle({ ok: true });
+        return;
+      }
+      // An exit of 0 is not proof: the record of success is what later boots trust.
+      if (!playwrightBrowsersInstalled(browsersDir, requirement)) {
+        settle({
+          ok: false,
+          error: `playwright install chromium finished, but ${requirement.headlessShell[0]} is not in ${browsersDir}`,
+        });
+        return;
+      }
+      settle({ ok: true, revision: requirement.revision });
     });
   });
 }

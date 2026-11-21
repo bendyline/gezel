@@ -25,7 +25,7 @@ let store: Store;
 let manager: ChatManager;
 let mock: MockProvider;
 
-function playwrightToolset(installPath: string): InstalledToolset {
+function playwrightToolset(installPath: string, args: string[] = []): InstalledToolset {
   return {
     toolsetId: '@playwright/mcp',
     sourceId: 'system',
@@ -38,7 +38,7 @@ function playwrightToolset(installPath: string): InstalledToolset {
       version: '0.0.78',
       sha256: '0'.repeat(64),
       entry: 'cli.js',
-      args: [],
+      args,
       envHints: [],
     },
   };
@@ -159,6 +159,26 @@ describe('ChatManager — local-preview browser security exception', () => {
       expect(playwright?.args?.join('\n')).not.toContain(escaped);
     },
   );
+
+  // Unnamed, Playwright MCP launches the installed Google Chrome, which a fresh
+  // machine may not have; the managed Chromium is what the bootstrap downloads.
+  it('launches the managed Chromium rather than whatever Chrome is installed', async () => {
+    const opts = await latestCreateOpts();
+    const playwright = opts.extraMcpServers?.find((entry) => entry.id.includes('playwright'));
+    const args = playwright?.args ?? [];
+    expect(args[args.indexOf('--browser') + 1]).toBe('chromium');
+  });
+
+  it('leaves a browser the system manifest names alone', async () => {
+    const installed = (await store.listInstalledToolsets({ kind: 'system' }))[0]!;
+    await store.writeInstalledToolsets({ kind: 'system' }, [
+      playwrightToolset(installed.installPath!, ['--browser=msedge']),
+    ]);
+    const opts = await latestCreateOpts();
+    const playwright = opts.extraMcpServers?.find((entry) => entry.id.includes('playwright'));
+    expect(playwright?.args).toContain('--browser=msedge');
+    expect(playwright?.args).not.toContain('chromium');
+  });
 
   it('does not extend the strict-mode exception to a user-installed copy', async () => {
     const installed = (await store.listInstalledToolsets({ kind: 'system' }))[0];

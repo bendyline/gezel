@@ -86,10 +86,27 @@ describe('stopSystemBootstraps', () => {
     expect((await readSystemTracking(home)).chromiumRevision).toBeUndefined();
 
     // The next boot sees the download as not done and runs it again.
-    vi.mocked(ensureChromiumInstalled).mockResolvedValue({ ok: true });
+    vi.mocked(ensureChromiumInstalled).mockResolvedValue({ ok: true, revision: '1232' });
     await runSystemBootstrap({ home, store, statusBus: bus, manifest: [PLAYWRIGHT] });
     expect(ensureChromiumInstalled).toHaveBeenCalledTimes(2);
-    expect((await readSystemTracking(home)).chromiumRevision).toBeDefined();
+    expect((await readSystemTracking(home)).chromiumRevision).toBe('1232');
+  });
+
+  // Regression: the record said 1232 while only the previous pin's 1217 was
+  // on disk, so the download never ran and every launch failed.
+  it('checks the browser on disk even when the tracking record names its revision', async () => {
+    const tracking = await readSystemTracking(home);
+    await writeSystemTracking(home, { ...tracking, chromiumRevision: '1232' });
+    vi.mocked(ensureChromiumInstalled).mockResolvedValue({ ok: true, revision: '1232' });
+
+    await runSystemBootstrap({
+      home,
+      store,
+      statusBus: new SystemStatusBus(),
+      manifest: [PLAYWRIGHT],
+    });
+
+    expect(ensureChromiumInstalled).toHaveBeenCalledTimes(1);
   });
 
   it('returns at once when nothing is running', async () => {

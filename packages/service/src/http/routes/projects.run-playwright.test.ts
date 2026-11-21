@@ -283,6 +283,57 @@ describe('POST /api/projects/:id/run-playwright', () => {
     expect(result.body.log).toContain('intentional-playwright-probe-failure');
   });
 
+  // A first run registers the toolset minutes before Chromium finishes
+  // downloading; the script used to start anyway and die on Playwright's
+  // "Executable doesn't exist … npx playwright install".
+  it('says the browser is not installed yet instead of running into Playwright', async () => {
+    const pending = join(home, 'playwright-without-browser');
+    const core = join(pending, 'node_modules', 'playwright-core');
+    await mkdir(core, { recursive: true });
+    await writeFile(
+      join(pending, 'package.json'),
+      JSON.stringify({ name: 'pending', private: true }),
+    );
+    await writeFile(
+      join(core, 'package.json'),
+      JSON.stringify({
+        name: 'playwright-core',
+        version: '1.0.0',
+        exports: { '.': './index.js', './package.json': './package.json' },
+      }),
+    );
+    await writeFile(join(core, 'index.js'), 'module.exports = {};\n');
+    await writeFile(
+      join(core, 'browsers.json'),
+      JSON.stringify({
+        browsers: [
+          { name: 'chromium', revision: '999999' },
+          { name: 'chromium-headless-shell', revision: '999999' },
+        ],
+      }),
+    );
+    await svc.context.store.writeProjectArtifact(
+      'default',
+      'scripts/needs-browser.ts',
+      "console.log('should not run');\n",
+    );
+    await svc.context.store.writeInstalledToolsets({ kind: 'system' }, [
+      playwrightToolset(pending),
+    ]);
+    try {
+      const result = await runPlaywright('scripts/needs-browser.ts');
+
+      expect(result.status).toBe(200);
+      expect(result.body.ok).toBe(false);
+      expect(result.body.error).toContain('Chromium browser');
+      expect(result.body.log).toBe('');
+    } finally {
+      await svc.context.store.writeInstalledToolsets({ kind: 'system' }, [
+        playwrightToolset(installPath),
+      ]);
+    }
+  });
+
   it('returns an actionable error before spawning when the artifact is missing', async () => {
     const result = await runPlaywright('scripts/does-not-exist.ts');
 

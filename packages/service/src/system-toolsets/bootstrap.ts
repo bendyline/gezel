@@ -20,12 +20,7 @@ import { type PnpmResult, runPnpm } from '../packages/pnpm.js';
 import { ensureDocblocksBrowser } from '../toolsets/docblocks-browser.js';
 import { checkInstallTree } from './install-health.js';
 import { SYSTEM_LOCKFILES } from './locks.js';
-import {
-  CHROMIUM_REVISION,
-  type PinnedSystemToolset,
-  SYSTEM_TOOLSETS,
-  isPlaceholder,
-} from './manifest.js';
+import { type PinnedSystemToolset, SYSTEM_TOOLSETS, isPlaceholder } from './manifest.js';
 import { ensureChromiumInstalled } from './playwright-browsers.js';
 import { installDirName } from './resolve.js';
 import type { SystemStatusBus } from './status-bus.js';
@@ -315,10 +310,10 @@ async function bootstrap(opts: SystemBootstrapOptions, signal: AbortSignal): Pro
     const rec = installed.find((t) => t.toolsetId === entry.toolsetId);
     if (!rec?.installPath) continue;
 
-    if (tracking.chromiumRevision === CHROMIUM_REVISION) {
-      // On-disk revision already matches — trust the tracking record.
-      continue;
-    }
+    // Checked against the disk on every boot, never taken from the tracking
+    // record: a record claiming 1232 while only 1217 was on disk kept the
+    // download from ever running. When the browser is present this is a few
+    // file probes.
     const res = await ensureChromiumInstalled({
       home,
       playwrightInstallPath: rec.installPath,
@@ -337,8 +332,10 @@ async function bootstrap(opts: SystemBootstrapOptions, signal: AbortSignal): Pro
       });
       return;
     }
-    tracking.chromiumRevision = CHROMIUM_REVISION;
-    await writeSystemTracking(home, tracking);
+    if (res.revision && tracking.chromiumRevision !== res.revision) {
+      tracking.chromiumRevision = res.revision;
+      await writeSystemTracking(home, tracking);
+    }
   }
 
   // DocBlocks previews are optional — a conversion never needs one — so a
