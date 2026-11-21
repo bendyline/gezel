@@ -283,6 +283,97 @@ describe('app knowledge boundary', () => {
     });
     expect(f.ctx.relevance.install).not.toHaveBeenCalled();
   });
+  describe("the app's own passages", () => {
+    const own = (n: number, text = `Note ${n} text`) => ({
+      uri: `knowledge://local/ws-0123456789abcdef/notes/${n}.md#line=1-4`,
+      title: `Note ${n}`,
+      text,
+    });
+    const local = (n: number) =>
+      expect.objectContaining({
+        uri: own(n).uri,
+        catalogId: 'ws-0123456789abcdef',
+        version: 'local',
+      });
+    it('are judged with catalog passages and held to the same bar', async () => {
+      const f = fixture();
+      f.score.mockResolvedValue({ status: 'scored', scores: [0.2, 0.9, 0.95, 0.1] });
+      f.forSurface.mockResolvedValue({
+        model: { id: 'reranker' },
+        thresholds: { keep: 0.15 },
+      } as never);
+      const response = await f.request('retrieve', {
+        ...query,
+        maxResults: 4,
+        maxCharacters: 2000,
+        candidates: [own(1), own(2)],
+      });
+      expect(await response.json()).toEqual({
+        reranked: true,
+        passages: [
+          local(1),
+          expect.objectContaining({ title: 'B' }),
+          expect.objectContaining({ title: 'A' }),
+        ],
+      });
+      expect(f.score).toHaveBeenCalledWith(
+        expect.objectContaining({
+          passages: ['Less relevant', 'Best passage', 'Note 1 text', 'Note 2 text'],
+        }),
+      );
+    });
+    it('are judged alone when no catalog is enabled', async () => {
+      const f = fixture([]);
+      f.score.mockResolvedValue({ status: 'scored', scores: [0.1, 0.8] });
+      const response = await f.request('retrieve', {
+        ...query,
+        maxResults: 2,
+        candidates: [own(1), own(2)],
+      });
+      expect(await response.json()).toEqual({ reranked: true, passages: [local(2), local(1)] });
+      expect(f.search).not.toHaveBeenCalled();
+    });
+    it('take turns with unjudged catalog passages without the model', async () => {
+      const f = fixture();
+      f.forSurface.mockResolvedValue(null as never);
+      f.search.mockResolvedValue([
+        { uri: 'knowledge://pub/science/a', kind: 'knowledge', arm: 'vector', relevance: 0.9 },
+        { uri: 'knowledge://pub/science/b', kind: 'knowledge', arm: 'vector', relevance: 0.9 },
+      ] as never);
+      const response = await f.request('retrieve', {
+        ...query,
+        rerank: 'auto',
+        maxResults: 3,
+        maxCharacters: 2000,
+        candidates: [own(1), own(2)],
+      });
+      expect(await response.json()).toEqual({
+        reranked: false,
+        passages: [
+          expect.objectContaining({ title: 'A' }),
+          local(1),
+          expect.objectContaining({ title: 'B' }),
+        ],
+      });
+      expect(f.score).not.toHaveBeenCalled();
+      // `required` still refuses without the model.
+      expect((await f.request('retrieve', { ...query, candidates: [own(1)] })).status).toBe(409);
+    });
+    it('must be bounded knowledge://local/ references', async () => {
+      const f = fixture();
+      for (const candidates of [
+        [{ ...own(1), uri: 'knowledge://pub/science/a' }],
+        [{ ...own(1), uri: 'file:///etc/passwd' }],
+        Array.from({ length: 9 }, (_, n) => own(n)),
+      ])
+        expect((await f.request('retrieve', { ...query, candidates })).status).toBe(400);
+      expect(f.search).not.toHaveBeenCalled();
+      // 24,000 two-byte characters: past the old 40 KB body limit.
+      const large = Array.from({ length: 4 }, (_, n) => own(n, '\u00e9'.repeat(6000)));
+      const response = await f.request('retrieve', { ...query, rerank: 'auto', candidates: large });
+      expect(response.status).toBe(200);
+    });
+  });
   it('rejects attempts to disable reranking', async () => {
     const f = fixture();
     expect((await f.request('retrieve', { ...query, rerank: false })).status).toBe(400);

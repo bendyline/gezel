@@ -528,6 +528,18 @@ API works through the private in-process host's direct Fetch transport.
   to `required` and returns no passages when that Gezel has no model.
   `rerank: 'required'` refuses with `reranker_required` instead. Neither mode
   installs the model.
+- `candidates` (optional, at most 8 passages and 24,000 characters) are the
+  app's own passages, such as a person's notes, under
+  `knowledge://local/<collection>/<path>[#line=a-b]` references. With the
+  relevance model, Gezel judges them together with catalog passages and holds
+  both to the same bar. Without it, they count as admitted (the app applied its
+  own bar) and take turns with the catalog passages, a catalog passage first.
+  A chosen candidate comes back as a passage whose `catalogId` is its
+  collection and whose `version` is `local`. Against a Gezel that predates
+  candidates, the SDK retrieves without them and interleaves them itself
+  (`interleaveKnowledgeCandidates`). `knowledgeContext(…, { candidates })`
+  passes them through and still uses them when there is no client or catalog
+  retrieval fails. No catalog may publish under the `local` publisher.
 
 Offer `improvement` to people as better results with its size, for example
 "Improve knowledge results with a 300 MB model download", and stop showing it

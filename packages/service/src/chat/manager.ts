@@ -139,6 +139,7 @@ import {
   pronounFormsForGender,
   redactCredentials,
   resolveAsk,
+  resolveDistributionProfile,
   resolveNewProjectMode,
   resolveSandboxCopilot,
   resolveSecurityPolicy,
@@ -266,6 +267,7 @@ import {
   isHttpSpec,
 } from '../providers/mcp-bridge.js';
 import {
+  hasCliOption,
   hasLocalPreviewBrowserNetworkOverride,
   localPreviewBrowserLaunchArgs,
 } from '../providers/mcp-wrappers/playwright-arg-validator.js';
@@ -16232,6 +16234,10 @@ export class ChatManager extends LocalEngineRuntime {
       profile: modelProfile,
       installedToolsetIds,
       browserAutomationRoleExcluded,
+      // A store build may not download the Playwright toolset at all.
+      ...(resolveDistributionProfile().allowRuntimeCodeDownloads
+        ? {}
+        : { browserAutomationUnavailable: true }),
       browserLocalPreviewOnly:
         installedToolsetIds.has('@playwright/mcp') && !securityPolicy.allowExternalServices,
       availableTools: availableBuiltinTools,
@@ -17417,6 +17423,19 @@ export class ChatManager extends LocalEngineRuntime {
         // sessions don't share auth state by design.
         if (!runtimeArgs.includes('--isolated')) {
           extraArgs.push('--isolated');
+        }
+        // Launch the Chromium the system bootstrap downloaded. Without a
+        // browser named, Playwright MCP launches the installed Google Chrome
+        // (`channel: "chrome"`), so on a machine without Chrome every
+        // `browser_*` call failed while the managed browser sat unused. The
+        // page check and run_playwright_script already launch the managed one.
+        if (
+          isManagedSystemPlaywright(t) &&
+          !['--browser', '--executable-path', '--config'].some((option) =>
+            hasCliOption(runtimeArgs, option),
+          )
+        ) {
+          extraArgs.push('--browser', 'chromium');
         }
         // Permit explicitly requested loopback HTTPS targets that use a local
         // self-signed certificate. Gezel's `/preview` URLs are deliberately

@@ -146,6 +146,14 @@ describe('KnowledgeCatalogManifestSchema across generations', () => {
     ).toBe(false);
   });
 
+  it('reserves the local publisher for app passages', () => {
+    const local = KnowledgeCatalogManifestSchema.safeParse(
+      manifestFor('0.8', { publisher: { id: 'local', name: 'Local' } }),
+    );
+    expect(local.success).toBe(false);
+    expect(local.error?.issues.map((issue) => issue.path.join('.'))).toContain('publisher.id');
+  });
+
   it('rejects a mismatched format/index pairing', () => {
     const r05 = KnowledgeCatalogManifestSchema.safeParse(
       manifestFor('0.5', { indexSchemaVersion: 3 }),

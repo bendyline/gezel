@@ -5,6 +5,7 @@ import {
   type KnowledgeClient,
   type KnowledgeRetrieveInput,
   type KnowledgeState,
+  interleaveKnowledgeCandidates,
 } from '@bendyline/gezel-app-sdk/browser';
 import { admitsUnjudgedKnowledge } from '@bendyline/gezel-inference/internal/knowledge/admission';
 import type { KnowledgeCatalogHost } from '@bendyline/gezel-inference/internal/knowledge/catalog-host';
@@ -391,13 +392,18 @@ export function createMobileKnowledge(options: MobileKnowledgeOptions) {
     query: KnowledgeRetrieveInput,
     opts: { signal?: AbortSignal } = {},
   ): Promise<Retrieval> {
+    // The app's own passages: with no relevance model here, they take turns
+    // with the catalog passages, as the daemon does without its model.
+    const candidates = query.candidates ?? [];
     await sync();
     opts.signal?.throwIfAborted();
-    if (mounted.size === 0) return { reranked: true, passages: [] };
+    if (mounted.size === 0 && !candidates.length) return { reranked: true, passages: [] };
     if (query.rerank === 'required')
       throw new GezelSdkError('Better knowledge results are not available on this device yet', {
         code: 'reranker_required',
       });
+    if (mounted.size === 0)
+      return interleaveKnowledgeCandidates({ reranked: false, passages: [] }, candidates, query);
     const hits = await searchUnifiedCatalogs(
       {
         catalog: (key) => mounted.get(key),
@@ -444,7 +450,9 @@ export function createMobileKnowledge(options: MobileKnowledgeOptions) {
       passages.push({ ...passage, text });
       remaining -= text.length;
     }
-    return { reranked: false, passages };
+    return candidates.length
+      ? interleaveKnowledgeCandidates({ reranked: false, passages }, candidates, query)
+      : { reranked: false, passages };
   }
 
   return {

@@ -37,6 +37,7 @@ export {
 export type {
   AppKnowledgeState,
   AppKnowledgeAction,
+  AppKnowledgeCandidate,
   AppKnowledgeQuery,
   AppKnowledgeRelevance,
   AppKnowledgeRetrieval,
@@ -84,4 +85,5 @@ export type {
 export * from './model-manager.js';
 export * from './embedding.js';
 
+export * from './knowledge-candidates.js';
 export * from './knowledge-context.js';

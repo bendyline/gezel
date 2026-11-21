@@ -91,6 +91,22 @@ describe('runPageCheck (spawn seam)', () => {
     expect(before).toContain('--config.verify-deps-before-run=false');
   });
 
+  // Regression (2026-11-21): a missing browser came back as a page error, and
+  // `validate` told the model to "fix the reported runtime error" in a page
+  // that had none.
+  it('reports a browser that did not start as no verdict, never as a page error', async () => {
+    const launchError =
+      "browserType.launch: Executable doesn't exist at /Users/x/.gezel/playwright-browsers/chromium_headless_shell-1232/chrome-headless-shell";
+    const outcome = await runPageCheck({
+      ...BASE,
+      spawnImpl: (() =>
+        fakeChild({
+          stdout: `GEZEL_PAGE_CHECK_RESULT:${JSON.stringify({ ok: false, launchError })}\n`,
+        })) as never,
+    });
+    expect(outcome).toEqual({ ran: false, reason: 'browser-did-not-start' });
+  });
+
   it('treats a sentinel-less exit as no-signal, never a pass', async () => {
     const outcome = await runPageCheck({
       ...BASE,

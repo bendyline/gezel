@@ -137,6 +137,7 @@ export async function buildPortableInstructions(
       : {}),
     ...(input.minimalContext ? { minimalContext: true } : {}),
     ...(input.inAppWebPreview ? { inAppWebPreview: true } : {}),
+    browserAutomationUnavailable: true,
     ...(step?.promptProfile === 'focused' ? { focusedTaskContext: true } : {}),
     ...(leanSession(project, session) ? { leanProfile: true } : {}),
     ...(profileHasBehavior(profile, 'prompt.retrieval-first') ? { retrievalFirstHint: true } : {}),

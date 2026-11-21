@@ -61,7 +61,7 @@ const FILE_OUTPUT_BROWSER_TOOLS: ReadonlySet<string> = new Set([
   'browser_take_screenshot',
 ]);
 
-function hasCliOption(args: readonly string[], option: string): boolean {
+export function hasCliOption(args: readonly string[], option: string): boolean {
   return args.some((arg) => arg === option || arg.startsWith(`${option}=`));
 }
 

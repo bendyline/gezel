@@ -101,7 +101,13 @@ allowBuilds:
   "esbuild": true
   "koffi": true
   "node-pty": true
-  "onnxruntime-node": true
+  # Its install script only downloads the CUDA providers from NuGet on
+  # linux-x64, unverified, and Gezel never selects the CUDA provider; the CPU
+  # runtime ships in the npm tarball. Denied here rather than by
+  # ONNXRUNTIME_NODE_INSTALL=skip: pnpm restores an earlier run's build output
+  # from the store whatever the variable says, but never for a denied build
+  # (both checked on pnpm 11.15.1, 2026-11-21).
+  "onnxruntime-node": false
   "protobufjs": true
   # The sharp slot holds the private no-image stub, which has no build step.
   sharp: false

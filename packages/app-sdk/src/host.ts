@@ -92,4 +92,5 @@ export * from './model-manager.js';
 export * from './embedding.js';
 export * from './desktop-embedding.js';
 
+export * from './knowledge-candidates.js';
 export * from './knowledge-context.js';

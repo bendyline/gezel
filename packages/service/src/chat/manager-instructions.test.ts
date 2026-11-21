@@ -189,6 +189,38 @@ describe('buildInstructions never advertises a tool the role lacks', () => {
     expect(withoutScript).toContain('automatically rewrites');
   });
 
+  // Fired as `directive-missing-tool tool=validate` on a Builder's build step
+  // (2026-11-21): every browsing branch named `validate` whether or not the
+  // step had it.
+  it('names validate only where the turn has it', () => {
+    const installed = { installedToolsetIds: new Set(['@playwright/mcp']) };
+    const excluded = { browserAutomationRoleExcluded: true };
+
+    expect(prompt(['read_file', 'write_file'], excluded)).not.toContain('validate(');
+    expect(prompt(['read_file', 'write_file'], excluded)).toContain(
+      'Workspace HTML is runtime-checked automatically after each write.',
+    );
+    expect(prompt(['read_file', 'validate'], excluded)).toContain(
+      'validate({ path: "index.html" })',
+    );
+
+    expect(prompt(['read_file', 'browser_navigate'], installed)).not.toContain('validate(');
+    expect(prompt(['read_file', 'browser_navigate'], installed)).toContain(
+      'file:///workspace/index.html',
+    );
+    expect(
+      prompt(['read_file', 'browser_navigate'], { ...installed, providerName: 'copilot' }),
+    ).not.toContain('validate(');
+  });
+
+  it('tells a host without browser automation so, not to finish desktop setup', () => {
+    const unavailable = prompt(['read_file'], { browserAutomationUnavailable: true });
+    expect(unavailable).toContain('**No browser tools here.**');
+    expect(unavailable).not.toContain('Settings → Daemon');
+
+    expect(prompt(['read_file'])).toContain('Browser automation is not installed');
+  });
+
   it('does not advertise bridge-only file URL rewriting to Copilot', () => {
     const installed = { installedToolsetIds: new Set(['@playwright/mcp']) };
     const copilot = prompt(['read_file', 'validate', 'browser_navigate'], {

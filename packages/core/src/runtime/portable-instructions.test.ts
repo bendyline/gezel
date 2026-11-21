@@ -126,6 +126,8 @@ describe('buildPortableInstructions', () => {
       modelId: 'gemma4-e4b-q4',
       profile,
       installedToolsetIds: new Set(),
+      // A host fact, as a store build passes it: phones have no browser tools.
+      browserAutomationUnavailable: true,
       // The desktop's prediction: built-in group order, first group wins.
       availableTools: BUILTIN_TOOLSETS.flatMap((group) => group.tools)
         .filter((name, index, all) => all.indexOf(name) === index)
@@ -171,6 +173,12 @@ describe('buildPortableInstructions', () => {
     expect(phone).toContain('**Web pages.** The person runs a web page by opening its HTML file');
     expect(phone).toContain('Never tell the person to open localhost');
     expect(phone).not.toContain('Browser automation is not installed');
-    expect((await build(false)).full).not.toContain('**Web pages.**');
+    // Without the in-app preview the fallback used to send the person to a
+    // desktop Settings → Daemon screen phones do not have.
+    const noPreview = (await build(false)).full;
+    expect(noPreview).not.toContain('**Web pages.**');
+    expect(noPreview).toContain('**No browser tools here.**');
+    expect(noPreview).not.toContain('Settings → Daemon');
+    expect(noPreview).not.toContain('validate(');
   });
 });

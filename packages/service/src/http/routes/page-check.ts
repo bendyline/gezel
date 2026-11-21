@@ -69,7 +69,7 @@ export function pageCheckRoutes(ctx: ServiceContext, capabilities: PreviewCapabi
     if (!installPath) {
       return respond({ ran: false, reason: 'browser-runtime-not-installed' });
     }
-    if (!(await isChromiumReady(ctx.home))) {
+    if (!(await isChromiumReady(ctx.home, installPath))) {
       return respond({ ran: false, reason: 'chromium-not-installed' });
     }
 

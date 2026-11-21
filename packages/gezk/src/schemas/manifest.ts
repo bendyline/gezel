@@ -6,6 +6,7 @@ import {
   formatAtLeast,
 } from '../format/constants.js';
 import { KnowledgeSpatialManifestSchema } from '../spatial.js';
+import { LOCAL_KNOWLEDGE_PUBLISHER } from '../uri.js';
 import {
   KnowledgeDocumentIdSchema,
   KnowledgeIdSchema,
@@ -150,6 +151,13 @@ export const KnowledgeCatalogManifestSchema = z
     signature: KnowledgeSignatureSchema.optional(),
   })
   .superRefine((manifest, ctx) => {
+    if (manifest.publisher.id === LOCAL_KNOWLEDGE_PUBLISHER) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['publisher', 'id'],
+        message: `publisher id "${LOCAL_KNOWLEDGE_PUBLISHER}" is reserved for app passages`,
+      });
+    }
     const spatialEra = formatAtLeast(manifest.formatVersion, '0.7');
     if (spatialEra && !manifest.spatial) {
       ctx.addIssue({

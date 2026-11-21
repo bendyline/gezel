@@ -99,7 +99,7 @@
           "license": "MIT",
           "purl": "pkg:nuget/Microsoft.ML.OnnxRuntime.Gpu.Linux@1.30.0",
           "source": "https://www.nuget.org/packages/Microsoft.ML.OnnxRuntime.Gpu.Linux/1.30.0",
-          "note": "Not in the npm tarball: onnxruntime-node's install script downloads them from this NuGet package (install-metadata-versions.js pins 1.30.0) on linux-x64 hosts only, so they are optional here. The package's LICENSE and ThirdPartyNotices.txt match ONNX Runtime v1.30.0's apart from line endings.",
+          "note": "Not in the npm tarball: onnxruntime-node's install script downloads them from this NuGet package (install-metadata-versions.js pins 1.30.0) on linux-x64 hosts only, so they are optional here. Gezel's own builds deny that script (allowBuilds in pnpm-workspace.yaml), so its bundles and installers carry none; an npm install that runs the script still fetches them. The package's LICENSE and ThirdPartyNotices.txt match ONNX Runtime v1.30.0's apart from line endings.",
           "binaries": [
             {
               "path": "bin/napi-v6/linux/x64/libonnxruntime_providers_cuda.so",
