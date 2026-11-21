@@ -395,6 +395,9 @@ function runPackageManager(manager, args, options = {}) {
           // Never the developer's global npm cache: see npm-consumer-cache.mjs.
           env: {
             ...process.env,
+            // onnxruntime-node's install script fetches unverified CUDA
+            // providers from NuGet on linux-x64; Gezel's own builds skip it too.
+            ONNXRUNTIME_NODE_INSTALL: 'skip',
             ...options.env,
             npm_config_cache: npmCache,
             npm_config_update_notifier: 'false',
