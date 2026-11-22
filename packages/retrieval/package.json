@@ -1,6 +1,6 @@
 {
   "name": "@bendyline/gezel-retrieval",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A mutable, browser-safe retrieval index for documents an app owns: heading-aware chunks and SQLite FTS5 over any synchronous SQLite handle (node:sqlite, or sqlite-wasm on origin-private storage).",
   "license": "MIT",
   "keywords": ["gezel", "retrieval", "search", "rag", "sqlite", "fts5", "opfs"],
