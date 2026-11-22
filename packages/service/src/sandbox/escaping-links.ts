@@ -34,11 +34,15 @@ export type LinkScanResult =
  * script could not read by name, and a write through it fails at the kernel,
  * so it is no way out. Refusing it blocked every script in a folder holding a
  * standard Python `.venv` on Linux (1.26326.112 release audit). POSIX only.
+ *
+ * Regular files only. A root-owned folder such as `/home` or `/` is not
+ * writable itself, but the account's own files sit beneath it, so a link to
+ * one let a script write `h/<user>/.bashrc` (1.26326.113 release audit).
  */
 export async function isProtectedSystemTarget(target: string): Promise<boolean> {
   if (process.platform === 'win32') return false;
   const info = await stat(target).catch(() => null);
-  if (!info || info.uid !== 0) return false;
+  if (!info || !info.isFile() || info.uid !== 0) return false;
   return access(target, constants.W_OK).then(
     () => false,
     () => true,

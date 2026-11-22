@@ -476,9 +476,11 @@ binary wrapped in:
    granted roots, dangling links included (`sandbox/escaping-links.ts`, at most 500,000
    entries, refused past that). Workspace scripts (`run_nodejs_script`, `derive_file`) count
    only their write roots as granted (`linkTargets: 'write'`), since a write through a link
-   into the read-only artifacts drawer lands there. A link to a root-owned file this account
-   cannot write (`.venv/bin/python3 -> /usr/bin/python3`) is allowed on POSIX: it reaches
-   nothing a script could not read by name, and the kernel refuses writes through it. A script
+   into the read-only artifacts drawer lands there. A link to a root-owned regular file this
+   account cannot write (`.venv/bin/python3 -> /usr/bin/python3`) is allowed on POSIX: it
+   reaches nothing a script could not read by name, and the kernel refuses writes through it.
+   A link to a root-owned folder is never allowed: `/home` and `/` are not writable
+   themselves, but the account's own files sit beneath them. A script
    cannot make such a link: `symlink`, `link` and renames out are all refused under
    `--permission`.
 

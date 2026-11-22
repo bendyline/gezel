@@ -114,12 +114,12 @@ describe('ProjectConnectionsTab connector picker', () => {
 
     const uncertain = (await screen.findByText('send_email')).closest('li')!;
     expect(within(uncertain as HTMLElement).getByText(/may have been sent/)).toBeInTheDocument();
-    expect(within(uncertain as HTMLElement).queryByRole('button', { name: 'Commit' })).toBeNull();
+    expect(within(uncertain as HTMLElement).queryByRole('button', { name: 'Approve' })).toBeNull();
     expect(within(uncertain as HTMLElement).getByRole('button', { name: 'Discard' })).toBeTruthy();
 
     const offline = screen.getByText('reply').closest('li')!;
     expect(within(offline as HTMLElement).getByText('Not sent: fetch failed')).toBeInTheDocument();
-    expect(within(offline as HTMLElement).getByRole('button', { name: 'Commit' })).toBeTruthy();
+    expect(within(offline as HTMLElement).getByRole('button', { name: 'Approve' })).toBeTruthy();
   });
 
   it('opens a two-step dialog: choose a connector, then set it up', async () => {

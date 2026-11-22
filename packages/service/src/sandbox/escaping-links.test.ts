@@ -106,6 +106,29 @@ describe('isProtectedSystemTarget', () => {
     },
   );
 
+  it.skipIf(process.platform === 'win32')(
+    "is false for a root-owned folder, whose contents may be the account's own",
+    async () => {
+      expect(await isProtectedSystemTarget('/')).toBe(false);
+      expect(await isProtectedSystemTarget('/usr')).toBe(false);
+    },
+  );
+
+  // `h -> /home` passed as a protected target, and the account's own files
+  // under it became writable through the link.
+  it.skipIf(process.platform === 'win32')(
+    'refuses a link to a root-owned folder through the default check',
+    async () => {
+      const { workspace } = await layout();
+      await dirLink('/', join(workspace, 'h'));
+      expect(await findEscapingLinks([workspace], [workspace])).toMatchObject({
+        ok: false,
+        reason: 'links',
+        links: [{ target: '/' }],
+      });
+    },
+  );
+
   it('is never true on Windows', async () => {
     if (process.platform !== 'win32') return;
     expect(await isProtectedSystemTarget('C:\\Windows\\System32\\cmd.exe')).toBe(false);

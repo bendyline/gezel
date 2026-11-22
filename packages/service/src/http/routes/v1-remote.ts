@@ -279,9 +279,11 @@ export function v1RemoteRoutes(ctx: EngineContext): Hono {
   });
 
   // --- Image generation (inference-only; A persists the artifact) ---------
+  // On-device engines only, like chat: `current()` follows the person's own
+  // pick, which may be a cloud image account a paired device must not spend.
   app.post('/image/generate', async (c) => {
     const body = RemoteImageGenRequestSchema.parse(await c.req.json());
-    const provider = await ctx.imageProvider.current();
+    const provider = await ctx.imageProvider.localProvider();
     const out = await provider.generate({
       prompt: body.prompt,
       ...(body.negativePrompt ? { negativePrompt: body.negativePrompt } : {}),
@@ -305,12 +307,12 @@ export function v1RemoteRoutes(ctx: EngineContext): Hono {
   });
 
   app.get('/image/models', async (c) => {
-    const provider = await ctx.imageProvider.current();
+    const provider = await ctx.imageProvider.localProvider();
     return c.json({ models: await provider.listInstalledModels() });
   });
 
   app.get('/image/health', async (c) => {
-    const provider = await ctx.imageProvider.current();
+    const provider = await ctx.imageProvider.localProvider();
     return c.json(await provider.health());
   });
 

@@ -24,7 +24,7 @@ To keep a single page, write its address in a chat, starting with `https://` or 
 
 ## Read what was saved
 
-**Web pages**, in the project's **Views** tab, lists the pages by site. Choose one to read it. **Reading** shows the page's text; **Screenshots** shows how it looked. A link to another saved page opens it here; any other link opens in your browser. When Gezel has written a short synopsis of a page, it appears at the top, marked as written from the page.
+The project's **Web pages view** tab lists the pages by site. Choose one to read it. **Reading** shows the page's text; **Screenshots** shows how it looked. A link to another saved page opens it here; any other link opens in your browser. When Gezel has written a short synopsis of a page, it appears at the top, marked as written from the page.
 
 Each site also gets two files Gezel reads: an **overview** of every saved page, and a **change log** for the month listing pages that appeared, changed (with the lines that changed) and disappeared.
 

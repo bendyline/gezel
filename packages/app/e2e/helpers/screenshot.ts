@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test';
+import { type Page, errors } from '@playwright/test';
 
 type ScreenshotOptions = NonNullable<Parameters<Page['screenshot']>[0]>;
 
@@ -12,6 +12,12 @@ const ATTEMPTS = 3;
 const RETRY_DELAY_MS = 250;
 /** rAF never fires for an occluded window; don't hang the spec waiting for it. */
 const FRAME_WAIT_MS = 1_000;
+/**
+ * A healthy capture takes ~100 ms. One that has not answered in this long is
+ * waiting on a frame that will not come, and a fresh request is likelier to
+ * land than the same one waited on longer.
+ */
+const ATTEMPT_TIMEOUT_MS = 5_000;
 
 /**
  * Capture a diagnostic screenshot without letting the compositor fail the spec.
@@ -26,7 +32,11 @@ const FRAME_WAIT_MS = 1_000;
  * BrowserWindow finished swapping from the splash to the daemon URL, before
  * any later test had given the compositor a reason to paint — and reported a
  * green app as a failed smoke run twice on branches that were otherwise
- * passing.
+ * passing. On macOS the same missing frame does not error: the capture just
+ * never answers, so `startup-home.spec.ts`'s first shot after the handover to
+ * the daemon URL hung for Playwright's full 30 s in a whole-suite run while
+ * every evaluate before it passed and the spec passed alone. Each attempt is
+ * therefore bounded, and a timed-out one counts as a missing frame.
  *
  * So: nudge the compositor for a real frame, retry the capture, and if the
  * frame still never arrives, warn and move on. The renderer is probed first —
@@ -40,7 +50,7 @@ export async function captureScreenshot(page: Page, options: ScreenshotOptions):
   for (let attempt = 1; attempt <= ATTEMPTS; attempt += 1) {
     await waitForFrame(page);
     try {
-      await page.screenshot(options);
+      await page.screenshot({ timeout: ATTEMPT_TIMEOUT_MS, ...options });
       return;
     } catch (err) {
       if (!isMissingFrame(err)) throw err;
@@ -59,6 +69,7 @@ export async function captureScreenshot(page: Page, options: ScreenshotOptions):
 }
 
 function isMissingFrame(err: unknown): boolean {
+  if (err instanceof errors.TimeoutError) return true;
   return err instanceof Error && err.message.includes(NO_FRAME);
 }
 

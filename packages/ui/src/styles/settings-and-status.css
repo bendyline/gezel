@@ -507,6 +507,22 @@ legend.gz-setting-label {
   margin: 0;
 }
 
+/* Inside a dialog, `.gz-dialog label` and `.gz-dialog label input` outrank
+   the plain classes: the page export dialog showed each radio centered on a
+   full-width row above a grey label. Claim the row and the control, and
+   align the control with the first line, since these options carry a hint. */
+.gz-dialog .gz-setting-option {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 0;
+  color: inherit;
+}
+.gz-dialog .gz-setting-option > input {
+  display: inline-block;
+  width: auto;
+  margin: 0.2rem 0 0;
+}
+
 /* A setting whose control sits inside its sentence ("Keep sent drafts for
    [90] days", "[x] I'm within [20] % of my overall quota"): words, a
    checkbox and small number inputs share one wrapping line. */

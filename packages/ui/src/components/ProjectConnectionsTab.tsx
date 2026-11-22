@@ -112,7 +112,7 @@ export function ProjectConnectionsTab({
       setNotice('');
       try {
         const r = await api.commitConnectorAction(project.id, draftId);
-        setNotice(r.status === 'committed' ? 'Action committed.' : 'Held in the outbox.');
+        setNotice(r.status === 'committed' ? 'Approved.' : 'Held in the outbox.');
         await refresh();
       } catch (err) {
         setError(apiErrorMessage(err));
@@ -412,9 +412,9 @@ export function ProjectConnectionsTab({
 
       {pending.length > 0 && (
         <div className="settings-subsection">
-          <h4>Pending actions</h4>
+          <h4>Waiting for your approval</h4>
           <p className="muted small">
-            Drafted by your crew. Review each one, then commit it to send it. Anything your crew
+            Drafted by your crew. Review each one, then approve it to send it. Anything your crew
             tried to send or post while you weren't directing it waits here.
           </p>
           <ul className="settings-list">
@@ -436,7 +436,7 @@ export function ProjectConnectionsTab({
                   )}
                 </div>
                 <div className="gz-mail-link-actions">
-                  {/* Commit refuses an uncertain send, so it is not offered. */}
+                  {/* The service refuses to send an uncertain one again, so Approve is not offered. */}
                   {a.status !== 'uncertain' && (
                     <button
                       type="button"
@@ -444,7 +444,7 @@ export function ProjectConnectionsTab({
                       onClick={() => void handleCommit(a.draftId)}
                       disabled={busy === a.draftId}
                     >
-                      {busy === a.draftId ? 'Working…' : 'Commit'}
+                      {busy === a.draftId ? 'Working…' : 'Approve'}
                     </button>
                   )}
                   <button

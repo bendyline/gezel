@@ -8,6 +8,7 @@ import { _electron as electron } from 'playwright';
 import { closeApp } from './helpers/close-app.js';
 import { buildLaunchEnv } from './helpers/launch-env.js';
 import { expectLayoutToMatch } from './helpers/layout.js';
+import { captureScreenshot } from './helpers/screenshot.js';
 
 test('local Home matches the live chrome and preserves reading across service navigation', async () => {
   test.setTimeout(120_000);
@@ -130,7 +131,7 @@ test('local Home matches the live chrome and preserves reading across service na
           };
         });
     const startupPill = await pillMetrics();
-    await page.screenshot({ path: join(screenshots, 'startup-home-local.png') });
+    await captureScreenshot(page, { path: join(screenshots, 'startup-home-local.png') });
     await page.getByRole('tab', { name: 'Night shift', exact: true }).click();
     await expect(page.getByText('The research notes are ready for your review.')).toBeVisible();
 
@@ -169,7 +170,7 @@ test('local Home matches the live chrome and preserves reading across service na
         ),
       );
     const startupReader = await readerMetrics('#startup-reading');
-    await page.screenshot({ path: join(screenshots, 'startup-home-reading.png') });
+    await captureScreenshot(page, { path: join(screenshots, 'startup-home-reading.png') });
     await expect(page).toHaveURL(/^https?:\/\//, { timeout: 60_000 });
     // The startup screen mounts again on the service page to hand its copy
     // over, then leaves. The live Handboek tab reads the same article, so the
@@ -196,7 +197,7 @@ test('local Home matches the live chrome and preserves reading across service na
     expectLayoutToMatch(await chrome(), startupChrome);
     expectLayoutToMatch(await pillMetrics(), startupPill);
     expectLayoutToMatch(await readerMetrics(liveReader), startupReader);
-    await page.screenshot({ path: join(screenshots, 'startup-home-live.png') });
+    await captureScreenshot(page, { path: join(screenshots, 'startup-home-live.png') });
     await page.getByRole('button', { name: 'Return to Meester chat', exact: true }).click();
     await expect(
       page.locator('[data-testid="meester-chat"] [contenteditable="true"]').first(),
