@@ -54,7 +54,7 @@ import { isPureDelegationRole } from './role-tool-filter.js';
 import { scopeProjectAboutForTier } from './scope-instructions.js';
 import { SQUISQ_DIALECT_BRIEF } from './squisq-dialect.js';
 import { type AvailableToolInfo, renderAvailableToolsBlock } from './tools-block.js';
-import { IN_APP_WEB_PREVIEW_GUIDANCE } from './web-preview.js';
+import { inAppWebPreviewGuidance } from './web-preview.js';
 import {
   WORKSPACE_LISTING_TOOLS,
   WORKSPACE_PROMPT_ENTRY_CAP,
@@ -452,6 +452,14 @@ export interface BuildInstructionsOptions {
    */
   inAppWebPreview?: boolean;
   /**
+   * The libraries pages can load on this host (`pageLibrariesNote` in core
+   * pages/note.ts, docs/page-libraries.md). Rendered beside the browsing
+   * guidance for a turn that can write workspace files.
+   */
+  pageLibrariesNote?: string;
+  /** The ids of those libraries, so a task step names only ones that load here. */
+  pageLibraryIds?: readonly string[];
+  /**
    * This host can never run browser automation: a phone, or a store build,
    * which may not download the Playwright toolset. The fallback line then
    * says so, instead of sending the person to a desktop setup screen that
@@ -688,6 +696,8 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
     browserLocalPreviewOnly,
     inAppWebPreview,
     browserAutomationUnavailable,
+    pageLibrariesNote,
+    pageLibraryIds,
     appSubject,
     craftbookFocus,
   } = opts;
@@ -1374,8 +1384,9 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
     : canValidate
       ? 'For workspace HTML, call `validate({ path: "index.html" })`; it runs the HTML/JavaScript lint plus a headless load through Gezel\'s scoped preview server. This provider\'s native MCP loop cannot rewrite `file:` navigation, so do not pass `file://` to `browser_navigate` and do not install a separate static server.'
       : "This provider's native MCP loop cannot rewrite `file:` navigation, so do not pass `file://` to `browser_navigate` for workspace HTML, and do not install a separate static server.";
+  const libraryNoteShown = Boolean(pageLibrariesNote) && availableToolNameSet.has('write_file');
   const browsingGuidance = inAppWebPreview
-    ? IN_APP_WEB_PREVIEW_GUIDANCE
+    ? inAppWebPreviewGuidance(libraryNoteShown)
     : browserLocalPreviewOnly
       ? `**Local preview browser.** ${workspaceHtmlBrowserGuidance} External URLs and arbitrary localhost services are blocked in this security mode. Use the available \`browser_*\` tools only to inspect and interact with that hosted workspace page; JavaScript evaluation, file upload, storage mutation, and unsafe browser code are intentionally absent.`
       : scriptedBrowsing
@@ -1408,6 +1419,7 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
   const taskContext = task
     ? `\n\n---\n\n${renderTaskContextBlock(task, {
         ...(availableTools === undefined ? {} : { availableToolNames: availableToolNameSet }),
+        ...(pageLibraryIds?.length ? { pageLibraries: new Set(pageLibraryIds) } : {}),
       })}`
     : '';
 
@@ -1629,8 +1641,10 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
   // body underneath is then read in the context of "you route, you
   // don't build." Suppresses `browsingGuidance` for delegation roles
   // (it talks about writing artifacts they aren't supposed to need).
+  // A page library is only worth naming to a turn that can write a page.
+  const libraryNote = libraryNoteShown ? ` ${pageLibrariesNote}` : '';
   const browsingForRole =
-    isDelegationRole || leanProfile || itemFocus ? '' : `\n\n${browsingGuidance}`;
+    isDelegationRole || leanProfile || itemFocus ? '' : `\n\n${browsingGuidance}${libraryNote}`;
   // ── Cache-friendly ordering (Phase 2.4) ──
   // We extract the workspace-files listing from projectContext so a
   // file mutation doesn't invalidate the entire stable prefix — that
@@ -1710,7 +1724,7 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
       wantsFile && !!expectedFilePath && isExpectedBinaryDocumentDeliverablePath(expectedFilePath);
     const singleFileHtmlClause =
       expectedFilePath && /(?:^|\/)index\.html$/i.test(expectedFilePath)
-        ? ' For `index.html`, write a single self-contained HTML file: inline `<style>` and inline `<script>` only; do not create or depend on `script.js`, `styles.css`, external assets, or a build step unless the asker explicitly named those files.'
+        ? ' For `index.html`, write a single self-contained HTML file: inline `<style>` and inline `<script>` only; do not create or depend on `script.js`, `styles.css`, external assets other than a listed page library, or a build step unless the asker explicitly named those files.'
         : '';
     const filePathClause = expectedFilePath
       ? `\`${expectedFilePath}\``

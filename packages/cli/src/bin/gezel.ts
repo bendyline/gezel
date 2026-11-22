@@ -3,6 +3,7 @@
  * management commands, workflows, or the TUI. Transport selection is process-wide
  * so SDK discovery and command requests use the same protocol and trust policy.
  */
+import { writeFile } from 'node:fs/promises';
 import { basename, isAbsolute as isAbsolutePath, join as joinPath } from 'node:path';
 import {
   type ApiCompatVerdict,
@@ -2767,6 +2768,27 @@ program
     const job = await pollStorageJob(client, jobId);
     console.log(formatCleanupResult(job));
     if (job.status === 'error') process.exitCode = 1;
+  });
+
+const page = program.command('page').description('Web pages your crew builds');
+
+page
+  .command('export <project> <path> <out>')
+  .description(
+    'Save a copy of a workspace page with the libraries it uses: a zipped folder, or one HTML file with --single',
+  )
+  .option('--single', 'One HTML file that opens without a web server')
+  .action(async (project: string, path: string, out: string, opts: { single?: boolean }) => {
+    const client = await connectOwned(cliGlobals());
+    const exported = await client.exportProjectPage(
+      project,
+      path,
+      opts.single ? 'single' : 'folder',
+    );
+    const outPath = resolvePath(out);
+    await writeFile(outPath, Buffer.from(await exported.blob.arrayBuffer()));
+    console.log(`Wrote ${outPath}`);
+    for (const note of exported.notes) console.log(`  Not included: ${note}`);
   });
 
 program

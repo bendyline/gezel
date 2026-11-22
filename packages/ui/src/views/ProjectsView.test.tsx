@@ -2333,6 +2333,20 @@ describe('ProjectsView', () => {
       expect(screen.getByRole('checkbox', { name: 'Artifacts' })).toBeChecked();
     });
 
+    it('give a project that follows web sites a Views tab for its saved pages', async () => {
+      // What's New sends people to Views → Web pages; a project with no folder
+      // that follows a site had no Views tab at all.
+      vi.mocked(api.getProject).mockResolvedValue({
+        ...plain,
+        connectors: [{ id: 'w1', type: 'website', driver: 'native', displayName: 'Docs' }],
+      } as never);
+      render(<ProjectsView forceProjectId="pj-alpha" />);
+      await screen.findByTestId('project-chat');
+      expect(tabNames().some((n) => / view$/.test(n))).toBe(true);
+      fireEvent.click(screen.getByRole('tab', { name: 'Settings' }));
+      expect(screen.getByRole('checkbox', { name: 'Views' })).toBeChecked();
+    });
+
     it('show Artifacts in the Default project and the shared library', async () => {
       vi.mocked(api.getProject).mockResolvedValue({
         ...plain,

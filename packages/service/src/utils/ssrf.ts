@@ -133,6 +133,91 @@ function isPrivateV6(ip: string): boolean {
   return false;
 }
 
+function neverReachableV4(ip: string): 'loopback' | 'metadata' | null {
+  const parts = ip.split('.').map((p) => Number(p));
+  if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
+    return 'loopback'; // malformed → treat as unsafe
+  }
+  const [a, b] = parts as [number, number, number, number];
+  if (a === 127 || a === 0) return 'loopback';
+  if (a === 169 && b === 254) return 'metadata';
+  if (ip === '100.100.100.200') return 'metadata';
+  return null;
+}
+
+/**
+ * Why an address may never be reached, even for a private host the person
+ * typed: `loopback` (this computer's own services) or `metadata` (cloud
+ * instance metadata and link-local). Every IPv6 form that carries an IPv4
+ * address is judged as that address. A prefix check let `::ffff:127.0.0.1`
+ * and `::ffff:169.254.169.254` through, which a site the person saved could
+ * reach by answering its own name with that AAAA record.
+ */
+export function neverReachableKind(ip: string): 'loopback' | 'metadata' | null {
+  const v = isIP(ip);
+  if (v === 4) return neverReachableV4(ip);
+  if (v !== 6) return null;
+  const g = ipv6Groups(ip);
+  if (!g) return 'loopback'; // unparseable → treat as unsafe
+  const [g0, g1, g2, g3, g4, g5, g6, g7] = g as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  const zeroThrough = (n: number) => g.slice(0, n).every((group) => group === 0);
+  if (zeroThrough(7) && (g7 === 0 || g7 === 1)) return 'loopback';
+  if (zeroThrough(5) && g5 === 0xffff) return neverReachableV4(embeddedV4(g6, g7));
+  if (zeroThrough(6)) return neverReachableV4(embeddedV4(g6, g7));
+  if (g0 === 0x64 && g1 === 0xff9b && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0) {
+    return neverReachableV4(embeddedV4(g6, g7));
+  }
+  if (g0 === 0x2002) return neverReachableV4(embeddedV4(g1, g2));
+  if ((g0 & 0xffc0) === 0xfe80) return 'metadata'; // fe80::/10 link-local
+  // fd00:ec2::254, AWS instance metadata over IPv6.
+  if (g0 === 0xfd00 && g1 === 0xec2 && g.slice(2, 7).every((x) => x === 0) && g7 === 0x254) {
+    return 'metadata';
+  }
+  return null;
+}
+
+/**
+ * Throw `SsrfError` when `rawUrl`'s host is, or resolves to, an address no
+ * host may reach (see {@link neverReachableKind}). For hosts the person typed,
+ * whose private addresses are otherwise allowed.
+ */
+export async function assertNotLoopbackOrMetadata(rawUrl: string): Promise<void> {
+  let u: URL;
+  try {
+    u = new URL(rawUrl);
+  } catch {
+    throw new SsrfError('invalid URL');
+  }
+  const host = u.hostname.replace(/^\[/, '').replace(/\]$/, '');
+  if (host === 'localhost' || host.endsWith('.localhost')) {
+    throw new SsrfError('destination resolves to loopback');
+  }
+  let addresses: string[];
+  if (isIP(host)) {
+    addresses = [host];
+  } else {
+    try {
+      addresses = (await lookup(host, { all: true })).map((r) => r.address);
+    } catch {
+      return;
+    }
+  }
+  for (const address of addresses) {
+    const kind = neverReachableKind(address);
+    if (kind === 'loopback') throw new SsrfError('destination resolves to loopback');
+    if (kind === 'metadata') throw new SsrfError('destination resolves to a link-local address');
+  }
+}
+
 /**
  * Throw `SsrfError` unless `rawUrl` is an http(s) URL whose host resolves
  * exclusively to public, routable addresses.

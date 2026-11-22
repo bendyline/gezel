@@ -17,7 +17,12 @@ import { createHash } from 'node:crypto';
 import { isIP } from 'node:net';
 import { createAwakeTimeout, normalizePageUrl, scopeOfUrl } from '@bendyline/gezel';
 import { htmlBodyToMarkdown } from '../mail/html.js';
-import { SsrfError, assertPublicUrl, isPrivateAddress } from '../utils/ssrf.js';
+import {
+  SsrfError,
+  assertNotLoopbackOrMetadata,
+  assertPublicUrl,
+  isPrivateAddress,
+} from '../utils/ssrf.js';
 import type {
   CaptureFailure,
   CaptureSession,
@@ -284,9 +289,10 @@ async function checkHop(url: URL, privateHosts: readonly string[]): Promise<void
   if (url.username || url.password) throw new SsrfError('credentials in the address');
   const host = url.hostname.replace(/^\[|\]$/g, '');
   if (privateAllowed(host, privateHosts)) {
-    // The person typed this host; its private address is the point. Cloud
-    // metadata stays out of reach regardless.
-    if (isIP(host) && host.startsWith('169.254.')) throw new SsrfError('link-local address');
+    // The person typed this host; its private address is the point. This
+    // computer's own services and cloud metadata stay out of reach regardless,
+    // for literals and resolved names alike (the name is the site's to answer).
+    await assertNotLoopbackOrMetadata(url.href);
     return;
   }
   if (isIP(host) && isPrivateAddress(host)) throw new SsrfError('private address');

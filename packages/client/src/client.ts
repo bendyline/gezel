@@ -524,6 +524,7 @@ import type {
   EvalTrialDetail,
   EvalTrialListResponse,
 } from '@bendyline/gezel/eval';
+import type { PageLibrariesResponse, PageLibraryNeedsResponse } from '@bendyline/gezel/pages';
 import type {
   ClaudeCliPoolView,
   ProviderCacheStatsResponse,
@@ -1205,6 +1206,74 @@ export class GezelClient {
    * started (or attached); poll `getGildeUpdateStatus` for the outcome. */
   checkGildeUpdates(): Promise<{ started: boolean }> {
     return this.request('POST', '/api/gilde-updates/check');
+  }
+
+  // ---------- page libraries (docs/page-libraries.md) ----------
+
+  /** What the catalog offers, what is installed, and whether downloads may run. */
+  getPageLibraries(): Promise<PageLibrariesResponse> {
+    return this.request('GET', '/api/page-libraries');
+  }
+
+  /** Download one line now. First-party only; resolves when it is installed. */
+  installPageLibrary(library: string, version: string): Promise<{ ok: boolean; ready: boolean }> {
+    return this.request('POST', '/api/page-libraries/install', { library, version });
+  }
+
+  /** Remove a downloaded line. First-party only. */
+  removePageLibrary(library: string, version: string): Promise<{ ok: boolean }> {
+    return this.request(
+      'DELETE',
+      `/api/page-libraries/${encodeURIComponent(library)}/${encodeURIComponent(version)}`,
+    );
+  }
+
+  /**
+   * What a workspace page needs from the shelf. Downloads what is missing
+   * when allowed and waits up to `waitMs` for it; `installed` lists what
+   * arrived during the call, so a preview showing the page can reload.
+   */
+  getPageLibraryNeeds(
+    projectId: string,
+    relativePath: string,
+    opts: { waitMs?: number } = {},
+  ): Promise<PageLibraryNeedsResponse> {
+    return this.request(
+      'POST',
+      `/api/projects/${encodeURIComponent(projectId)}/page-libraries/needs`,
+      { path: relativePath, ...(opts.waitMs !== undefined ? { waitMs: opts.waitMs } : {}) },
+    );
+  }
+
+  /**
+   * A workspace page with its libraries: a zip of its folder, or one HTML
+   * file. `notes` says, in plain words, what the copy leaves out.
+   */
+  async exportProjectPage(
+    projectId: string,
+    relativePath: string,
+    format: 'folder' | 'single',
+  ): Promise<{ blob: Blob; filename: string; notes: string[] }> {
+    const res = await this.fetchImpl(
+      `${this.baseUrl}/api/projects/${encodeURIComponent(projectId)}/pages/export`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${this.token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ path: relativePath, format }),
+      },
+    );
+    if (!res.ok) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new GezelApiError(body.error ?? `page export failed: ${res.status}`, res.status, body);
+    }
+    const disposition = res.headers.get('content-disposition') ?? '';
+    const filename =
+      /filename="([^"]+)"/.exec(disposition)?.[1] ??
+      (format === 'single' ? 'page.html' : 'page.zip');
+    const notes = decodeURIComponent(res.headers.get('x-gezel-export-notes') ?? '')
+      .split('\n')
+      .filter(Boolean);
+    return { blob: await res.blob(), filename, notes };
   }
 
   // ---------- night shift ----------

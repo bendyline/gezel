@@ -712,9 +712,12 @@ versions and notes without touching anything.
 ## Listing in the MCP Registry
 
 Gezel's tools for coding agents (`gezel-mcp --harness <app>`, see
-[harness-tools.md](harness-tools.md)) are listed in the official
+[harness-tools.md](harness-tools.md)) are ready to list in the official
 [MCP Registry](https://registry.modelcontextprotocol.io) as `com.gezel/gezel`.
-Claude, VS Code and the directories that copy the registry find them there.
+Publishing is the manual step below, run after an npm release; until someone
+runs it the registry has no entry, so nothing user-facing should say Gezel is
+listed. Once listed, Claude, VS Code and the directories that copy the
+registry find the tools there.
 The registry stores only metadata,
 [`packages/mcp/server.json`](../packages/mcp/server.json), and verifies it
 against the npm package it names:

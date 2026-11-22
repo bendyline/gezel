@@ -46,6 +46,7 @@ import {
 } from '../../git/manager.js';
 import { ReviewInProgressError } from '../../git/reviews.js';
 import { parseGitHubUrl } from '../../github/url.js';
+import { isOwnerCaller } from '../auth.js';
 import type { ServiceContext } from '../context.js';
 import { modelGitRefusal } from '../model-git-gate.js';
 
@@ -192,6 +193,7 @@ export function gitRoutes(ctx: ServiceContext, segment: 'git' | 'github' = 'git'
       const result = await ctx.git.commit(project, {
         message: body.message,
         ...(body.allowEmpty ? { allowEmpty: true } : {}),
+        personStarted: isOwnerCaller(c),
       });
       const out: GitCommitResponse = {
         ok: true,
@@ -211,7 +213,7 @@ export function gitRoutes(ctx: ServiceContext, segment: 'git' | 'github' = 'git'
     if (!project) return c.json({ error: 'not found' }, 404);
     if (!project.github) return c.json({ error: 'project has no github link' }, 400);
     try {
-      const result = await ctx.git.push(project);
+      const result = await ctx.git.push(project, { personStarted: isOwnerCaller(c) });
       const body: GitPushResponse = {
         ok: true,
         pushed: result.pushed,
@@ -335,7 +337,9 @@ export function gitRoutes(ctx: ServiceContext, segment: 'git' | 'github' = 'git'
     try {
       // Every expected outcome (auth/offline/conflicts/needs-save) is a
       // 200 with a `state` discriminator; only infra errors become 5xx.
-      const body: GitSyncResponse = await ctx.git.sync(project);
+      const body: GitSyncResponse = await ctx.git.sync(project, {
+        personStarted: isOwnerCaller(c),
+      });
       return c.json(body);
     } catch (err) {
       return gitError(c, err);
@@ -393,6 +397,7 @@ export function gitRoutes(ctx: ServiceContext, segment: 'git' | 'github' = 'git'
     try {
       const result = await ctx.git.completeMerge(project, {
         ...(body.message ? { message: body.message } : {}),
+        personStarted: isOwnerCaller(c),
       });
       const out: GitCompleteMergeResponse = { ok: true, sha: result.sha };
       return c.json(out);

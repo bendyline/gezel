@@ -1,7 +1,13 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { describe, expect, it } from 'vitest';
-import { SsrfError, assertPublicUrl, isPrivateAddress } from './ssrf.js';
+import {
+  SsrfError,
+  assertNotLoopbackOrMetadata,
+  assertPublicUrl,
+  isPrivateAddress,
+  neverReachableKind,
+} from './ssrf.js';
 
 describe('isPrivateAddress', () => {
   it('judges every IPv6 form that carries an IPv4 address as that address', () => {
@@ -90,5 +96,58 @@ describe('assertPublicUrl', () => {
     } finally {
       server.close();
     }
+  });
+});
+
+describe('neverReachableKind', () => {
+  // A private host the person typed may reach its own private address, but
+  // never this computer or cloud metadata. A prefix match let the mapped
+  // forms through, which the site could hand out as its own AAAA answer.
+  it('catches loopback and metadata in every IPv6 form that carries them', () => {
+    for (const ip of [
+      '127.0.0.1',
+      '0.0.0.0',
+      '::1',
+      '::',
+      '::ffff:127.0.0.1',
+      '::ffff:7f00:1',
+      '0:0:0:0:0:ffff:7f00:0001',
+      '::7f00:1',
+      '64:ff9b::127.0.0.1',
+      '2002:7f00:1::',
+    ]) {
+      expect(neverReachableKind(ip), ip).toBe('loopback');
+    }
+    for (const ip of [
+      '169.254.169.254',
+      '100.100.100.200',
+      '::ffff:169.254.169.254',
+      '::ffff:a9fe:a9fe',
+      '64:ff9b::a9fe:a9fe',
+      'fe80::1',
+      'febf::1',
+      'fd00:ec2::254',
+    ]) {
+      expect(neverReachableKind(ip), ip).toBe('metadata');
+    }
+  });
+
+  it('leaves private and public addresses to the other rules', () => {
+    for (const ip of ['10.0.0.5', '192.168.1.20', '::ffff:10.0.0.5', 'fd12::1', '93.184.216.34']) {
+      expect(neverReachableKind(ip), ip).toBeNull();
+    }
+  });
+
+  it('refuses a typed host whose address is loopback or metadata', async () => {
+    await expect(assertNotLoopbackOrMetadata('http://[::ffff:127.0.0.1]:8080/')).rejects.toThrow(
+      SsrfError,
+    );
+    await expect(assertNotLoopbackOrMetadata('http://169.254.169.254/latest')).rejects.toThrow(
+      SsrfError,
+    );
+    await expect(assertNotLoopbackOrMetadata('http://intranet.localhost/')).rejects.toThrow(
+      SsrfError,
+    );
+    await expect(assertNotLoopbackOrMetadata('http://10.0.0.5/wiki')).resolves.toBeUndefined();
   });
 });

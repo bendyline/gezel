@@ -148,6 +148,27 @@ export class PreviewCapabilityStore {
   }
 
   /**
+   * Whether a lease is live, whatever it is scoped to. For the page-library
+   * shelf, whose files are the same public bytes for every project: a page
+   * may load them because it holds a preview lease at all, and the lease
+   * says nothing about which. Refreshes the idle window like any in-scope
+   * request, since a page's libraries are part of loading it.
+   */
+  authorizeLease(token: string): { ok: true } | { ok: false; reason: 'invalid' | 'expired' } {
+    if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return { ok: false, reason: 'invalid' };
+    const digest = tokenDigest(token);
+    const record = this.records.get(digest);
+    if (!record) return { ok: false, reason: 'invalid' };
+    const now = this.now();
+    if (record.idleExpiresAtMs <= now || record.absoluteExpiresAtMs <= now) {
+      this.records.delete(digest);
+      return { ok: false, reason: 'expired' };
+    }
+    record.idleExpiresAtMs = Math.min(now + this.ttlMs, record.absoluteExpiresAtMs);
+    return { ok: true };
+  }
+
+  /**
    * End a lease now. For one-shot consumers such as page-check, whose page
    * can read its own URL and write it, encoded however it likes, into what
    * the caller gets back: once the run ends the capability opens nothing.

@@ -45,4 +45,19 @@ describe('createTrustedIpc', () => {
     expect(trusted.returnValue).toEqual({ token: 'secret' });
     expect(untrusted.returnValue).toBeNull();
   });
+
+  it('tells the check which channel was asked, so a page can be trusted for one channel', async () => {
+    const { ipc, handlers, listeners } = fakeIpcMain();
+    const onlyRestart = (_event: IpcMainEvent | IpcMainInvokeEvent, channel: string) =>
+      channel === 'gezel:restart-service';
+    const trustedIpc = createTrustedIpc(ipc, onlyRestart);
+    trustedIpc.handle('gezel:restart-service', () => 'restarted');
+    trustedIpc.on('gezel:current-connection', (event) => {
+      event.returnValue = { token: 'secret' };
+    });
+    expect(await handlers.get('gezel:restart-service')!({ trusted: false })).toBe('restarted');
+    const event: { returnValue?: unknown; trusted: boolean } = { trusted: false };
+    listeners.get('gezel:current-connection')!(event);
+    expect(event.returnValue).toBeNull();
+  });
 });

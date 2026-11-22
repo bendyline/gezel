@@ -1,7 +1,7 @@
 import http from 'node:http';
 import net from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
-import { FilterProxy } from './filter-proxy.js';
+import { FilterProxy, SIGN_IN_NETWORK_BUDGET } from './filter-proxy.js';
 
 /** Send a raw CONNECT through the proxy; resolve with the status line. */
 function connectThrough(proxyPort: number, target: string): Promise<string> {
@@ -116,6 +116,51 @@ describe('FilterProxy', () => {
     const stats = p.endPage();
     expect(stats.refused.private ?? 0).toBe(0);
     expect(stats.connections).toBe(1);
+  });
+
+  it('keeps loopback and metadata out of reach for a typed host, in any IPv6 spelling', async () => {
+    // The site the person typed answers its own name. A prefix check let the
+    // IPv4-mapped forms through, because the private-address rule is waived
+    // for a typed host while its own page is captured.
+    const answers: Record<string, string[]> = {
+      'wiki.corp': ['::ffff:127.0.0.1'],
+      'docs.corp': ['::ffff:169.254.169.254'],
+      'hex.corp': ['::ffff:a9fe:a9fe'],
+    };
+    const p = await proxy({
+      privateHosts: Object.keys(answers),
+      resolve: async (host) => answers[host] ?? [],
+    });
+    for (const host of Object.keys(answers)) {
+      p.beginPage(host);
+      expect(await connectThrough(p.port, `${host}:443`), host).toMatch(/403/);
+      p.endPage();
+    }
+  });
+
+  it('opens for a sign-in window once its page begins', async () => {
+    // A sign-in window has no capture request of its own, so nothing began a
+    // page and every connection it made was refused as "no page".
+    // 198.51.100.0/24 is a documentation range: public to the proxy, routed nowhere.
+    const p = await proxy({ resolve: async () => ['198.51.100.7'] });
+    expect(await connectThrough(p.port, 'accounts.example.test:22')).toMatch(/403/);
+    p.beginPage('site.example.test', SIGN_IN_NETWORK_BUDGET);
+    const reply = await new Promise<string>((resolve) => {
+      const s = net.connect(p.port, '127.0.0.1', () =>
+        s.write('CONNECT accounts.example.test:443 HTTP/1.1\r\n\r\n'),
+      );
+      const done = (v: string) => {
+        s.destroy();
+        resolve(v);
+      };
+      s.once('data', (d) => done(d.toString('latin1').split('\r\n')[0] ?? ''));
+      s.on('error', () => done('error'));
+      setTimeout(() => done('pending'), 400);
+    });
+    expect(reply).not.toMatch(/403/);
+    const stats = p.endPage();
+    expect(stats.refused['no-page'] ?? 0).toBe(0);
+    expect(SIGN_IN_NETWORK_BUDGET.connections).toBeGreaterThan(400);
   });
 
   it('tunnels to an allowed target and counts the bytes', async () => {

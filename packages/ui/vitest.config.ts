@@ -1,9 +1,29 @@
-import { searchForWorkspaceRoot } from 'vite';
+import { type Plugin, searchForWorkspaceRoot } from 'vite';
 import { configDefaults, defineConfig } from 'vitest/config';
 import { projectPageTypographyPlugin } from '../../scripts/project-page-typography.mjs';
 import { reactWithCompiler } from './scripts/vite-react.js';
 
 const workspaceRoot = searchForWorkspaceRoot(import.meta.dirname);
+
+/**
+ * tests/html-preview-host imports the phone's html-preview.ts, which loads the
+ * libraries a phone build ships from a module only packages/mobile's Vite
+ * config provides. Here it ships none, as in mobile's test-html-preview.mjs.
+ */
+function emptyPhonePageLibraries(): Plugin {
+  const libraries = 'virtual:gezel-page-libraries';
+  const lines = 'virtual:gezel-page-library-lines';
+  return {
+    name: 'empty-phone-page-libraries',
+    resolveId: (id) => (id === libraries || id === lines ? `\0${id}` : null),
+    load: (id) =>
+      id === `\0${libraries}`
+        ? 'export default { lines: [], files: {}, modules: {} };'
+        : id === `\0${lines}`
+          ? 'export default [];'
+          : null,
+  };
+}
 
 /**
  * Vitest config for the UI package.
@@ -20,6 +40,7 @@ export default defineConfig({
   // The compiler runs here too, so the suite tests the memoized code that ships.
   plugins: [
     projectPageTypographyPlugin(import.meta.dirname),
+    emptyPhonePageLibraries(),
     ...reactWithCompiler(import.meta.dirname),
   ],
   // Mirrors vite.config.ts: with `pnpm link:squisq` active the linked

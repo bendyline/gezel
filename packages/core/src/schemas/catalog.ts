@@ -35,6 +35,7 @@ import { BehaviorEntrySchema, ModelStyleSchema } from './model-profile.js';
 import { ChatModelTuningSchema } from './model-tuning.js';
 import { ObservationTableManifestSchema } from './observations.js';
 import { PageImportTargetSchema } from './page-imports.js';
+import { PageLibraryLineSchema } from './page-library.js';
 import { PreviewSourceSchema } from './preview.js';
 import { ProjectTabVisibilitySchema } from './project.js';
 import { ScriptOutputPredicateSchema } from './script.js';
@@ -1994,6 +1995,61 @@ export const ImageLoraManifestSchema = z.object({
 });
 export type ImageLoraManifest = z.infer<typeof ImageLoraManifestSchema>;
 
+// ─ Page libraries ────────────────────────────────────────────────────
+//
+// Browser-ready JavaScript libraries that AI-written pages load from this
+// computer (docs/page-libraries.md). One item per library; each version of
+// the item lists the library's lines, so adding three 0.190 beside 0.187 is
+// a new item version, and the item's identity holds what every line shares.
+
+export const PageLibraryIdentitySchema = IdentityCommonSchema.extend({
+  kind: z.literal('page-library'),
+  homepage: z.string().url().optional(),
+});
+export type PageLibraryIdentity = z.infer<typeof PageLibraryIdentitySchema>;
+
+/** A line as an item version lists it: the library and its name come from the item. */
+export const PageLibraryVersionLineSchema = PageLibraryLineSchema.omit({
+  library: true,
+  name: true,
+});
+
+export const PageLibraryVersionManifestSchema = z.object({
+  ...MinGezelVersionShape,
+  schemaVersion: z.literal(1),
+  version: z.string().regex(SemverRegex),
+  releasedAt: z.string(),
+  lines: z.array(PageLibraryVersionLineSchema).min(1),
+  notes: z.string().optional(),
+});
+export type PageLibraryVersionManifest = z.infer<typeof PageLibraryVersionManifestSchema>;
+
+export const PageLibraryManifestSchema = z.object({
+  ...MinGezelVersionShape,
+  schemaVersion: z.literal(1),
+  kind: z.literal('page-library'),
+  id: z.string().regex(IdRegex),
+  name: z.string().min(1),
+  description: z.string(),
+  tags: z.array(z.string()).default([]),
+  maintainer: z.object({
+    name: z.string(),
+    url: z.string().url().optional(),
+  }),
+  logo: z.string().optional(),
+  license: z.string().optional(),
+  ...LicenseMetaShape,
+  ...RecoMetaShape,
+  homepage: z.string().url().optional(),
+  version: z.string(),
+  releasedAt: z.string(),
+  /** Every line, with `library` and `name` filled in from the item. */
+  lines: z.array(PageLibraryLineSchema),
+  notes: z.string().optional(),
+  availableVersions: z.array(z.string()).default([]),
+});
+export type PageLibraryManifest = z.infer<typeof PageLibraryManifestSchema>;
+
 // ─ Video models ─────────────────────────────────────────────────────
 
 /**
@@ -2565,6 +2621,7 @@ export const CatalogItemIdentitySchema: z.ZodDiscriminatedUnion<
     typeof ImageLoraIdentitySchema,
     typeof VideoModelIdentitySchema,
     typeof KnowledgeCatalogIdentitySchema,
+    typeof PageLibraryIdentitySchema,
   ],
   'kind'
 > = z.discriminatedUnion('kind', [
@@ -2578,6 +2635,7 @@ export const CatalogItemIdentitySchema: z.ZodDiscriminatedUnion<
   ImageLoraIdentitySchema,
   VideoModelIdentitySchema,
   KnowledgeCatalogIdentitySchema,
+  PageLibraryIdentitySchema,
 ]);
 export type CatalogItemIdentity = z.infer<typeof CatalogItemIdentitySchema>;
 
@@ -2595,6 +2653,7 @@ export const CatalogItemManifestSchema: z.ZodDiscriminatedUnion<
     typeof ImageLoraManifestSchema,
     typeof VideoModelManifestSchema,
     typeof KnowledgeCatalogItemManifestSchema,
+    typeof PageLibraryManifestSchema,
   ],
   'kind'
 > = z.discriminatedUnion('kind', [
@@ -2608,6 +2667,7 @@ export const CatalogItemManifestSchema: z.ZodDiscriminatedUnion<
   ImageLoraManifestSchema,
   VideoModelManifestSchema,
   KnowledgeCatalogItemManifestSchema,
+  PageLibraryManifestSchema,
 ]);
 export type CatalogItemManifest = z.infer<typeof CatalogItemManifestSchema>;
 
@@ -2622,6 +2682,7 @@ export const CatalogKindSchema = z.enum([
   'image-lora',
   'video-model',
   'knowledge-catalog',
+  'page-library',
 ]);
 export type CatalogKind = z.infer<typeof CatalogKindSchema>;
 

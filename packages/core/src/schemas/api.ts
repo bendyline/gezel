@@ -2408,6 +2408,18 @@ const GezelConfigObject = z.object({
     })
     .optional(),
   /**
+   * Page libraries (docs/page-libraries.md): browser-ready libraries pages
+   * load from this computer. `autoDownload` (default on) fetches a pinned
+   * library the first time a page needs it, when the security policy allows
+   * app network. Off, only libraries the person installs in Settings, or that
+   * came with the app, are used.
+   */
+  pageLibraries: z
+    .object({
+      autoDownload: z.boolean().optional(),
+    })
+    .optional(),
+  /**
    * Face recognition (person correlation across photos) — an explicit
    * biometric opt-in, default OFF. Enabling downloads the pinned local face
    * models (~261 MB) and lets the indexer cluster faces into anonymous

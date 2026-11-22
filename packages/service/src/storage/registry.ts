@@ -32,6 +32,7 @@ import {
   knowledgeDownloadsDir,
   knowledgeRegistryFile,
   meesterStatusDir,
+  pageLibrariesDir,
   pendingGrantsFile,
   playwrightBrowsersDir,
   projectDir,
@@ -243,7 +244,7 @@ export const STORAGE_CATEGORIES: StorageCategoryDef[] = [
     class: 'redownloadable',
     label: 'Tools and browsers',
     description:
-      'Installed toolset packages, the automation browser, and the components connections download.',
+      'Installed toolset packages, the automation browser, the components connections download, and the libraries pages load.',
     deletable: true,
     inBackup: false,
     async resolve({ home, store }) {
@@ -255,6 +256,7 @@ export const STORAGE_CATEGORIES: StorageCategoryDef[] = [
         },
         localEntry(playwrightBrowsersDir(home)),
         localEntry(connectorComponentsDir(home)),
+        localEntry(pageLibrariesDir(home)),
         {
           path: sharedToolsetsInstallDir(home),
           external: false,
@@ -574,6 +576,7 @@ export function classifiedTopLevelNames(): string[] {
     'system-toolsets',
     'system-toolsets.json',
     'connector-components',
+    'page-libraries',
     'installed-toolsets-system.json',
     'toolsets',
     'toolsets.json',

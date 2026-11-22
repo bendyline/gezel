@@ -56,6 +56,15 @@ describe('project views', () => {
     expect(defaultProjectView({ detectedProjectType: { id: 'content-writing' } })).toBe('gallery');
   });
 
+  it('opens a project that only follows sites on its Web pages', () => {
+    const sites = { connectors: [{ type: 'website' }] };
+    expect(defaultProjectView(sites)).toBe('web');
+    // A folder or a known type still decides.
+    expect(defaultProjectView({ ...sites, ...kind('code') })).toBe('village');
+    expect(defaultProjectView({ ...sites, ...kind('documents') })).toBe('gallery');
+    expect(defaultProjectView({ ...sites, detectedProjectType: { id: 'node' } })).toBe('village');
+  });
+
   it('keeps the stored choice, and passes over one this build does not offer', () => {
     expect(resolveProjectView({ ...kind('code'), selectedView: 'diagram' }, ALL)).toBe('diagram');
     expect(resolveProjectView({ ...kind('code'), selectedView: 'heatmap' }, ALL)).toBe('village');

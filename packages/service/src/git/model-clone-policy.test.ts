@@ -19,6 +19,7 @@ describe('planModelClone', () => {
     );
     expect(isModelCloneRefusal(plan)).toBe(false);
     if (isModelCloneRefusal(plan)) return;
+    expect(plan.url).toBe('https://github.com/bendyline/gezel.git');
     expect(plan.cloneOptions).toEqual([
       '--config',
       'protocol.allow=never',
@@ -41,6 +42,34 @@ describe('planModelClone', () => {
     if (!isModelCloneRefusal(free)) {
       expect(free.cloneOptions).toContain('http.followRedirects=false');
     }
+  });
+
+  it.each([
+    'https://github.com\\@collector.example/x/aGVsbG8.git',
+    'https://github.com/\\\\collector.example/x.git',
+    'https://github.com/x /y.git',
+    'https://github.com/x\ty.git',
+    'https://github.com/x\u0000y.git',
+  ])('refuses an address two URL parsers read differently: %s', async (url) => {
+    // WHATWG reads the backslash form as github.com, so the allowlist passed,
+    // while git and curl connected to collector.example.
+    for (const name of ['lockdown', 'free'] as const) {
+      expect(await planModelClone(url, level(name), publicHost)).toMatchObject({
+        status: 400,
+        error: expect.stringMatching(/backslash, a space or a control character/),
+      });
+    }
+  });
+
+  it('hands git the address exactly as the checks read it', async () => {
+    const plan = await planModelClone(
+      'HTTPS://GitHub.com/bendyline/gezel.git',
+      level('lockdown'),
+      publicHost,
+    );
+    expect(isModelCloneRefusal(plan)).toBe(false);
+    if (isModelCloneRefusal(plan)) return;
+    expect(plan.url).toBe('https://github.com/bendyline/gezel.git');
   });
 
   it('clones nothing at super-lockdown, where gezels have no git', async () => {

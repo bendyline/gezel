@@ -58,6 +58,7 @@ import {
   isAllowedPreviewNavigation,
   isAllowedPreviewResourceRequest,
   isAllowedTopLevelNavigation,
+  isConnectionErrorPageMessage,
   isExactApprovedPath,
   isExternalRendererNetworkRequest,
   isPreviewDocumentUrl,
@@ -73,6 +74,7 @@ import {
   createOfficeVerifyScheduler,
   registerOfficeIntegrationIpc,
 } from './office-integration/ipc.js';
+import { stampPageLibrarySeed } from './page-library-seed.js';
 import { QuitCoordinator } from './quit-coordinator.js';
 import { rendererConnectionSnapshot } from './renderer-connection.js';
 import { resolveRendererNetworkPermission } from './renderer-network-policy.js';
@@ -309,6 +311,8 @@ if (process.platform === 'linux') {
 // environment every child inherits.
 const storeBuild = detectStoreBuild({ resourcesPath: process.resourcesPath });
 stampDistributionProfile(storeBuild);
+// Libraries pages load, shipped inside a store build (docs/page-libraries.md).
+stampPageLibrarySeed({ resourcesPath: app.isPackaged ? process.resourcesPath : undefined });
 if (storeBuild.channel) {
   console.log(`[gezel] store build: ${storeBuild.channel} (via ${storeBuild.source})`);
 }
@@ -1245,12 +1249,17 @@ async function showConnectionError(
     }
   });
 </script></body></html>`;
+  const pageUrl = `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+  connectionErrorPageUrl = pageUrl;
   try {
-    await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    await win.loadURL(pageUrl);
   } catch {
     /* nothing more we can do — the sage background remains */
   }
 }
+
+/** The exact URL of the connection-error page main last painted (see isAppPageSender). */
+let connectionErrorPageUrl: string | null = null;
 
 /**
  * The last two daemon origins the app page was served from. A restart can
@@ -1281,9 +1290,13 @@ function startupFileUrl(): string | null {
  * True when an IPC message came from Gezel's own page: the main window's main
  * frame, showing the app or the startup splash. A model-written `/preview/`
  * page is refused even if it somehow became the main frame
- * (`isTrustedAppDocumentUrl`); preview iframes never run the preload.
+ * (`isTrustedAppDocumentUrl`); preview iframes never run the preload. The
+ * connection-error page main paints is answered on its Reconnect channel only.
  */
-function isAppPageSender(event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent): boolean {
+function isAppPageSender(
+  event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent,
+  channel: string,
+): boolean {
   if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) {
     return false;
   }
@@ -1295,6 +1308,7 @@ function isAppPageSender(event: Electron.IpcMainEvent | Electron.IpcMainInvokeEv
   } catch {
     return false;
   }
+  if (isConnectionErrorPageMessage(url, connectionErrorPageUrl, channel)) return true;
   return isTrustedAppDocumentUrl(url, appPageOrigins(), startupFileUrl());
 }
 

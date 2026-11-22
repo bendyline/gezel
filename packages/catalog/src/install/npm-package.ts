@@ -154,7 +154,30 @@ async function resolveTarballUrl(
   version: string,
   registry: URL,
 ): Promise<string> {
-  const url = new URL(encodePackumentPath(packageName), registry);
+  const base = encodePackumentPath(packageName);
+  let tarball: string | undefined;
+  try {
+    const packument = (await readRegistryJson(new URL(base, registry), registry)) as {
+      versions?: Record<string, { dist?: { tarball?: string } }>;
+    };
+    tarball = packument.versions?.[version]?.dist?.tarball;
+  } catch (err) {
+    if (!(err instanceof RegistryResponseTooLargeError)) throw err;
+    // A package with a long history outgrows the metadata limit: react-dom's
+    // full document is 9.7 MB. The registry also serves one version alone.
+    const one = (await readRegistryJson(
+      new URL(`${base}/${encodeURIComponent(version)}`, registry),
+      registry,
+    )) as { dist?: { tarball?: string } };
+    tarball = one.dist?.tarball;
+  }
+  if (!tarball) throw new Error(`[catalog] version ${version} of ${packageName} was not found`);
+  const parsed = new URL(tarball, registry);
+  assertSameOrigin(parsed, registry.origin);
+  return parsed.href;
+}
+
+async function readRegistryJson(url: URL, registry: URL): Promise<unknown> {
   const { response, dispose } = await fetchSameOrigin(url, registry.origin, REGISTRY_TIMEOUT_MS);
   try {
     if (!response.ok) {
@@ -164,17 +187,11 @@ async function resolveTarballUrl(
       );
     }
     const raw = await readBoundedBody(response, MAX_PACKUMENT_BYTES);
-    let packument: { versions?: Record<string, { dist?: { tarball?: string } }> };
     try {
-      packument = JSON.parse(new TextDecoder().decode(raw));
+      return JSON.parse(new TextDecoder().decode(raw));
     } catch {
       throw new Error('[catalog] registry returned malformed package metadata');
     }
-    const tarball = packument.versions?.[version]?.dist?.tarball;
-    if (!tarball) throw new Error(`[catalog] version ${version} of ${packageName} was not found`);
-    const parsed = new URL(tarball, registry);
-    assertSameOrigin(parsed, registry.origin);
-    return parsed.href;
   } finally {
     dispose();
   }
@@ -247,6 +264,44 @@ export async function extractNpmPackageTarball(opts: {
   return packageDir;
 }
 
+/**
+ * Extract only the listed files (and folders, ending in `/`) of a package,
+ * with the leading `package/` removed, and return the paths written. For a
+ * consumer that serves a few files of a large package: three's tarball holds
+ * 21 MB and a page needs two of its files and one folder. The archive is
+ * inspected whole first, so an unsafe entry refuses the package even when it
+ * is not one of the files asked for. `package.json` is read to check the
+ * package's identity and kept only when listed.
+ */
+export async function extractNpmPackageFiles(opts: {
+  tarballPath: string;
+  destination: string;
+  include: readonly string[];
+  expectedName: string;
+  expectedVersion: string;
+}): Promise<string[]> {
+  await inspectTarball(opts.tarballPath);
+  const wanted = (path: string) =>
+    opts.include.some((entry) => (entry.endsWith('/') ? path.startsWith(entry) : entry === path));
+  const written: string[] = [];
+  await tar.extract({
+    file: opts.tarballPath,
+    cwd: opts.destination,
+    strict: true,
+    preservePaths: false,
+    strip: 1,
+    filter: (path, entry) => {
+      if ((entry as { type?: string }).type !== 'File') return false;
+      const inside = path.replace(/^(?:\.\/)?package\//, '');
+      if (wanted(inside)) written.push(inside);
+      return inside === 'package.json' || wanted(inside);
+    },
+  });
+  await validateExtractedPackage(opts.destination, opts.expectedName, opts.expectedVersion);
+  if (!wanted('package.json')) await rm(join(opts.destination, 'package.json'), { force: true });
+  return written.sort();
+}
+
 async function inspectTarball(path: string): Promise<void> {
   let entries = 0;
   let unpackedBytes = 0;
@@ -314,11 +369,18 @@ async function resolvePackageEntry(packageDir: string, entry: string): Promise<s
   return candidate;
 }
 
+export class RegistryResponseTooLargeError extends Error {
+  constructor() {
+    super('[catalog] registry metadata response is too large');
+    this.name = 'RegistryResponseTooLargeError';
+  }
+}
+
 export async function readBoundedBody(response: Response, maxBytes: number): Promise<Uint8Array> {
   if (!response.body) throw new Error('[catalog] registry returned an empty response');
   const declared = Number(response.headers.get('content-length'));
   if (Number.isFinite(declared) && declared > maxBytes) {
-    throw new Error('[catalog] registry metadata response is too large');
+    throw new RegistryResponseTooLargeError();
   }
   const chunks: Uint8Array[] = [];
   let total = 0;
@@ -328,7 +390,7 @@ export async function readBoundedBody(response: Response, maxBytes: number): Pro
       const { done, value } = await reader.read();
       if (done) break;
       total += value.byteLength;
-      if (total > maxBytes) throw new Error('[catalog] registry metadata response is too large');
+      if (total > maxBytes) throw new RegistryResponseTooLargeError();
       chunks.push(value);
     }
   } finally {

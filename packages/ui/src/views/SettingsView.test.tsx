@@ -299,6 +299,7 @@ describe('SettingsView', () => {
           'channels',
           'remoteServers',
           'toolsets',
+          'pageLibraries',
         ]),
       );
     });

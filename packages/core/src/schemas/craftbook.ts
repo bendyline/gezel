@@ -405,6 +405,16 @@ const CraftbookStepShape = {
   promptProfile: CraftbookStepPromptProfileSchema.optional(),
   /** The document format this step writes; the runtime adds its authoring notes. */
   authoring: CraftbookStepAuthoringSchema.optional(),
+  /**
+   * Page libraries (docs/page-libraries.md) the page this step builds may use,
+   * by library id (`three`, `chart.js`). Fetched when the task starts, so the
+   * first look at the page does not wait on a download, and named in the
+   * step's prompt.
+   */
+  libraries: z
+    .array(z.string().regex(/^[a-z0-9][a-z0-9._-]{0,63}$/))
+    .max(12)
+    .optional(),
   /** Per-step subtractive tool and output-surface policy. */
   toolPolicy: CraftbookStepToolPolicySchema.optional(),
   /**
@@ -1249,6 +1259,11 @@ const NewCraftbookStepShape = {
   promptProfile: CraftbookStepPromptProfileSchema.optional(),
   /** See {@link CraftbookStepSchema.shape.authoring}. */
   authoring: CraftbookStepAuthoringSchema.optional(),
+  /** See {@link CraftbookStepSchema.shape.libraries}. */
+  libraries: z
+    .array(z.string().regex(/^[a-z0-9][a-z0-9._-]{0,63}$/))
+    .max(12)
+    .optional(),
   /** See {@link CraftbookStepSchema.shape.toolPolicy}. */
   toolPolicy: CraftbookStepToolPolicySchema.optional(),
   /** See {@link CraftbookStepSchema.shape.turnTimeoutSec}. */
@@ -1502,6 +1517,7 @@ export function resolveSteps(blueprints: NewCraftbookStep[]): CraftbookStep[] {
       ...(s.retrieval ? { retrieval: s.retrieval } : {}),
       ...(s.promptProfile ? { promptProfile: s.promptProfile } : {}),
       ...(s.authoring ? { authoring: s.authoring } : {}),
+      ...(s.libraries?.length ? { libraries: s.libraries } : {}),
       ...(s.toolPolicy ? { toolPolicy: s.toolPolicy } : {}),
       ...(s.turnTimeoutSec ? { turnTimeoutSec: s.turnTimeoutSec } : {}),
       ...(s.stage ? { stage: s.stage } : {}),

@@ -34,6 +34,7 @@ const KINDS: CatalogKind[] = [
   'image-lora',
   'video-model',
   'knowledge-catalog',
+  'page-library',
 ];
 
 const KIND_DIR: Partial<Record<CatalogKind, string>> = {

@@ -1,4 +1,5 @@
 import type { ProviderName } from '@bendyline/gezel';
+import type { PageLibraryManager } from '@bendyline/gezel-inference/internal/page-libraries/manager';
 import type { RelevanceModelManager as InferenceRelevanceModelManager } from '@bendyline/gezel-inference/internal/relevance/manager';
 import type { AppToolRelayRegistry } from '../app-tools/relay-registry.js';
 
@@ -140,6 +141,11 @@ export interface ServiceContext extends EngineContext {
    * `/api/gilde-updates` and the config toggle dispatcher.
    */
   gildeUpdates: GildeUpdateManager;
+  /**
+   * The page-library shelf and its downloads (docs/page-libraries.md). The
+   * preview serves from its store; page checks and `needs` ask it to fetch.
+   */
+  pageLibraries?: PageLibraryManager;
   /**
    * Installed `.gezk` knowledge catalogs: registry, mounts, install jobs,
    * and the SearchService knowledge arm. Absent on the machine-engine role.

@@ -9,6 +9,7 @@ import {
 } from 'react';
 import { api } from '../api.js';
 import { Select } from '../primitives/index.js';
+import { ExportPageDialog } from './ExportPageDialog.js';
 import {
   HtmlPreviewFrame,
   type HtmlPreviewLogEntry,
@@ -84,6 +85,14 @@ const OpenExternalIcon = () => (
     <path d="M8 3.5H4.2A0.7 0.7 0 0 0 3.5 4.2V11.8A0.7 0.7 0 0 0 4.2 12.5H11.8A0.7 0.7 0 0 0 12.5 11.8V8" />
     <path d="M9.5 3.5H12.5V6.5" />
     <path d="M12.5 3.5 8 8" />
+  </svg>
+);
+
+const ExportIcon = () => (
+  <svg {...ICON_SVG_PROPS} aria-hidden="true">
+    <path d="M8 2.5V10" />
+    <path d="M5 7 8 10 11 7" />
+    <path d="M3.5 11v1.3a0.7 0.7 0 0 0 0.7 0.7h7.6a0.7 0.7 0 0 0 0.7-0.7V11" />
   </svg>
 );
 
@@ -265,6 +274,7 @@ export function ProjectOutputPane({
   const [maximized, setMaximized] = useState(
     () => takeOutputPaneFullWindow(projectId) || initialMaximized,
   );
+  const [exporting, setExporting] = useState(false);
   const savedMaximized = useRef(initialMaximized);
   const [capturing, setCapturing] = useState(false);
   const [captureError, setCaptureError] = useState('');
@@ -513,6 +523,15 @@ export function ProjectOutputPane({
       ariaLabel: 'Open in your default browser',
     },
     {
+      key: 'export',
+      label: 'Export…',
+      icon: <ExportIcon />,
+      onClick: () => setExporting(true),
+      disabled: !selectedTarget || selectedTarget.source !== 'workspace',
+      title: 'Save a copy of this page with its libraries',
+      ariaLabel: 'Export this page',
+    },
+    {
       key: 'maximize',
       label: maximized ? 'Restore' : 'Maximize',
       icon: maximized ? <CollapseIcon /> : <ExpandIcon />,
@@ -520,7 +539,10 @@ export function ProjectOutputPane({
       title: maximized ? 'Restore (F5)' : 'Maximize (F5)',
       ariaLabel: maximized ? 'Restore output pane' : 'Maximize output pane',
     },
-  ].filter((action) => action.key !== 'open' || !window.__GEZEL__?.createHtmlPreview);
+  ].filter(
+    (action) =>
+      (action.key !== 'open' && action.key !== 'export') || !window.__GEZEL__?.createHtmlPreview,
+  );
   if (!maximized) {
     actions.push({
       key: 'close',
@@ -677,6 +699,14 @@ export function ProjectOutputPane({
         {body}
       </div>
       {debugBar}
+      {selectedTarget?.source === 'workspace' ? (
+        <ExportPageDialog
+          open={exporting}
+          projectId={projectId}
+          path={selectedTarget.path}
+          onClose={() => setExporting(false)}
+        />
+      ) : null}
     </aside>
   );
 }

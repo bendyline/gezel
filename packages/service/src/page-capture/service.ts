@@ -20,6 +20,7 @@ import {
   DEFAULT_PAGE_NETWORK_BUDGET,
   FilterProxy,
   type FilterProxyOptions,
+  SIGN_IN_NETWORK_BUDGET,
 } from './filter-proxy.js';
 import { HttpCaptureSession } from './http-session.js';
 import { resolveCaptureChromium } from './launch-policy.js';
@@ -242,6 +243,11 @@ class BrowserCaptureSession implements CaptureSession {
       extraPorts,
       ...(args.proxyTestOptions ?? {}),
     });
+    // The proxy refuses everything until a page begins. A capture begins one
+    // per request; a sign-in window has no requests of its own, so its page
+    // (the site the person signs in to) begins before the window opens.
+    // Without this every connection the window made was refused.
+    if (args.headed) proxy.beginPage(args.headed.host, SIGN_IN_NETWORK_BUDGET);
     const profileDir = await mkdtemp(join(tmpdir(), 'gezel-capture-'));
     const session = new BrowserCaptureSession(args, proxy, profileDir);
     try {

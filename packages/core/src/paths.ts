@@ -530,6 +530,15 @@ export function projectLookoutsFile(root: string, projectId: string): string {
   return join(projectPrivateDir(root, projectId), 'lookouts.json');
 }
 
+/**
+ * The page-library versions a project settled on (docs/page-libraries.md):
+ * written the first time a page uses a library without naming a version, so
+ * the project keeps that version when the default moves.
+ */
+export function projectPageLibrariesFile(root: string, projectId: string): string {
+  return join(projectPrivateDir(root, projectId), 'page-libraries.json');
+}
+
 /** Lookout counters and the recent-firings log, written only by the daemon. */
 export function projectLookoutStateFile(root: string, projectId: string): string {
   return join(projectPrivateDir(root, projectId), 'lookout-state.json');
@@ -1407,6 +1416,16 @@ export function systemToolsetsInstallDir(root: string): string {
  */
 export function connectorComponentsDir(root: string): string {
   return join(root, 'connector-components');
+}
+
+/**
+ * Page libraries downloaded for AI-written pages:
+ * `<library>/<version>-<sha12>/`, each holding the files taken from the
+ * package beside a `.gezel-page-library.json` marker. Owned by the page
+ * library store (inference `page-libraries/store.ts`); safe to delete.
+ */
+export function pageLibrariesDir(root: string): string {
+  return join(root, 'page-libraries');
 }
 
 /**

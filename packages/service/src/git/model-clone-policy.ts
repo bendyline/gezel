@@ -26,6 +26,12 @@ export type ModelCloneRefusal =
 
 export interface ModelClonePlan {
   /**
+   * The address exactly as the checks read it (`URL.href`). Callers hand git
+   * this, never the raw string: WHATWG reads `https://github.com\\@evil/x.git`
+   * as github.com while git and curl connect to `evil`.
+   */
+  url: string;
+  /**
    * `--config` pairs to pass to `git clone`. They are written into the new
    * repository, so the later fetch, checkout and lazy blob fetches of a
    * partial clone keep them too.
@@ -49,6 +55,16 @@ export async function planModelClone(
   policy: ResolvedSecurityPolicy,
   assertPublic: (url: string) => Promise<void> = assertPublicUrl,
 ): Promise<ModelClonePlan | ModelCloneRefusal> {
+  // Characters that two URL parsers read differently. A backslash is a path
+  // separator to WHATWG and part of the user name to curl, so the allowlist
+  // saw github.com while git connected to the host after the `@`.
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: refusing control characters is the point
+  if (/[\\\s\u0000-\u001f\u007f]/.test(rawUrl)) {
+    return {
+      status: 400,
+      error: 'a repository address may not contain a backslash, a space or a control character',
+    };
+  }
   let url: URL;
   try {
     url = new URL(rawUrl);
@@ -80,12 +96,13 @@ export async function planModelClone(
     return { status: 403, error: egressIndicatorRefusal(indicators), indicators };
   }
   try {
-    await assertPublic(rawUrl);
+    await assertPublic(url.href);
   } catch (err) {
     if (err instanceof SsrfError) return { status: 403, error: `request denied: ${err.message}` };
     throw err;
   }
   return {
+    url: url.href,
     cloneOptions: [
       '--config',
       'protocol.allow=never',

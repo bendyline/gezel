@@ -2117,7 +2117,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         }
         cloneArgs.push('--branch', body.branch);
       }
-      cloneArgs.push(body.url, destAbs);
+      cloneArgs.push(clone.url, destAbs);
       await runGit(cloneArgs, {
         timeoutMs: 5 * 60 * 1000,
       });
@@ -2177,7 +2177,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     if (cloneToWorkspaceRoot) {
       try {
         await ctx.store.updateProjectGitHub(id, {
-          url: body.url,
+          url: clone.url,
           ...(body.branch ? { branch: body.branch } : {}),
           checkoutDir: workspaceDir,
         });
@@ -2285,7 +2285,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     // Partial clone — pull commit graph + trees but no blobs until needed.
     // Modern git (2.19+) + GitHub support this. Fast for a diff use case.
     try {
-      await runGit(['clone', ...clone.cloneOptions, '--filter=blob:none', body.url, destAbs], {
+      await runGit(['clone', ...clone.cloneOptions, '--filter=blob:none', clone.url, destAbs], {
         timeoutMs: 5 * 60 * 1000,
       });
     } catch (err) {
@@ -2453,7 +2453,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     if (cloneToWorkspaceRoot) {
       try {
         await ctx.store.updateProjectGitHub(id, {
-          url: body.url,
+          url: clone.url,
           ...(body.headRef ? { branch: body.headRef } : {}),
           checkoutDir: workspaceDir,
         });

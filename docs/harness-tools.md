@@ -212,9 +212,10 @@ what Gezel wrote):
 | `conflict` | an entry Gezel did not write, or one edited by hand; replacing it keeps a `.backup` |
 | `unavailable` | the app or its command was not found; a copyable command is offered |
 
-The tools are also listed in the official MCP Registry as `com.gezel/gezel`
-([npm-release.md](npm-release.md#listing-in-the-mcp-registry)), which starts
-`npx @bendyline/gezel-mcp --harness <app>`. An app set up from the registry
+The tools can also be listed in the official MCP Registry as `com.gezel/gezel`
+([npm-release.md](npm-release.md#listing-in-the-mcp-registry)); publishing
+there is a manual step, and until it runs the registry has no entry. A listing
+starts `npx @bendyline/gezel-mcp --harness <app>`. An app set up from the registry
 runs the version it names rather than following the installed Gezel through
 `launch.mjs`, and gets no agent-file line, so the setup above stays the way to
 recommend. It lists its tools with Gezel closed, which the directories that

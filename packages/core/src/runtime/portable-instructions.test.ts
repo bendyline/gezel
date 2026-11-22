@@ -154,7 +154,7 @@ describe('buildPortableInstructions', () => {
       providerName: 'llama-cpp',
     });
     const tools = await portableToolSurface(store, session);
-    const build = (inAppWebPreview: boolean) =>
+    const build = (inAppWebPreview: boolean, pageLibrariesNote?: string) =>
       store.getProjectContext(project.id, wren.id).then(async (context) =>
         buildPortableInstructions({
           store,
@@ -167,6 +167,7 @@ describe('buildPortableInstructions', () => {
           toolNames: tools.map((tool) => tool.name),
           minimalContext: false,
           inAppWebPreview,
+          ...(pageLibrariesNote ? { pageLibrariesNote } : {}),
         }),
       );
     const phone = (await build(true)).full;
@@ -180,5 +181,14 @@ describe('buildPortableInstructions', () => {
     expect(noPreview).toContain('**No browser tools here.**');
     expect(noPreview).not.toContain('Settings → Daemon');
     expect(noPreview).not.toContain('validate(');
+    expect(phone).toContain('npm packages do not');
+    // An app that carries page libraries names them and stops saying no
+    // package loads.
+    const note =
+      '**Page libraries.** Pages you write can use these with no internet connection: three.js 0.187.';
+    const withLibraries = (await build(true, note)).full;
+    expect(withLibraries).toContain(note);
+    expect(withLibraries).toContain('the page libraries below work; other npm packages do not.');
+    expect(withLibraries).not.toContain('; npm packages do not.');
   });
 });

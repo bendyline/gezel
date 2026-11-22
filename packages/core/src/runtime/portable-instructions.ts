@@ -1,11 +1,17 @@
+import { renderCharacterBlock } from '../character/index.js';
 import { effectiveGeneralistModeSetting, resolveGeneralistKickoff } from '../generalist-mode.js';
 import { profileHasBehavior } from '../local-loop/profile.js';
-import { selectPersonNotes } from '../memory-notes.js';
+import { renderPersonNotesBlock, selectPersonNotes } from '../memory-notes.js';
 import type { LocalModelTier } from '../model-profile/local-model-tier.js';
 import type { ResolvedModelProfile } from '../model-profile/types.js';
 import { isOutsideInInternalPath } from '../outside-in-paths.js';
 import { leanSession } from '../project-types/composition.js';
-import { PROMPT_FOOTPRINT_POLICY } from '../prompt-footprint.js';
+import {
+  PROMPT_FOOTPRINT_POLICY,
+  type PromptFootprintPolicy,
+  capAboutForFootprint,
+  renderProjectBrief,
+} from '../prompt-footprint.js';
 import {
   type BuiltInstructions,
   type PromptTaskContext,
@@ -13,15 +19,22 @@ import {
 } from '../prompt/instructions.js';
 import { formatTaskNotesDigest, newestTaskNotesFirst } from '../prompt/task-notes-digest.js';
 import type { AvailableToolInfo } from '../prompt/tools-block.js';
+import { IN_APP_WEB_PREVIEW_GUIDANCE } from '../prompt/web-preview.js';
 import type { GezelConfig } from '../schemas/api.js';
 import type { GezelCharacter } from '../schemas/character.js';
 import type { GezelDetail, GezelSummary } from '../schemas/gezel.js';
 import type { ProjectDetail, ProjectFileEntry } from '../schemas/project.js';
 import type { ChatSession } from '../schemas/session.js';
-import { type Task, taskEffectiveStatus, withEffectiveTaskStatuses } from '../schemas/task.js';
+import {
+  type Task,
+  type TaskCraftbookStep,
+  taskEffectiveStatus,
+  withEffectiveTaskStatuses,
+} from '../schemas/task.js';
 import { projectManagedWorkspaceWritable } from '../security/policy.js';
 import { isSharedLibraryProject } from '../shared-project.js';
 import { isOwnerStep } from '../task-execution.js';
+import { renderTaskContextBlock } from '../tasks/prompt-context.js';
 import { BUILTIN_TOOLSETS } from '../tools/builtin-groups.js';
 import type { PortableStore } from './store.js';
 
@@ -54,6 +67,10 @@ export interface PortableInstructionsInput {
   character?: GezelCharacter;
   /** The app previews the project's HTML pages itself. */
   inAppWebPreview?: boolean;
+  /** The page libraries the app carries, as `pageLibrariesNote` words them. */
+  pageLibrariesNote?: string;
+  /** Their ids, for a task step that declares libraries. */
+  pageLibraryIds?: readonly string[];
 }
 
 /**
@@ -137,6 +154,8 @@ export async function buildPortableInstructions(
       : {}),
     ...(input.minimalContext ? { minimalContext: true } : {}),
     ...(input.inAppWebPreview ? { inAppWebPreview: true } : {}),
+    ...(input.pageLibrariesNote ? { pageLibrariesNote: input.pageLibrariesNote } : {}),
+    ...(input.pageLibraryIds?.length ? { pageLibraryIds: input.pageLibraryIds } : {}),
     browserAutomationUnavailable: true,
     ...(step?.promptProfile === 'focused' ? { focusedTaskContext: true } : {}),
     ...(leanSession(project, session) ? { leanProfile: true } : {}),
@@ -229,4 +248,59 @@ async function assignedTo(store: PortableStore, session: ChatSession): Promise<T
       return true;
     return activeStep?.suggestedGezelId === session.gezelId;
   });
+}
+
+export interface SystemModelInstructionsInput {
+  store: PortableStore;
+  context: PortableInstructionsInput['context'];
+  footprint: PromptFootprintPolicy;
+  /** The gezel's character, only in social mode. */
+  character?: GezelCharacter;
+  task?: Task;
+  step?: TaskCraftbookStep;
+  /** The tools this turn wires, by name. */
+  toolNames: readonly string[];
+  inAppWebPreview: boolean;
+  pageLibraryIds: readonly string[];
+}
+
+/**
+ * The phone's own short prompt for the system models (Apple Foundation
+ * Models, ML Kit): they have 4K windows and no desktop counterpart, so they
+ * skip the desktop builder that llama.cpp turns get.
+ */
+export async function buildSystemModelInstructions(
+  input: SystemModelInstructionsInput,
+): Promise<string> {
+  const { context, footprint, task, step } = input;
+  const { project, crew } = context;
+  const voorman = project.voormanGezelId
+    ? crew.find((member) => member.id === project.voormanGezelId)
+    : undefined;
+  return [
+    capAboutForFootprint(context.gezel.about, footprint.aboutMaxChars),
+    renderCharacterBlock(input.character).replace(/^\s*(?:---\s*)?/, ''),
+    renderPersonNotesBlock(
+      selectPersonNotes(
+        await input.store.personMemoryEntries().catch(() => []),
+        footprint.personNotesMaxChars,
+      ),
+    ).replace(/^\s*(?:---\s*)?/, ''),
+    task &&
+      renderTaskContextBlock(
+        { task, ...(step ? { step } : {}) },
+        {
+          availableToolNames: new Set(input.toolNames),
+          pageLibraries: new Set(input.pageLibraryIds),
+        },
+      ),
+    `Current project: ${project.name}`,
+    crew.length &&
+      `Project crew: ${crew.map((member) => `${member.name}${member.role ? ` (${member.role})` : ''}`).join(', ')}.`,
+    voorman && `The crew lead of this project is ${voorman.name}.`,
+    renderProjectBrief(project, footprint.projectBriefMaxChars),
+    input.inAppWebPreview && input.toolNames.includes('write_file') && IN_APP_WEB_PREVIEW_GUIDANCE,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }

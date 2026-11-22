@@ -141,6 +141,7 @@ import {
   resolveInside,
   safeJoin,
 } from '@bendyline/gezel-inference/internal/fs/safe-paths';
+import type { PageLibraryPins } from '@bendyline/gezel/pages';
 import {
   type ExternalFolders,
   activeMachineSharedHome,
@@ -176,6 +177,7 @@ import {
   projectLookoutStateFile,
   projectLookoutsFile,
   projectMetaFile,
+  projectPageLibrariesFile,
   projectPrivateDir,
   projectQuestionsFile,
   projectReminderFile,
@@ -6896,6 +6898,39 @@ export class Store {
       lookouts: lookouts.map((l) => LookoutSchema.parse(l)),
     };
     await writeFileAtomic(path, `${JSON.stringify(file, null, 2)}\n`);
+  }
+
+  /**
+   * The page-library versions this project settled on, by library and form
+   * (docs/page-libraries.md). A sidecar, never `project.json`: it changes when
+   * a page first uses a library, and `updatedAt` reads as activity.
+   */
+  async readPageLibraryPins(projectId: string): Promise<PageLibraryPins> {
+    try {
+      const parsed = JSON.parse(
+        await readFile(projectPageLibrariesFile(this.home, projectId), 'utf8'),
+      ) as { pins?: unknown };
+      const pins: PageLibraryPins = {};
+      if (!parsed.pins || typeof parsed.pins !== 'object') return pins;
+      for (const [library, forms] of Object.entries(parsed.pins as Record<string, unknown>)) {
+        if (!forms || typeof forms !== 'object') continue;
+        const kept: PageLibraryPins[string] = {};
+        for (const form of ['module', 'classic', 'style'] as const) {
+          const version = (forms as Record<string, unknown>)[form];
+          if (typeof version === 'string' && version.length <= 64) kept[form] = version;
+        }
+        pins[library] = kept;
+      }
+      return pins;
+    } catch {
+      return {};
+    }
+  }
+
+  async writePageLibraryPins(projectId: string, pins: PageLibraryPins): Promise<void> {
+    const path = projectPageLibrariesFile(this.home, projectId);
+    await mkdir(dirname(path), { recursive: true });
+    await writeFileAtomic(path, `${JSON.stringify({ version: 1, pins }, null, 2)}\n`);
   }
 
   async readLookoutState(projectId: string): Promise<LookoutStateFile> {

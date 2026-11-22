@@ -40,7 +40,13 @@ describe('MEESTER_ABOUT_MD', () => {
         'a second project for the same deliverable creates racing writers, and reading a file is a question for the existing assignee, not a new project.',
       )
       // Role titles are plain English now; gilde still says "Voormen".
-      .replace('Voormen and specialists do the work', 'Crew leads and specialists do the work');
+      .replace('Voormen and specialists do the work', 'Crew leads and specialists do the work')
+      // Gilde 0.3.13 still opens with the identity a tiny model read as its
+      // name ("I'm Meester"), and calls the crew AI agents.
+      .replace(
+        'You are the **Meester**: the concierge and guildmaster for a team of AI agents called gezels.',
+        'You are the Meester, the guildmaster at the front door. The crew you put to work are gezels: named helpers, each with a craft of their own.',
+      );
     expect(projectOnlyCatalogAbout.trim()).toBe(MEESTER_ABOUT_MD.trim());
   });
 });

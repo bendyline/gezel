@@ -138,6 +138,51 @@ export function formatValidateResult(result: ValidateResult): string {
   return lines.join('\n').trimEnd();
 }
 
+/**
+ * The page's library spellings checked against what this computer can serve
+ * (docs/page-libraries.md), before any browser runs. A library nothing
+ * answers fails only where the page cannot reach the network for it.
+ */
+export function pageLibrariesToValidateCheck(needs: {
+  needed: Array<{ name: string; version: string; ready: boolean }>;
+  pending: string[];
+  failed: Array<{ line: string; error: string }>;
+  unknown: Array<{ spelling: string; from: string; kind: 'package' | 'url' }>;
+  externalNetwork: boolean;
+  available: Array<{ name: string; version: string; scriptOnly: boolean }>;
+}): ValidateCheck | null {
+  if (!needs.needed.length && !needs.unknown.length) return null;
+  if (needs.unknown.length && !needs.externalNetwork) {
+    const named = needs.unknown
+      .slice(0, 4)
+      .map((entry) => `\`${entry.spelling}\` (in ${entry.from})`)
+      .join(', ');
+    const available = needs.available.length
+      ? ` Available here: ${needs.available.map((entry) => `${entry.name} ${entry.version}${entry.scriptOnly ? ' (script tag)' : ''}`).join(', ')}.`
+      : '';
+    return {
+      ok: false,
+      name: 'page-libraries',
+      message: `${named} ${needs.unknown.length === 1 ? 'is' : 'are'} not available on this computer, and this page cannot reach the internet for ${needs.unknown.length === 1 ? 'it' : 'them'}.`,
+      fixHint: `use a library that is available here, or write that part in plain JavaScript.${available}`,
+    };
+  }
+  if (needs.pending.length || needs.failed.length) {
+    return {
+      ok: null,
+      name: 'page-libraries',
+      detail: needs.pending.length
+        ? `still downloading ${needs.pending.join(', ')}; validate again in a moment`
+        : `could not download ${needs.failed.map((entry) => entry.line).join(', ')}`,
+    };
+  }
+  const ready = needs.needed.map((entry) => `${entry.name} ${entry.version}`).join(', ');
+  const remote = needs.unknown.length
+    ? `; ${needs.unknown.map((entry) => entry.spelling).join(', ')} load${needs.unknown.length === 1 ? 's' : ''} from the internet`
+    : '';
+  return { ok: true, name: 'page-libraries', detail: `${ready || 'no shelf libraries'}${remote}` };
+}
+
 export function runtimePageCheckToValidateCheck(check: {
   ran: boolean;
   ok?: boolean;

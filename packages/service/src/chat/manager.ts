@@ -259,6 +259,7 @@ import {
   resolveMlxEffectiveNumCtx,
 } from '@bendyline/gezel-inference/internal/providers/mlx/build-provider';
 import { mlxToolGrammarActive } from '@bendyline/gezel-inference/internal/providers/mlx/request-shape';
+import { type PageLibraryLine, pageLibrariesNote } from '@bendyline/gezel/pages';
 import { providerCanReachHostedMcp } from '../providers/hosted-mcp-transports.js';
 import { McpBridgePool } from '../providers/mcp-bridge-pool.js';
 import {
@@ -1229,6 +1230,11 @@ export interface ChatManagerOptions {
    */
   getWorkspacePreviewOrigin?: () => string | null;
   /**
+   * The page-library lines a page can load here, installed or downloadable
+   * (docs/page-libraries.md). Named to a turn that can write pages.
+   */
+  pageLibraryLines?: () => Promise<PageLibraryLine[]>;
+  /**
    * The daemon's TLS cert PEM, when serving HTTPS. Spawned MCP children
    * receive the cert path via `GEZEL_CERT_PATH` so their GezelClient
    * dispatcher trusts it; without HTTPS the env var is unset and the
@@ -1802,6 +1808,7 @@ export class ChatManager extends LocalEngineRuntime {
   private readonly previewLog?: PreviewLogBuffer;
   private readonly createWorkspacePreviewUrl?: ChatManagerOptions['createWorkspacePreviewUrl'];
   private readonly getWorkspacePreviewOrigin: () => string | null;
+  private readonly pageLibraryLines: () => Promise<PageLibraryLine[]>;
   private readonly issueSessionToken?: ChatManagerOptions['issueSessionToken'];
   private readonly revokeSessionToken?: ChatManagerOptions['revokeSessionToken'];
   private readonly issueSessionBootstrapCode?: ChatManagerOptions['issueSessionBootstrapCode'];
@@ -1863,6 +1870,7 @@ export class ChatManager extends LocalEngineRuntime {
     if (opts.previewLog) this.previewLog = opts.previewLog;
     this.createWorkspacePreviewUrl = opts.createWorkspacePreviewUrl;
     this.getWorkspacePreviewOrigin = opts.getWorkspacePreviewOrigin ?? (() => null);
+    this.pageLibraryLines = opts.pageLibraryLines ?? (async () => []);
     this.issueSessionToken = opts.issueSessionToken;
     this.revokeSessionToken = opts.revokeSessionToken;
     this.issueSessionBootstrapCode = opts.issueSessionBootstrapCode;
@@ -15861,6 +15869,11 @@ export class ChatManager extends LocalEngineRuntime {
     // so a generic Developer on a browser-game project still gets Playwright.
     const effectiveProjectTypeId = project?.projectTypeId ?? project?.detectedProjectType?.id;
 
+    // Libraries a page written in this session can load (docs/page-libraries.md).
+    const promptPageLibraryLines = await this.pageLibraryLines().catch(() => []);
+    const pageLibrariesNoteText = pageLibrariesNote(promptPageLibraryLines);
+    const pageLibraryIds = [...new Set(promptPageLibraryLines.map((line) => line.library))];
+
     const installedToolsetIds = new Set<string>();
     // Fix-#2 input for the prompt: distinguishes "Playwright isn't
     // installed" from "installed, but this role/project doesn't qualify" —
@@ -16238,6 +16251,8 @@ export class ChatManager extends LocalEngineRuntime {
       ...(resolveDistributionProfile().allowRuntimeCodeDownloads
         ? {}
         : { browserAutomationUnavailable: true }),
+      ...(pageLibrariesNoteText ? { pageLibrariesNote: pageLibrariesNoteText } : {}),
+      ...(pageLibraryIds.length ? { pageLibraryIds } : {}),
       browserLocalPreviewOnly:
         installedToolsetIds.has('@playwright/mcp') && !securityPolicy.allowExternalServices,
       availableTools: availableBuiltinTools,

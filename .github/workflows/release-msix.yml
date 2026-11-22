@@ -258,6 +258,12 @@ jobs:
             --version "${{ needs.store-preflight.outputs.version }}" \
             --service-meta packages/app/dist/service-bundle.meta.json
 
+      - name: Stage the page libraries
+        # Store-lane only: a store build may not download code, so the
+        # libraries pages load ship inside it (docs/page-libraries.md). After
+        # the build, because the stager uses the built catalog and store.
+        run: node scripts/seed-page-libraries.mjs --out packages/app/dist/page-libraries --allow-empty
+
       - name: Stage the model pack
         # Store-lane only. The direct-download installers ship no weights; this
         # channel does because the store CDN serves them. The script hard-fails

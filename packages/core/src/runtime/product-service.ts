@@ -1,9 +1,5 @@
 import { z } from 'zod';
-import {
-  renderCharacterBlock,
-  resolveSocialMode,
-  withCharacterChatCap,
-} from '../character/index.js';
+import { resolveSocialMode, withCharacterChatCap } from '../character/index.js';
 import { sampleCommonDir } from '../craftbook-samples.js';
 import { isEngagementAllowed, isTaskWorkAllowed } from '../engagement.js';
 import { displayName } from '../gezel-display.js';
@@ -14,7 +10,6 @@ import { checkHandoffChain } from '../handoff-limits.js';
 import { llamaCppNativeChatConfig, resolveLlamaCppChatLaunch } from '../llama-cpp-launch.js';
 import type { ActiveCraftbookStep, TerminalToolPolicy } from '../local-loop/provider-contract.js';
 import { createLogger } from '../log.js';
-import { renderPersonNotesBlock, selectPersonNotes } from '../memory-notes.js';
 import { mobileEnginePhaseDetail } from '../mobile/engine-phase.js';
 import type { PortableInference, PortableSampling } from '../mobile/inference.js';
 import { classifyModelTier } from '../model-profile/local-model-tier.js';
@@ -22,6 +17,7 @@ import { resolveProfile } from '../model-profile/registry.js';
 import type { ResolvedModelProfile } from '../model-profile/types.js';
 import { gezelNamesInUse, pickUnusedGezelName } from '../names.js';
 import { isOwnerLaunchedCompletion } from '../notifications/index.js';
+import { pageLibrariesNote } from '../pages/note.js';
 import {
   LEAN_PROFILE_REPLY_MAX_TOKENS,
   leanSession,
@@ -30,14 +26,8 @@ import {
   turnStateWanted,
 } from '../project-types/composition.js';
 import { rewritePromptDraftFileRefs } from '../prompt-drafts.js';
-import {
-  PROMPT_FOOTPRINT_POLICY,
-  capAboutForFootprint,
-  renderProjectBrief,
-  resolvePromptFootprint,
-} from '../prompt-footprint.js';
+import { PROMPT_FOOTPRINT_POLICY, resolvePromptFootprint } from '../prompt-footprint.js';
 import type { BuiltInstructions } from '../prompt/instructions.js';
-import { IN_APP_WEB_PREVIEW_GUIDANCE } from '../prompt/web-preview.js';
 import { formatAnswerSeed, outstandingSessionQuestion } from '../question-format.js';
 import { parseRemoteModelId, remoteChatFetch } from '../remote/index.js';
 import { resolveRoleId, roleForMatching } from '../roles/index.js';
@@ -60,6 +50,7 @@ import {
   type MobileProviderId,
   MobileProviderIdSchema,
 } from '../schemas/mobile-provider.js';
+import type { PageLibraryLine } from '../schemas/page-library.js';
 import type { PromptDraftMeta } from '../schemas/prompt-draft.js';
 import {
   OFFLINE_RUNTIME_CAPABILITIES,
@@ -71,7 +62,6 @@ import type { Task } from '../schemas/task.js';
 import { resolveSecurityPolicy } from '../security/policy.js';
 import { isTaskOrCraftbookSession } from '../session-scope.js';
 import { taskSessionCanContinue } from '../task-execution.js';
-import { renderTaskContextBlock } from '../tasks/prompt-context.js';
 import { buildStepDispatchSeed } from '../tasks/step-dispatch-seed.js';
 import { stepTurnSteering, tuningForStepAction } from '../tasks/step-turn-steering.js';
 import { deriveThreadTitleFromMessages } from '../thread-title.js';
@@ -113,7 +103,10 @@ import {
 } from './message-delivery.js';
 import { handlePortableModelsRoute, modelBudget } from './model-budget.js';
 import { portableSessionModel, portableTurnRoute, serverModelParts } from './model-routing.js';
-import { buildPortableInstructions } from './portable-instructions.js';
+import {
+  buildPortableInstructions,
+  buildSystemModelInstructions,
+} from './portable-instructions.js';
 import { portableSampling, portableTuning } from './portable-sampling.js';
 import { portableToolSurface } from './product-tools.js';
 import {
@@ -257,6 +250,9 @@ export class PortableProductService {
   /** Other devices' gezel servers this one paired with, for their models. */
   readonly remotes: PortableRemoteServers;
   readonly capabilities: Readonly<RuntimeCapabilities>;
+  /** What the prompt says about the page libraries this app carries, when it carries any. */
+  private readonly pageLibrariesNote: string | null;
+  private readonly pageLibraryIds: readonly string[];
   /** One turn per conversation, waiting for the engine or running on it. */
   private readonly turns = new Map<string, Turn>();
   private readonly admissions = new Map<string, Admission>();
@@ -416,8 +412,13 @@ export class PortableProductService {
       vision?: PortableVision;
       /** Native HTTPS to other devices; omitted hosts cannot use another device's models. */
       remote?: PortableRemoteHost;
+      /** The page libraries the app bundles for its previews (docs/page-libraries.md). */
+      pageLibraries?: readonly PageLibraryLine[];
     } = {},
   ) {
+    const pageLibraryLines = host.htmlPreview ? (host.pageLibraries ?? []) : [];
+    this.pageLibrariesNote = pageLibrariesNote(pageLibraryLines);
+    this.pageLibraryIds = [...new Set(pageLibraryLines.map((line) => line.library))];
     this.vision = host.vision;
     this.remotes = new PortableRemoteServers(store, host.remote ?? null);
     if (host.speech)
@@ -1374,6 +1375,8 @@ export class PortableProductService {
           personNotesMaxChars: footprint.personNotesMaxChars,
           ...(socialCharacter ? { character: socialCharacter } : {}),
           inAppWebPreview: this.capabilities.htmlPreview,
+          ...(this.pageLibrariesNote ? { pageLibrariesNote: this.pageLibrariesNote } : {}),
+          ...(this.pageLibraryIds.length ? { pageLibraryIds: this.pageLibraryIds } : {}),
         });
       if (structuredChat?.prompt)
         this.logPromptSizes(session.id, structuredChat.prompt, footprintName);
@@ -1381,33 +1384,17 @@ export class PortableProductService {
         ? [structuredChat.prompt.full, structuredChat.prompt.volatileContext]
             .filter(Boolean)
             .join('\n\n')
-        : [
-            capAboutForFootprint(context.gezel.about, footprint.aboutMaxChars),
-            renderCharacterBlock(socialCharacter).replace(/^\s*(?:---\s*)?/, ''),
-            renderPersonNotesBlock(
-              selectPersonNotes(
-                await this.store.personMemoryEntries().catch(() => []),
-                footprint.personNotesMaxChars,
-              ),
-            ).replace(/^\s*(?:---\s*)?/, ''),
-            activeTask &&
-              renderTaskContextBlock(
-                { task: activeTask, ...(activeStep ? { step: activeStep } : {}) },
-                { availableToolNames: new Set(inventoryTools.map((tool) => tool.name)) },
-              ),
-            `Current project: ${context.project.name}`,
-            context.crew.length &&
-              `Project crew: ${context.crew.map((member) => `${member.name}${member.role ? ` (${member.role})` : ''}`).join(', ')}.`,
-            context.project.voormanGezelId &&
-              context.crew.some((member) => member.id === context.project.voormanGezelId) &&
-              `The crew lead of this project is ${context.crew.find((member) => member.id === context.project.voormanGezelId)!.name}.`,
-            renderProjectBrief(context.project, footprint.projectBriefMaxChars),
-            this.capabilities.htmlPreview &&
-              inventoryTools.some((tool) => tool.name === 'write_file') &&
-              IN_APP_WEB_PREVIEW_GUIDANCE,
-          ]
-            .filter(Boolean)
-            .join('\n\n');
+        : await buildSystemModelInstructions({
+            store: this.store,
+            context,
+            footprint,
+            ...(socialCharacter ? { character: socialCharacter } : {}),
+            ...(activeTask ? { task: activeTask } : {}),
+            ...(activeStep ? { step: activeStep } : {}),
+            toolNames: inventoryTools.map((tool) => tool.name),
+            inAppWebPreview: this.capabilities.htmlPreview,
+            pageLibraryIds: this.pageLibraryIds,
+          });
       // A person's own message carries what the crew remembers about it, for
       // the model only; seeds, handoffs and task turns bring their own context.
       const recall =

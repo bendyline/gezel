@@ -1,7 +1,7 @@
 import type { IpcMain, IpcMainEvent, IpcMainInvokeEvent } from 'electron';
 
-/** Decides whether a message came from the app's own page. */
-export type IpcSenderCheck = (event: IpcMainEvent | IpcMainInvokeEvent) => boolean;
+/** Decides whether a message on `channel` came from the app's own page. */
+export type IpcSenderCheck = (event: IpcMainEvent | IpcMainInvokeEvent, channel: string) => boolean;
 
 export interface TrustedIpc {
   handle(channel: string, listener: Parameters<IpcMain['handle']>[1]): void;
@@ -25,7 +25,7 @@ export function createTrustedIpc(
   return {
     handle(channel, listener) {
       ipc.handle(channel, (event, ...args) => {
-        if (!isTrusted(event)) {
+        if (!isTrusted(event, channel)) {
           throw new Error(`${channel} is only answered for Gezel's own page`);
         }
         return listener(event, ...args);
@@ -33,7 +33,7 @@ export function createTrustedIpc(
     },
     on(channel, listener) {
       ipc.on(channel, (event, ...args) => {
-        if (!isTrusted(event)) {
+        if (!isTrusted(event, channel)) {
           event.returnValue = null;
           return;
         }

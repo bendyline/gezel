@@ -20,11 +20,11 @@ Links are followed inside the folder of each address: `https://example.com/docs/
 
 ## Save one page
 
-To keep a single page, open **Views → Web pages** and press **Save a page**, or just write the address in a chat, starting with `https://` or `www.` A line above the message box says the page will be saved here and included in the chat. When you send the message, Gezel saves the page first and includes it with your message, so "Can you summarize https://example.com/pricing?" works as you'd expect. Press **×** on that line if you don't want the page fetched, or **Save now** to save it before you finish writing. Under your sent message, a row with the page's title opens the saved copy. A page saved this way isn't refreshed on its own; press **Sync now** on its connection when you want a fresh copy.
+To keep a single page, write its address in a chat, starting with `https://` or `www.`, or press **Save a page** in **Web pages** once the project follows a site. A line above the message box says the page will be saved here and included in the chat. When you send the message, Gezel saves the page first and includes it with your message, so "Can you summarize https://example.com/pricing?" works as you'd expect. Press **×** on that line if you don't want the page fetched, or **Save now** to save it before you finish writing. Under your sent message, a row with the page's title opens the saved copy. A page saved this way isn't refreshed on its own; press **Sync now** on its connection when you want a fresh copy.
 
 ## Read what was saved
 
-**Views → Web pages** lists the pages by site. Choose one to read it. **Reading** shows the page's text; **Screenshots** shows how it looked. A link to another saved page opens it here; any other link opens in your browser. When Gezel has written a short synopsis of a page, it appears at the top, marked as written from the page.
+**Web pages**, in the project's **Views** tab, lists the pages by site. Choose one to read it. **Reading** shows the page's text; **Screenshots** shows how it looked. A link to another saved page opens it here; any other link opens in your browser. When Gezel has written a short synopsis of a page, it appears at the top, marked as written from the page.
 
 Each site also gets two files Gezel reads: an **overview** of every saved page, and a **change log** for the month listing pages that appeared, changed (with the lines that changed) and disappeared.
 
