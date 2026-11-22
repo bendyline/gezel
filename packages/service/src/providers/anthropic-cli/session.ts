@@ -23,6 +23,7 @@ import type { WorkerTurnHooks } from './worker.js';
 
 export interface SessionDeps {
   binaryPath: string;
+  binaryVersion?: string;
   model: string;
   reasoningEffort?: ClaudeReasoningEffort;
   permissionMode: ClaudePermissionMode;
@@ -130,6 +131,7 @@ export class AnthropicCliSession extends StreamingSessionBase implements LLMSess
 
     const spec: ClaudeWorkerSpec = {
       binaryPath: this.deps.binaryPath,
+      ...(this.deps.binaryVersion ? { binaryVersion: this.deps.binaryVersion } : {}),
       model: this.deps.model,
       ...(this.deps.reasoningEffort ? { reasoningEffort: this.deps.reasoningEffort } : {}),
       permissionMode: this.deps.permissionMode,

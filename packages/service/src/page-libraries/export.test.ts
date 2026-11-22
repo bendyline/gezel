@@ -102,6 +102,24 @@ describe('exportPageFolder', () => {
     expect(byPath.get('LICENSES.txt')).toContain('MIT License — Widget authors');
     expect(result.notes).toEqual([]);
   });
+
+  it('keeps a JSX script that names its file, and points it at the compiled copy', async () => {
+    // Its empty body was once compiled into an empty module, and the page
+    // came out blank (1.26326.112 release audit).
+    const result = await exportPageFolder(
+      source({
+        'site/index.html':
+          '<html><head></head><body><div id="root"></div><script type="text/babel" src="app.jsx"></script></body></html>',
+        'site/app.jsx':
+          'const App = () => React.createElement("h1", null, "Hi");\nReactDOM.createRoot(document.getElementById("root")).render(<App />);',
+      }),
+    );
+    const byPath = new Map(result.files.map((file) => [file.path, file.data]));
+    const html = byPath.get('index.html') as string;
+    expect(html).toContain('<script type="module" src="app.js"></script>');
+    expect(html).not.toMatch(/<script type="module">\s*"use strict";\s*<\/script>/);
+    expect(byPath.get('app.js')).toContain('Hi');
+  });
 });
 
 describe('exportPageSingleFile', () => {

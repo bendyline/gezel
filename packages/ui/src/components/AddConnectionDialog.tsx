@@ -1,8 +1,10 @@
 import { CONNECTOR_FAMILIES, type ConnectorFamily, connectorTypeFamily } from '@bendyline/gezel';
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { apiErrorMessage } from '../api-error.js';
 import { api } from '../api.js';
 import { Dialog } from '../primitives/index.js';
 import { ProjectGlyph, type ProjectGlyphId } from '../views/projects/new-project-meta.js';
+import { ConfirmDialog } from './ConfirmDialog.js';
 import {
   ConnectorConfigFields,
   type ConnectorConfigValue,
@@ -158,6 +160,8 @@ export function AddConnectionDialog({
   // Gezel's own sign-in app can connect the selected type (read-only Google
   // and Microsoft types). An app saved here, or set by the environment, wins.
   const [builtinApp, setBuiltinApp] = useState(false);
+  // The other connection types that would need the saved app again.
+  const [forgetConfirm, setForgetConfirm] = useState<{ names: string[] } | null>(null);
   const galleryRef = useRef<HTMLDivElement>(null);
   const setupRef = useRef<HTMLElement>(null);
   const backRef = useRef<HTMLButtonElement>(null);
@@ -206,7 +210,7 @@ export function AddConnectionDialog({
         );
       })
       .catch((err: unknown) => {
-        if (live) setError(err instanceof Error ? err.message : String(err));
+        if (live) setError(apiErrorMessage(err));
       })
       .finally(() => {
         if (live) setLoadingTypes(false);
@@ -357,7 +361,7 @@ export function AddConnectionDialog({
           config: cameraConfigFromForm(cameraForm),
         });
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(apiErrorMessage(err));
         setBusy(null);
         return;
       }
@@ -432,7 +436,7 @@ export function AddConnectionDialog({
     } catch (err) {
       // Cancel already put the form back.
       if (err instanceof OAuthCancelledError) return;
-      const message = err instanceof Error ? err.message : String(err);
+      const message = apiErrorMessage(err);
       // The service ships no OAuth client of its own; this rejection means
       // the install hasn't registered an app yet — open the setup panel
       // rather than leaving the user with a bare error line.
@@ -458,7 +462,7 @@ export function AddConnectionDialog({
   ]);
 
   /** Forget the saved app, so Connect goes back to Gezel's own. */
-  const handleUseBuiltinApp = useCallback(async () => {
+  const forgetSavedApp = useCallback(async () => {
     if (!oauthRequirement) return;
     const key = oauthRequirement.clientKey;
     setError('');
@@ -469,11 +473,36 @@ export function AddConnectionDialog({
         setOauthClients(({ [key]: _forgotten, ...rest }) => rest);
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(apiErrorMessage(err));
     } finally {
       setBusy(null);
     }
   }, [oauthRequirement, refreshOAuthClients]);
+
+  /**
+   * One saved app serves every type that names the same key: the Google app
+   * a person saved for Gmail also signs in a Google calendar. Forgetting it
+   * for the calendar would leave Gmail and Drive, which Gezel's own app
+   * cannot serve, needing it again, so the person is told which first.
+   * Connections already made keep the app they signed in with.
+   */
+  const handleUseBuiltinApp = useCallback(async () => {
+    if (!oauthRequirement || !selected) return;
+    const key = oauthRequirement.clientKey;
+    const sharing = types.filter(
+      (t) =>
+        t.id !== selected.id &&
+        t.secretShape?.kind === 'oauth2' &&
+        (t.secretShape as { clientIdEnv?: unknown }).clientIdEnv === key,
+    );
+    const needOwnApp: string[] = [];
+    for (const t of sharing) {
+      const app = await api.connectorOAuthApp(projectId, t.id).catch(() => null);
+      if (app?.builtin !== true) needOwnApp.push(t.name);
+    }
+    if (needOwnApp.length > 0) setForgetConfirm({ names: needOwnApp });
+    else await forgetSavedApp();
+  }, [oauthRequirement, selected, types, projectId, forgetSavedApp]);
 
   /**
    * Save the user's OAuth app (client ID → config, secret → SecretStore),
@@ -500,7 +529,7 @@ export function AddConnectionDialog({
         });
         setOauthSetupNudge(0);
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(apiErrorMessage(err));
         throw err;
       } finally {
         setBusy(null);
@@ -791,6 +820,22 @@ export function AddConnectionDialog({
               </div>
             </>
           )}
+          <ConfirmDialog
+            open={forgetConfirm !== null}
+            title="Forget your saved app?"
+            message={
+              forgetConfirm
+                ? `${new Intl.ListFormat('en', { type: 'conjunction' }).format(forgetConfirm.names)} ${forgetConfirm.names.length === 1 ? 'uses' : 'use'} the same app and can't connect through Gezel's. You'll need to add it again to connect ${forgetConfirm.names.length === 1 ? 'that' : 'one of those'}. Connections you already have keep working.`
+                : undefined
+            }
+            confirmLabel="Forget it"
+            cancelLabel="Keep it"
+            onConfirm={async () => {
+              setForgetConfirm(null);
+              await forgetSavedApp();
+            }}
+            onCancel={() => setForgetConfirm(null)}
+          />
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>

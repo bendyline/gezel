@@ -2,7 +2,11 @@ import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { escapingLinkRefusal, findEscapingLinks } from './escaping-links.js';
+import {
+  escapingLinkRefusal,
+  findEscapingLinks,
+  isProtectedSystemTarget,
+} from './escaping-links.js';
 
 const dirs: string[] = [];
 
@@ -64,5 +68,46 @@ describe('findEscapingLinks', () => {
     const { workspace } = await layout();
     const result = await findEscapingLinks([workspace], [workspace], { maxEntries: 2 });
     expect(result).toMatchObject({ ok: false, reason: 'too-large' });
+  });
+
+  // A Python .venv's bin/python3 -> /usr/bin/python3 blocked every run.
+  it('accepts a link to a protected system file, and still refuses one that is not', async () => {
+    const { workspace, outside } = await layout();
+    await dirLink(outside, join(workspace, 'python3'));
+    const system = async () => true;
+    expect(
+      await findEscapingLinks([workspace], [workspace], { systemTarget: system }),
+    ).toMatchObject({ ok: true });
+    const writable = async () => false;
+    expect(
+      await findEscapingLinks([workspace], [workspace], { systemTarget: writable }),
+    ).toMatchObject({ ok: false, reason: 'links' });
+  });
+
+  // Workspace scripts pass only their write roots: a link into the read-only
+  // artifacts drawer carried writes there.
+  it('refuses a link into a read-only root when only write roots may be reached', async () => {
+    const { workspace, granted } = await layout();
+    await dirLink(granted, join(workspace, 'artifacts-link'));
+    expect(await findEscapingLinks([workspace], [workspace])).toMatchObject({
+      ok: false,
+      reason: 'links',
+    });
+  });
+});
+
+describe('isProtectedSystemTarget', () => {
+  it.skipIf(process.platform === 'win32')(
+    'is true for a root-owned file this account cannot change, false for its own',
+    async () => {
+      const { workspace } = await layout();
+      expect(await isProtectedSystemTarget('/usr/bin/env')).toBe(process.getuid?.() !== 0);
+      expect(await isProtectedSystemTarget(join(workspace, 'src', 'deep', 'a.txt'))).toBe(false);
+    },
+  );
+
+  it('is never true on Windows', async () => {
+    if (process.platform !== 'win32') return;
+    expect(await isProtectedSystemTarget('C:\\Windows\\System32\\cmd.exe')).toBe(false);
   });
 });

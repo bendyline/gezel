@@ -3530,8 +3530,12 @@ export class GezelClient {
 
   // ── Video generation (bundled diffusers / LTX sidecar or mock) ──
 
-  generateVideo(body: VideoGenerationRequest): Promise<VideoGenerationResponse> {
-    return this.request('POST', '/api/video-gen/generate', body);
+  /** `signal` cancels the render: the route stops it when the request goes away. */
+  generateVideo(
+    body: VideoGenerationRequest,
+    opts: { signal?: AbortSignal } = {},
+  ): Promise<VideoGenerationResponse> {
+    return this.request('POST', '/api/video-gen/generate', body, undefined, opts.signal);
   }
 
   listInstalledVideoModels(): Promise<ListInstalledVideoModelsResponse> {
@@ -5764,8 +5768,14 @@ export class GezelClient {
       bindingId: string;
       connectorType: string;
       action: string;
-      status: 'draft' | 'queued';
+      /**
+       * `uncertain`: sending started and did not finish, so it may have gone
+       * out; it is never sent again without the person.
+       */
+      status: 'draft' | 'queued' | 'uncertain';
       input: unknown;
+      /** Why it is uncertain, or why an earlier send did not go out. */
+      error?: string;
     }[];
   }> {
     return this.request('GET', `/api/projects/${encodeURIComponent(id)}/connectors/actions`);

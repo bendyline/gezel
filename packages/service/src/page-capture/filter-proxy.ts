@@ -86,7 +86,8 @@ type Refusal =
   | 'method'
   | 'budget'
   | 'no-page'
-  | 'bad-request';
+  | 'bad-request'
+  | 'rebinding';
 
 export class FilterProxy {
   private server: http.Server | null = null;
@@ -96,6 +97,14 @@ export class FilterProxy {
   private stats: PageNetworkStats = emptyStats();
   private readonly pageHosts = new Set<string>();
   private readonly privateHosts: Set<string>;
+  /**
+   * What each typed host's first answer was, for the life of this session. A
+   * typed host may be an intranet site, so its private answers are allowed,
+   * but only when it has always answered privately: a host that first served
+   * a public page and later answers with a router's address is DNS
+   * rebinding, which would let that page read the person's network.
+   */
+  private readonly typedHostKind = new Map<string, 'public' | 'private'>();
   private readonly ports: Set<number>;
   private readonly resolveHost: (host: string) => Promise<string[]>;
   private readonly allowLoopbackPorts: Set<number>;
@@ -113,11 +122,21 @@ export class FilterProxy {
   static async start(opts: FilterProxyOptions = {}): Promise<FilterProxy> {
     const proxy = new FilterProxy(opts);
     proxy.refreshOwnAddresses();
-    const server = http.createServer((req, res) => void proxy.onRequest(req, res));
-    server.on(
-      'connect',
-      (req, socket, head) => void proxy.onConnect(req, socket as net.Socket, head),
-    );
+    // A rejection here would be unhandled, and the daemon exits on one: a
+    // page's own requests must never be able to stop it.
+    const server = http.createServer((req, res) => {
+      proxy.onRequest(req, res).catch((err) => {
+        log.warn(`proxy request failed: ${err instanceof Error ? err.message : String(err)}`);
+        if (!res.headersSent) res.writeHead(502);
+        res.end();
+      });
+    });
+    server.on('connect', (req, socket, head) => {
+      proxy.onConnect(req, socket as net.Socket, head).catch((err) => {
+        log.warn(`proxy tunnel failed: ${err instanceof Error ? err.message : String(err)}`);
+        (socket as net.Socket).destroy();
+      });
+    });
     server.on('upgrade', (_req, socket) => {
       (socket as net.Socket).end('HTTP/1.1 403 Forbidden\r\n\r\n');
     });
@@ -188,6 +207,23 @@ export class FilterProxy {
     return why;
   }
 
+  /**
+   * Whether a typed host's answer is public, private (a LAN or this machine's
+   * own address), or both. Loopback and metadata are judged separately and
+   * never reachable, so they count as neither.
+   */
+  private typedAnswerKind(addresses: readonly string[]): 'public' | 'private' | 'mixed' {
+    let pub = false;
+    let priv = false;
+    for (const ip of addresses) {
+      const lower = ip.toLowerCase();
+      if (neverReachableKind(lower)) continue;
+      if (this.ownAddresses.has(lower) || isPrivateAddress(lower)) priv = true;
+      else pub = true;
+    }
+    return pub && priv ? 'mixed' : priv ? 'private' : 'public';
+  }
+
   /** The address to connect to, or why the target is refused. */
   private async pin(hostRaw: string, port: number): Promise<{ ip: string } | { refused: Refusal }> {
     if (this.currentHost === null) return { refused: this.refuse('no-page') };
@@ -214,12 +250,24 @@ export class FilterProxy {
       }
     }
     if (addresses.length === 0) return { refused: this.refuse('unresolvable') };
-    // A private address is allowed only for a host the person typed, while
-    // a page on that host is the one being captured.
-    const privateOk =
-      this.privateHosts.has(host) &&
-      (this.currentHost === host ||
-        this.currentHost.replace(/^www\./, '') === host.replace(/^www\./, ''));
+    // The page can end while the lookup runs; nothing connects after it.
+    const current = this.currentHost;
+    if (current === null) return { refused: this.refuse('no-page') };
+    let privateOk = false;
+    if (this.privateHosts.has(host)) {
+      const kind = this.typedAnswerKind(addresses);
+      const before = this.typedHostKind.get(host);
+      if (kind === 'mixed' || (before && before !== kind)) {
+        log.warn(`refused ${host}: its addresses changed between public and private`);
+        return { refused: this.refuse('rebinding') };
+      }
+      this.typedHostKind.set(host, kind);
+      // A private address is allowed only for a typed host that has always
+      // answered privately, while a page on that host is the one captured.
+      privateOk =
+        kind === 'private' &&
+        (current === host || current.replace(/^www\./, '') === host.replace(/^www\./, ''));
+    }
     for (const ip of addresses) {
       const lower = ip.toLowerCase();
       // Never reachable, even for a private site the person typed. Judged on

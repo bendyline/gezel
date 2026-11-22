@@ -163,6 +163,28 @@ describe('WebsiteService', () => {
     expect(list.pages.filter((p) => !p.path).every((p) => p.state === 'skipped')).toBe(true);
   });
 
+  it('keeps saving pasted pages past the 25 addresses a followed connection allows', async () => {
+    const w = world();
+    await w.websites.savePage(w.project(), 'other.test/article');
+    const binding = (
+      w.project() as { connectors: { id: string; config: Record<string, unknown> }[] }
+    ).connectors[0]!;
+    const many = (n: number) =>
+      Array.from({ length: n }, (_, i) => `https://page${i}.example.test/`);
+    await w.connectors.patchBinding(w.project(), binding.id, {
+      config: { ...binding.config, sites: ['https://other.test/article', ...many(24)] },
+    });
+    const saved = await w.websites.savePage(w.project(), 'https://site.test/guide');
+    expect(saved.page.state).toBe('saved');
+
+    await w.connectors.patchBinding(w.project(), binding.id, {
+      config: { ...binding.config, sites: many(500) },
+    });
+    await expect(w.websites.savePage(w.project(), 'https://site.test/guide/deep')).rejects.toThrow(
+      /already keeps 500 pages/,
+    );
+  });
+
   it('saves a pasted page into the connection that already found it, even past a redirect', async () => {
     const w = world();
     w.site.set('/en/learn/intro', { title: 'old', text: [], redirectTo: '/learn/intro' });

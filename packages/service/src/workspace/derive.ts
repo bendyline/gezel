@@ -121,6 +121,8 @@ export async function deriveWorkspaceFile(
       input: '',
       timeoutMs: timeout,
       extraReadPaths: [scratchDir, artifactsDir],
+      // The artifacts drawer is read-only to a script; a link into it would carry writes.
+      linkTargets: 'write',
       stripTypes: true,
       denyNet: await workspaceScriptDeniesNetwork(store),
       scriptArgs: [],

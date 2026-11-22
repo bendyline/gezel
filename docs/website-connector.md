@@ -76,12 +76,18 @@ sandboxed browser can run, that is a **browser session**:
 - **Every request goes through the filter proxy** (`filter-proxy.ts`), a
   forward proxy on `127.0.0.1:0`. It resolves each host itself, refuses
   private, loopback, link-local, metadata and this machine's own addresses,
-  and connects to the address it checked, which closes DNS rebinding. A host
-  the person typed may resolve privately (an intranet wiki), only while a
-  page on that host is being captured; loopback and cloud metadata never, in
-  any spelling (an IPv4-mapped AAAA answer is judged as its IPv4 address,
-  `neverReachableKind` in `utils/ssrf.ts`). Per page: 30 MB, 400 connections,
-  80 hosts. Nothing connects between pages.
+  and connects to the address it checked, so a name cannot change between
+  the check and the connection. A host the person typed (a followed site, or
+  a link pasted into chat) may resolve privately (an intranet wiki), only
+  while a page on that host is being captured, and only if it has answered
+  privately every time this session: the first answer pins the host as
+  public or private, and a later answer of the other kind, or one that mixes
+  both, is refused as `rebinding`. Without the pin, a pasted link could serve
+  its page publicly and then point its own name at the person's router.
+  Loopback and cloud metadata are never reachable, in any spelling (an
+  IPv4-mapped AAAA answer is judged as its IPv4 address, `neverReachableKind`
+  in `utils/ssrf.ts`). Per page: 30 MB, 400 connections, 80 hosts. Nothing
+  connects between pages.
 - **UDP is closed by the profile.** The worker seeds the fresh profile with
   `webrtc.ip_handling_policy = disable_non_proxied_udp`; QUIC is off by flag.
   Measured 2026-11-16 on Chrome for Testing 151: without the preference, WebRTC

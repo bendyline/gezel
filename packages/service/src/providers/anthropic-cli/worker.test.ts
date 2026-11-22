@@ -6,7 +6,7 @@ import type { ToolCallEvent, TurnUsage } from '@bendyline/gezel-inference/intern
 import type { SessionOpts } from '@bendyline/gezel-inference/internal/providers/types';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ClaudeReasoningEffort } from './reasoning.js';
-import { ClaudeWorker, type WorkerTurnHooks } from './worker.js';
+import { ClaudeWorker, type WorkerTurnHooks, claudeSupportsSettingSources } from './worker.js';
 
 let dir: string;
 
@@ -523,10 +523,12 @@ describe('ClaudeWorker — system prompt delivery', () => {
     sessionId: string;
     reasoningEffort?: ClaudeReasoningEffort;
     extraMcpServers?: SessionOpts['extraMcpServers'];
+    binaryVersion?: string;
     capture: (args: string[], spawnOptions: unknown) => void;
   }): ClaudeWorker {
     return new ClaudeWorker({
       binaryPath: 'node',
+      ...(opts.binaryVersion ? { binaryVersion: opts.binaryVersion } : {}),
       model: 'sonnet',
       ...(opts.reasoningEffort ? { reasoningEffort: opts.reasoningEffort } : {}),
       permissionMode: 'acceptEdits',
@@ -694,6 +696,44 @@ describe('ClaudeWorker — system prompt delivery', () => {
     expect(capturedArgs).toContain('--strict-mcp-config');
 
     await worker.shutdown();
+  });
+
+  it("loads only the person's settings, never the folder's own .claude settings", async () => {
+    // A project's .claude/settings.json is a file a gezel can write, and a
+    // hook there ran as the person once Claude Code started in that folder.
+    const binPath = await makeFakeClaude({ sessionId: 'cli-sources', turns: [] });
+    let capturedArgs: string[] = [];
+    const worker = buildCapturingWorker({
+      binPath,
+      systemMessage: 'You are a test gezel.',
+      manageRuntimeFiles: true,
+      sessionId: 'sess-sources',
+      binaryVersion: '2.1.316 (Claude Code)',
+      capture: (a) => {
+        capturedArgs = a;
+      },
+    });
+    await worker.start();
+    try {
+      expect(capturedArgs[capturedArgs.indexOf('--setting-sources') + 1]).toBe('user');
+      const settings = JSON.parse(
+        await readFile(capturedArgs[capturedArgs.indexOf('--settings') + 1]!, 'utf8'),
+      );
+      expect(settings.permissions.deny).toEqual(
+        expect.arrayContaining([
+          'Edit(**/.claude/settings.json)',
+          'Edit(**/.claude/settings.local.json)',
+        ]),
+      );
+    } finally {
+      await worker.shutdown();
+    }
+  });
+
+  it('leaves --setting-sources out for a Claude Code older than 2.0', () => {
+    expect(claudeSupportsSettingSources('1.0.72 (Claude Code)')).toBe(false);
+    expect(claudeSupportsSettingSources('2.0.0 (Claude Code)')).toBe(true);
+    expect(claudeSupportsSettingSources(undefined)).toBe(true);
   });
 });
 

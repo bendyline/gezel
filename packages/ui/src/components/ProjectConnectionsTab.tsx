@@ -1,5 +1,6 @@
 import type { ProjectDetail } from '@bendyline/gezel';
 import { useCallback, useEffect, useState } from 'react';
+import { apiErrorMessage } from '../api-error.js';
 import { api } from '../api.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { setVisibleInterval } from '../visible-interval.js';
@@ -81,7 +82,7 @@ export function ProjectConnectionsTab({
       setStatus(s);
       setPending(a.pending);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(apiErrorMessage(err));
     }
   }, [project.id]);
 
@@ -114,7 +115,7 @@ export function ProjectConnectionsTab({
         setNotice(r.status === 'committed' ? 'Action committed.' : 'Held in the outbox.');
         await refresh();
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(apiErrorMessage(err));
       } finally {
         setBusy(null);
       }
@@ -129,7 +130,7 @@ export function ProjectConnectionsTab({
         await api.discardConnectorAction(project.id, draftId);
         await refresh();
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(apiErrorMessage(err));
       } finally {
         setBusy(null);
       }
@@ -165,7 +166,7 @@ export function ProjectConnectionsTab({
         );
         await refresh();
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(apiErrorMessage(err));
       } finally {
         setBusy(null);
       }
@@ -189,7 +190,7 @@ export function ProjectConnectionsTab({
             : `The check found a problem: ${problem}`,
         );
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(apiErrorMessage(err));
       } finally {
         setBusy(null);
       }
@@ -210,7 +211,7 @@ export function ProjectConnectionsTab({
         );
         await refresh();
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(apiErrorMessage(err));
       } finally {
         setBusy(null);
       }
@@ -233,7 +234,7 @@ export function ProjectConnectionsTab({
         }
         await refresh();
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(apiErrorMessage(err));
       } finally {
         setBusy(null);
         setConfirmUnbind(null);
@@ -423,16 +424,29 @@ export function ProjectConnectionsTab({
                   <strong>{a.action}</strong>
                   <span className="muted small"> · {a.connectorType}</span>
                   {a.status === 'queued' && <span className="badge"> waiting for you</span>}
+                  {a.status === 'uncertain' && <span className="badge"> may have been sent</span>}
+                  {a.status === 'uncertain' ? (
+                    <p className="muted small">
+                      Sending started and did not finish, so it may already have gone out. Check the
+                      account before sending it again; Discard removes it here.
+                      {a.error ? ` (${a.error})` : ''}
+                    </p>
+                  ) : (
+                    a.error && <p className="muted small">{a.error}</p>
+                  )}
                 </div>
                 <div className="gz-mail-link-actions">
-                  <button
-                    type="button"
-                    className="primary"
-                    onClick={() => void handleCommit(a.draftId)}
-                    disabled={busy === a.draftId}
-                  >
-                    {busy === a.draftId ? 'Working…' : 'Commit'}
-                  </button>
+                  {/* Commit refuses an uncertain send, so it is not offered. */}
+                  {a.status !== 'uncertain' && (
+                    <button
+                      type="button"
+                      className="primary"
+                      onClick={() => void handleCommit(a.draftId)}
+                      disabled={busy === a.draftId}
+                    >
+                      {busy === a.draftId ? 'Working…' : 'Commit'}
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={() => void handleDiscardAction(a.draftId)}

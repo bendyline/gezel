@@ -1,6 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { HttpStatusError } from '@bendyline/gezel';
 import type { SecretStore } from '@bendyline/gezel-inference/internal/secrets/types';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Store } from '../fs/store.js';
@@ -15,6 +16,7 @@ registerConsentEnforcer('test-approve', () => ({ ok: true }));
 
 let lastAction: { action: string; input: unknown } | null = null;
 let failNextSend = false;
+let nextSendError: Error | null = null;
 let sends = 0;
 
 registerNativeAdapter(
@@ -32,6 +34,11 @@ registerNativeAdapter(
       if (failNextSend) {
         failNextSend = false;
         throw new Error('connection reset after the request was sent');
+      }
+      if (nextSendError) {
+        const err = nextSendError;
+        nextSendError = null;
+        throw err;
       }
       lastAction = { action, input };
       return { ok: true };
@@ -131,6 +138,37 @@ describe('ConnectorActionManager send journal', () => {
     expect(sends).toBe(1);
     // The person checks the account and discards it.
     await m.discard(project, draftId);
+    expect((await m.list(project)).pending).toEqual([]);
+  });
+
+  it.each([
+    [
+      'no network',
+      Object.assign(new TypeError('fetch failed'), {
+        cause: Object.assign(new Error('getaddrinfo ENOTFOUND api.test'), { code: 'ENOTFOUND' }),
+      }),
+    ],
+    ['a refusal from the service', new HttpStatusError(400, 'body is required')],
+  ])('a send that never got through (%s) waits in the outbox to be sent again', async (_l, err) => {
+    // Marked uncertain, an Approve pressed offline could only be discarded.
+    const m = mgr();
+    const { draftId } = await m.draft(project, {
+      bindingId: 'fake-action-conn:abc',
+      action: 'comment',
+      input: { body: 'hi' },
+    });
+    const before = sends;
+    nextSendError = err;
+    await expect(m.commit(project, draftId)).rejects.toThrow();
+    expect((await m.list(project)).pending).toEqual([
+      expect.objectContaining({
+        draftId,
+        status: 'queued',
+        error: expect.stringMatching(/^Not sent: /),
+      }),
+    ]);
+    await expect(m.commit(project, draftId)).resolves.toMatchObject({ status: 'committed' });
+    expect(sends - before).toBe(2);
     expect((await m.list(project)).pending).toEqual([]);
   });
 });

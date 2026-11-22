@@ -35,6 +35,18 @@ export function claudeAbsoluteRulePath(path: string): string {
   return `/${slashed.startsWith('/') ? slashed : `/${slashed}`}`;
 }
 
+/**
+ * Claude Code's own project settings, at any depth below the working folder.
+ * A hook written there runs as the person the next time Claude Code starts in
+ * that folder; the worker loads only user settings (`--setting-sources
+ * user`), and these rules keep Claude's file tools from planting one for the
+ * person's own sessions. `Edit` rules cover every built-in tool that edits.
+ */
+export const CLAUDE_PROJECT_SETTINGS_DENY_RULES: readonly string[] = [
+  'Edit(**/.claude/settings.json)',
+  'Edit(**/.claude/settings.local.json)',
+];
+
 export function claudeCredentialDenyRules(gezelHome: string | undefined): string[] {
   if (!gezelHome || !isAbsolute(gezelHome)) return [];
   const root = claudeAbsoluteRulePath(gezelHome);

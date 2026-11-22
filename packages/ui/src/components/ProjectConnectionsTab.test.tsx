@@ -86,6 +86,42 @@ describe('ProjectConnectionsTab connector picker', () => {
     vi.mocked(api.getProject).mockResolvedValue(PROJECT);
   });
 
+  it('offers no Commit for a send that may already have gone out', async () => {
+    // Commit refuses an uncertain send, so the button could only fail.
+    vi.mocked(api.listConnectorActions).mockResolvedValue({
+      pending: [
+        {
+          draftId: 'd-uncertain',
+          bindingId: 'mail-gmail:1',
+          connectorType: 'mail-gmail',
+          action: 'send_email',
+          status: 'uncertain',
+          input: {},
+          error: 'socket hang up',
+        },
+        {
+          draftId: 'd-offline',
+          bindingId: 'mail-gmail:1',
+          connectorType: 'mail-gmail',
+          action: 'reply',
+          status: 'queued',
+          input: {},
+          error: 'Not sent: fetch failed',
+        },
+      ],
+    } as never);
+    render(<ProjectConnectionsTab project={PROJECT} />);
+
+    const uncertain = (await screen.findByText('send_email')).closest('li')!;
+    expect(within(uncertain as HTMLElement).getByText(/may have been sent/)).toBeInTheDocument();
+    expect(within(uncertain as HTMLElement).queryByRole('button', { name: 'Commit' })).toBeNull();
+    expect(within(uncertain as HTMLElement).getByRole('button', { name: 'Discard' })).toBeTruthy();
+
+    const offline = screen.getByText('reply').closest('li')!;
+    expect(within(offline as HTMLElement).getByText('Not sent: fetch failed')).toBeInTheDocument();
+    expect(within(offline as HTMLElement).getByRole('button', { name: 'Commit' })).toBeTruthy();
+  });
+
   it('opens a two-step dialog: choose a connector, then set it up', async () => {
     render(<ProjectConnectionsTab project={PROJECT} />);
     const user = userEvent.setup();
@@ -748,6 +784,51 @@ describe('ProjectConnectionsTab bring-your-own OAuth app', () => {
     expect(
       await screen.findByText("Connects through Gezel's own X (Twitter) app, which can only read."),
     ).toBeInTheDocument();
+  });
+
+  it('names the connections that would need a shared app again before forgetting it', async () => {
+    // One saved Google app serves the calendar and Gmail; Gezel's own app
+    // can sign in the calendar but not Gmail.
+    const google = (id: string, name: string) =>
+      connectorItem(id, name, {
+        completeness: 'window',
+        secretShape: {
+          kind: 'oauth2',
+          label: 'Google account',
+          required: true,
+          clientIdEnv: 'GEZEL_GOOGLE_CLIENT_ID',
+          clientSetup: { providerLabel: 'Google' },
+        },
+      });
+    vi.mocked(api.listConnectorTypes).mockResolvedValue({
+      items: [google('calendar-google', 'Google Calendar'), google('mail-gmail', 'Gmail')],
+    } as never);
+    vi.mocked(api.connectorOAuthApp).mockImplementation(async (_project: string, type: string) => ({
+      key: 'GEZEL_GOOGLE_CLIENT_ID',
+      builtin: type === 'calendar-google',
+    }));
+    vi.mocked(api.listOAuthClients).mockResolvedValue({
+      clients: [
+        { key: 'GEZEL_GOOGLE_CLIENT_ID', clientId: 'mine-g', hasSecret: true, source: 'settings' },
+      ],
+    } as never);
+    render(<ProjectConnectionsTab project={PROJECT} />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: 'Add connection' }));
+    await user.click(await screen.findByRole('radio', { name: 'Google Calendar' }));
+    await user.click(await screen.findByRole('button', { name: "Use Gezel's app" }));
+
+    expect(
+      await screen.findByText(/^Gmail uses the same app and can't connect through Gezel's\./),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Keep it' }));
+    expect(api.deleteOAuthClient).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: "Use Gezel's app" }));
+    await user.click(await screen.findByRole('button', { name: 'Forget it' }));
+    await waitFor(() =>
+      expect(api.deleteOAuthClient).toHaveBeenCalledWith('GEZEL_GOOGLE_CLIENT_ID'),
+    );
   });
 
   it('names the app the daemon environment sets, with no form to override it', async () => {

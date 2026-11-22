@@ -144,11 +144,13 @@ export const DEFAULT_TOOL_TIMEOUT_MS = 5 * 60 * 1000;
  */
 export const TOOL_TIMEOUT_MS: Record<string, number> = {
   generate_image: 30 * 60 * 1000,
-  // `generate_video`: 60 min — first call provisions the Python venv
-  // (torch + diffusers, multi-minute on a cold machine), cold-loads the
-  // model, then runs a long multi-frame diffusion loop. Far slower than
-  // image generation, especially on the CPU fallback.
-  generate_video: 60 * 60 * 1000,
+  // `generate_video`: just past the sd.cpp video render's own 6 h budget
+  // (`sd-cpp-video.ts`). A cold first call provisions a Python venv and
+  // loads the model before a long diffusion loop, and a slow machine can
+  // take hours. At 60 min the bridge gave up while the render ran on, and a
+  // retry queued a second render behind it. The tool also forwards the
+  // call's cancel signal, so a turn that stops stops its render.
+  generate_video: (6 * 60 + 5) * 60 * 1000,
   run_playwright_script: 15 * 60 * 1000,
   run_nodejs_script: 10 * 60 * 1000,
   run_npx: 10 * 60 * 1000,

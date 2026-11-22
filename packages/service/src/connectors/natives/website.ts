@@ -129,6 +129,18 @@ function intIn(raw: unknown, min: number, max: number, fallback: number): number
   return Number.isFinite(n) ? Math.max(min, Math.min(max, Math.round(n))) : fallback;
 }
 
+/** Addresses a connection the person sets up may follow. */
+export const WEBSITE_MAX_ADDRESSES = 25;
+
+/**
+ * Addresses a project's Saved pages connection may hold. Every page saved
+ * from a chat adds one, and an address leaving `sites` takes its saved copy
+ * with it, so this limit is generous rather than a rolling window. At 25,
+ * the 26th link a person pasted in a project failed for good (1.26326.112
+ * release audit).
+ */
+export const SAVED_PAGES_MAX_ADDRESSES = 500;
+
 /** Read a binding's config, with the problems a person can fix. */
 export function parseWebsiteConfig(raw: Record<string, unknown> | undefined): {
   config: WebsiteConfig;
@@ -139,10 +151,16 @@ export function parseWebsiteConfig(raw: Record<string, unknown> | undefined): {
   const scopes: SiteScope[] = [];
   const sites: string[] = [];
   const entries = list(c.sites);
+  const savedPages = c.savedPages === true;
+  const maxAddresses = savedPages ? SAVED_PAGES_MAX_ADDRESSES : WEBSITE_MAX_ADDRESSES;
   if (entries.length === 0) problems.push('Add at least one web address.');
-  if (entries.length > 25)
-    problems.push('A connection follows at most 25 addresses; add another connection for more.');
-  for (const entry of entries.slice(0, 25)) {
+  if (entries.length > maxAddresses)
+    problems.push(
+      savedPages
+        ? `Saved pages keeps at most ${SAVED_PAGES_MAX_ADDRESSES} pages; remove some, or follow the site with a connection of its own.`
+        : `A connection follows at most ${WEBSITE_MAX_ADDRESSES} addresses; add another connection for more.`,
+    );
+  for (const entry of entries.slice(0, maxAddresses)) {
     const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(entry) ? entry : `https://${entry}`;
     let parsed: URL | null = null;
     try {

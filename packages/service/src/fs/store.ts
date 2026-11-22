@@ -135,6 +135,7 @@ import { copyFileAtomic, writeFileAtomic } from '@bendyline/gezel-inference/inte
 import { ensurePrivateUserHome } from '@bendyline/gezel-inference/internal/fs/home-permissions';
 import {
   assertNoTemplatePlaceholderPath,
+  assertNotAgentCliSettingsPath,
   assertNotGitControlPath,
   intoWorkspaceRelative,
   realpathNearest,
@@ -5050,6 +5051,13 @@ export class Store {
     // proposal is a gezel's text. Like the placeholder check, this throws.
     for (const p of Array.isArray(opts?.path) ? opts.path : opts?.path ? [opts.path] : []) {
       if (p) await assertNotGitControlPath(resolved.dir, p);
+    }
+    // An agent CLI's project settings can name hooks it runs as the person.
+    // The person may edit their own; a gezel may not.
+    if (opts?.initiatedByGezel) {
+      for (const p of Array.isArray(opts.path) ? opts.path : opts.path ? [opts.path] : []) {
+        if (p) await assertNotAgentCliSettingsPath(resolved.dir, p);
+      }
     }
     return {
       ok: true,

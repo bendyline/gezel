@@ -41,7 +41,7 @@ You don't have to get this right up front. Set a default provider in Settings, a
 
 ## Adding a model that isn't in the catalog
 
-The catalog is a short list Gezel has tried. You can add other models too. Choose **Add a model…** on your engine's page in Settings, then **From Hugging Face or a file…**, and paste a link to a model on [Hugging Face](https://huggingface.co), the public library most open models are published in. You can also choose a .gguf file that is already on your computer, for example one you downloaded with another app. On huggingface.co, a model's **Use this model** menu opens Gezel with that model ready to check.
+The catalog is a short list Gezel has tried. You can add other models too. Choose **Add a model…** on your engine's page in Settings, then **From Hugging Face or a file…**, and paste a link to a model on [Hugging Face](https://huggingface.co), the public library most open models are published in. You can also choose a .gguf file that is already on your computer, for example one you downloaded with another app.
 
 Gezel runs local models from GGUF files on every computer, and from MLX models on Apple silicon Macs. On Hugging Face, look for a repository whose name ends in "-GGUF", or an MLX one from mlx-community. Before anything is added, Gezel checks that:
 
@@ -54,6 +54,6 @@ Gezel runs local models from GGUF files on every computer, and from MLX models o
 
 If a check fails, Gezel says why and won't add that model. A repository usually holds the same model in several sizes, and a smaller one often fits where the largest does not.
 
-Once the model is on your computer, Gezel tries it: it starts the model, asks for a short reply and checks that the reply reads as language, and asks it to use a tool. The result appears beside the model in Settings → Models. Gezel doesn't pick a model that failed for work on its own, but you can still choose it yourself.
+Once the model is on your computer, Gezel tries it: it starts the model, asks for a short reply and checks that the reply reads as language, and asks it to use a tool. The result appears beside the model on your engine's page in Settings. Gezel doesn't pick a model that failed for work on its own, but you can still choose it yourself.
 
 Gezel also looks for good settings for the model. If the catalog has a tested version of the same model, the added one borrows its settings. Otherwise it uses the settings the model's author recommends, or Gezel's general settings for a model of its size. The review tells you which. If the catalog already has the exact file you linked, Gezel offers the catalog version instead.

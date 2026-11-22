@@ -308,6 +308,7 @@ export class AnthropicCliProvider implements LLMProvider {
     const reasoningEffort = pickReasoningEffort(opts.reasoningEffort, this.defaultReasoningEffort);
     const deps: SessionDeps = {
       binaryPath: this.resolved.path,
+      binaryVersion: this.resolved.version,
       model: opts.model ?? this.defaultModel,
       ...(reasoningEffort ? { reasoningEffort } : {}),
       permissionMode: ctx.permissionModeOverride ?? this.defaultPermissionMode,

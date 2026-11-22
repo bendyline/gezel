@@ -252,8 +252,8 @@ export function renderAvailableToolsBlock(opts: RenderToolsBlockOptions): string
       '',
       'What to do this turn:',
       '',
-      '1. Tell the user briefly: "My tool bridge failed to start — I can\'t actually perform any actions right now."',
-      '2. Suggest they restart the service or check Settings → On-device → MCP bridge for the underlying error.',
+      '1. Tell the user briefly: "My tools didn\'t start, so I can\'t take any actions right now."',
+      '2. Suggest they send the message again, and restart Gezel if it keeps happening.',
       "3. End your turn. Do not retry; the bridge state won't change within this turn.",
     ].join('\n');
   }

@@ -209,7 +209,8 @@ export type PathSafetyCode =
   | 'reserved-name'
   | 'empty-path'
   | 'template-placeholder'
-  | 'git-control';
+  | 'git-control'
+  | 'agent-settings';
 
 /**
  * Refuse a write whose path still carries an unresolved `{{param}}` token.
@@ -282,6 +283,58 @@ export async function assertNotGitControlPath(base: string, relPath: string): Pr
 /** {@link assertNotGitControlPath} as a question, for callers that skip rather than refuse. */
 export async function isGitControlTarget(base: string, relPath: string): Promise<boolean> {
   return isGitControlPath(relPath) || (await realPathIsGitControl(base, relPath));
+}
+
+/** A path segment as the filesystem resolves it: any case, no trailing dots or spaces, no NTFS stream. */
+function resolvedSegmentName(segment: string): string {
+  return (segment.split(':', 1)[0] ?? '').replace(/[. ]+$/, '').toLowerCase();
+}
+
+const CLAUDE_PROJECT_SETTINGS = new Set(['settings.json', 'settings.local.json']);
+
+/**
+ * True when `relPath` is an agent CLI's project settings: a Claude Code
+ * `.claude/settings.json` or `.claude/settings.local.json`, or anything in a
+ * `.codex` folder. Those files can name hooks and commands the CLI runs as
+ * the person the next time it starts in that folder, outside every limit
+ * Gezel puts on a gezel's shell. Compared the way {@link isGitControlPath}
+ * compares names.
+ */
+export function isAgentCliSettingsPath(relPath: string): boolean {
+  const names = relPath.split(/[\\/]+/).map(resolvedSegmentName);
+  for (let i = 0; i < names.length; i++) {
+    if (names[i] === '.codex') return true;
+    if (names[i] === '.claude' && i === names.length - 2) {
+      return CLAUDE_PROJECT_SETTINGS.has(names[i + 1] ?? '');
+    }
+  }
+  return false;
+}
+
+/**
+ * Refuse a gezel's change to an agent CLI's project settings. A gezel that
+ * wrote `.claude/settings.json` with a hook got a command run as the person
+ * when Claude Code next started there, at a security level that had taken
+ * its shell away (1.26326.112 release audit). Checked by name and on the
+ * real path, like `.git`.
+ */
+export async function assertNotAgentCliSettingsPath(base: string, relPath: string): Promise<void> {
+  const real = await realRelativePath(base, relPath);
+  if (!isAgentCliSettingsPath(relPath) && !(real !== null && isAgentCliSettingsPath(real))) return;
+  throw new PathSafetyError(
+    `"${relPath}" is an AI coding tool's settings file (Claude Code or Codex). Those files can run commands when the tool starts, so a gezel does not change them. Ask the person to edit it if it needs to change.`,
+    'agent-settings',
+  );
+}
+
+/** `relPath` on the real filesystem, relative to the real `base`, or null when it leaves `base`. */
+async function realRelativePath(base: string, relPath: string): Promise<string | null> {
+  const realBase = await realpathNearest(base);
+  const realTarget = await realpathNearest(isAbsolute(relPath) ? relPath : join(base, relPath));
+  if (!realBase || !realTarget) return null;
+  const rel = relative(realBase, realTarget);
+  if (rel === '' || isAbsolute(rel) || rel === '..' || rel.startsWith(`..${sep}`)) return null;
+  return rel;
 }
 
 async function realPathIsGitControl(base: string, relPath: string): Promise<boolean> {

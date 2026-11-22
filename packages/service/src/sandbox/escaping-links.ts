@@ -1,4 +1,5 @@
-import { readdir, readlink, realpath } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { access, readdir, readlink, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 
 /**
@@ -25,6 +26,24 @@ export type LinkScanResult =
   | { ok: true; entries: number }
   | { ok: false; reason: 'links'; links: EscapingLink[] }
   | { ok: false; reason: 'too-large'; entries: number };
+
+/**
+ * A link that leads to a system file this account can read but not change:
+ * owned by root and not writable, like a virtual environment's
+ * `bin/python3 -> /usr/bin/python3`. Reading through it reaches nothing a
+ * script could not read by name, and a write through it fails at the kernel,
+ * so it is no way out. Refusing it blocked every script in a folder holding a
+ * standard Python `.venv` on Linux (1.26326.112 release audit). POSIX only.
+ */
+export async function isProtectedSystemTarget(target: string): Promise<boolean> {
+  if (process.platform === 'win32') return false;
+  const info = await stat(target).catch(() => null);
+  if (!info || info.uid !== 0) return false;
+  return access(target, constants.W_OK).then(
+    () => false,
+    () => true,
+  );
+}
 
 function insideAny(path: string, roots: readonly string[], caseInsensitive: boolean): boolean {
   const norm = (p: string) => (caseInsensitive ? p.toLowerCase() : p);
@@ -67,8 +86,15 @@ async function linkTarget(link: string): Promise<string> {
 export async function findEscapingLinks(
   scanRoots: readonly string[],
   allowedRoots: readonly string[],
-  opts: { maxEntries?: number; platform?: NodeJS.Platform; maxReported?: number } = {},
+  opts: {
+    maxEntries?: number;
+    platform?: NodeJS.Platform;
+    maxReported?: number;
+    /** Test seam: whether a target outside every root is a protected system file. */
+    systemTarget?: (target: string) => Promise<boolean>;
+  } = {},
 ): Promise<LinkScanResult> {
+  const systemTarget = opts.systemTarget ?? isProtectedSystemTarget;
   // Both sides are realpaths, which carry the canonical case on macOS too.
   const caseInsensitive = (opts.platform ?? process.platform) === 'win32';
   const maxEntries = opts.maxEntries ?? MAX_LINK_SCAN_ENTRIES;
@@ -107,7 +133,7 @@ export async function findEscapingLinks(
         const full = join(dir, entry.name);
         if (entry.isSymbolicLink()) {
           const target = await linkTarget(full);
-          if (!insideAny(target, allowed, caseInsensitive)) {
+          if (!insideAny(target, allowed, caseInsensitive) && !(await systemTarget(target))) {
             links.push({ path: full, target });
             if (links.length >= maxReported) stopped = true;
           }

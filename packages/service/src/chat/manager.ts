@@ -15195,7 +15195,7 @@ export class ChatManager extends LocalEngineRuntime {
         };
         this.events.publish(scope, {
           type: 'warning',
-          message: `MCP bridge to your tools failed to start — ${gezel.name} can't run any actions this turn (no write_file, read_file, run_installed_script, etc.). The model has been told not to fabricate tool calls. Try restarting the service, or check Settings → On-device → MCP bridge for the underlying error.`,
+          message: `${gezel.name}'s tools didn't start, so they can't take any actions this turn. Send the message again; if it keeps happening, restart Gezel. The service log has the details.`,
         });
         return;
       }

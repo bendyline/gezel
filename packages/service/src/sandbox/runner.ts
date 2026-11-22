@@ -38,6 +38,15 @@ export interface SandboxRunOptions {
   onStdout?: (line: string) => void;
   onStderr?: (line: string) => void;
   extraReadPaths?: string[];
+  /**
+   * Where a link in the folder may lead, where no OS sandbox confines the run
+   * by real path. `'read-or-write'` (the default) allows any read root: code
+   * runners whose folders link into the packages they read. `'write'` allows
+   * only the write roots: Node's permission model checks the path a script
+   * names, so a link into a read-only root (a project's artifacts) carried
+   * writes there. Workspace scripts pass `'write'`.
+   */
+  linkTargets?: 'read-or-write' | 'write';
   /** Extra CLI args to pass to the script itself. */
   scriptArgs?: string[];
   /** Extra env vars to set on the child. Merged on top of `sandboxEnv`. */
@@ -210,7 +219,10 @@ export async function runInSandbox(opts: SandboxRunOptions): Promise<SandboxRunR
     // Where nothing confines the file system by real path, a link already in
     // the folder would carry the script's reads and writes out of it.
     if (!(windowsMxcSandboxAvailable || macSandboxAvailable)) {
-      const links = await findEscapingLinks([cwd], [...readPaths, ...writePaths]);
+      const links = await findEscapingLinks(
+        [cwd],
+        opts.linkTargets === 'write' ? writePaths : [...readPaths, ...writePaths],
+      );
       if (!links.ok) return refusedResult(escapingLinkRefusal(links), opts);
     }
 

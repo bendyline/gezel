@@ -287,6 +287,13 @@ class BrowserCaptureSession implements CaptureSession {
     child.stdout?.on('data', () => {});
     child.on('message', (raw) => this.onMessage(raw as WorkerReply));
     child.on('exit', (code, sig) => this.onExit(code, sig));
+    // A spawn that fails (a bad GEZEL_NODE_PATH, EAGAIN) emits 'error' and
+    // may never emit 'exit'. Unheard, it is an uncaught exception, and the
+    // daemon exits on one.
+    child.on('error', (err) => {
+      log.warn(`capture worker failed: ${err.message}`);
+      if (this.child === child) this.failWorker(err);
+    });
     const deadline = createAwakeTimeout(OPEN_BUDGET_MS);
     try {
       const reply = await new Promise<WorkerReply>((resolve, reject) => {
@@ -355,9 +362,12 @@ class BrowserCaptureSession implements CaptureSession {
   }
 
   private onExit(code: number | null, signal: NodeJS.Signals | null): void {
-    const err = new Error(
-      this.stopReason ?? `the browser stopped (${code ?? signal ?? 'unknown'})`,
+    this.failWorker(
+      new Error(this.stopReason ?? `the browser stopped (${code ?? signal ?? 'unknown'})`),
     );
+  }
+
+  private failWorker(err: Error): void {
     this.child = null;
     this.openWaiter?.reject(err);
     for (const p of this.pending.values()) p.reject(err);
@@ -516,6 +526,17 @@ class BrowserCaptureSession implements CaptureSession {
   }
 
   private async teardown(): Promise<void> {
+    // A browser that failed to start leaves its worker running; a host
+    // without Chrome's sandbox retried hourly and piled up idle workers.
+    const child = this.child;
+    this.child = null;
+    if (child && child.exitCode === null && child.signalCode === null) {
+      try {
+        child.kill();
+      } catch {
+        /* already gone */
+      }
+    }
     await this.proxy.close().catch(() => {});
     await rm(this.profileDir, { recursive: true, force: true, maxRetries: 3 }).catch(() => {});
   }

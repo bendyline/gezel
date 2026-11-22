@@ -1,5 +1,6 @@
 import type { PageLibrariesResponse, PageLibraryLineStatus } from '@bendyline/gezel/pages';
 import { useCallback, useEffect, useState } from 'react';
+import { apiErrorMessage } from '../api-error.js';
 import { api } from '../api.js';
 import { SettingCheck, SettingsSection } from './SettingsSection.js';
 import { formatBytes } from './model-memory-copy.js';
@@ -35,7 +36,7 @@ export function PageLibrariesCard() {
     try {
       setStatus(await api.getPageLibraries());
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(apiErrorMessage(err));
     }
   }, []);
 
@@ -52,7 +53,7 @@ export function PageLibrariesCard() {
         if (action === 'install') await api.installPageLibrary(library, version);
         else await api.removePageLibrary(library, version);
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(apiErrorMessage(err));
       } finally {
         setBusy(null);
         await refresh();
@@ -68,7 +69,7 @@ export function PageLibrariesCard() {
       try {
         await api.updateConfig({ pageLibraries: { autoDownload: next } });
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(apiErrorMessage(err));
       }
       await refresh();
     },

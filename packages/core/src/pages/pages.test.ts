@@ -692,6 +692,31 @@ describe('compileInlineJsx', () => {
     expect(isBabelStandaloneUrl('https://unpkg.com/react@18')).toBe(false);
   });
 
+  it('leaves a JSX script with a src, and the Babel tag that loads it, alone', () => {
+    // Its empty body was once compiled into an empty module and Babel dropped,
+    // so the page rendered blank.
+    const html = [
+      '<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>',
+      '<script type="text/babel" src="app.jsx"></script>',
+    ].join('\n');
+    expect(compileInlineJsx(html, compile)).toBe(html);
+  });
+
+  it('compiles inline JSX but keeps Babel while a JSX script with a src remains', () => {
+    const html = [
+      '<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>',
+      '<script type="text/babel">render(<App />)</script>',
+      '<script type="text/babel" src="widgets.jsx"></script>',
+    ].join('\n');
+    expect(compileInlineJsx(html, compile)).toBe(
+      [
+        '<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>',
+        '<script type="module">/* inline-1.jsx */ render(<App />)</script>',
+        '<script type="text/babel" src="widgets.jsx"></script>',
+      ].join('\n'),
+    );
+  });
+
   it('reports JSX that does not compile in the console', () => {
     expect(compileInlineJsx('<script type="text/babel">a << b</script>', compile)).toBe(
       '<script>console.error("This page\'s JSX did not compile: bad JSX");</script>',
