@@ -5,7 +5,7 @@ import { mkdir, open, readFile, realpath, rename, rm, stat, writeFile } from 'no
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import {
   HttpStatusError,
-  PNPM_HOISTED_NODE_LINKER,
+  PNPM_MANAGED_TREE_INSTALL_CONFIG,
   type ToolsetManifest,
   resolvePnpmInvocation,
   retryTransient,
@@ -76,14 +76,15 @@ export async function installNpmPackageToolset(opts: NpmInstallOptions): Promise
     // Hoisted node-linker: the install happens in the staging dir and is
     // renamed into place by `publishStagedNpmInstall` — pnpm's default
     // isolated linker produces a tree that does not survive that rename
-    // on Windows (see PNPM_HOISTED_NODE_LINKER's doc comment).
+    // on Windows (see PNPM_HOISTED_NODE_LINKER's doc comment). The staging
+    // dir must never join a parent pnpm workspace (PNPM_IGNORE_WORKSPACE).
     const pnpm = resolvePnpmInvocation(
       [
         'install',
         '--prod',
         '--ignore-scripts',
         '--frozen-lockfile=false',
-        PNPM_HOISTED_NODE_LINKER,
+        ...PNPM_MANAGED_TREE_INSTALL_CONFIG,
       ],
       {
         pnpmPath: process.env.GEZEL_PNPM_PATH,

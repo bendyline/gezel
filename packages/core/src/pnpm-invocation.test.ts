@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   PNPM_HOISTED_NODE_LINKER,
+  PNPM_IGNORE_WORKSPACE,
   PNPM_MANAGED_TREE_EXEC_CONFIG,
+  PNPM_MANAGED_TREE_INSTALL_CONFIG,
   PNPM_SKIP_DEPS_CHECK,
   resolvePnpmInvocation,
 } from './pnpm-invocation.js';
@@ -11,7 +13,24 @@ describe('PNPM_MANAGED_TREE_EXEC_CONFIG', () => {
     // pnpm 11's pre-exec dependency check runs a nested install that drops
     // command-line config and aborts with ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY.
     expect(PNPM_SKIP_DEPS_CHECK).toBe('--config.verify-deps-before-run=false');
-    expect(PNPM_MANAGED_TREE_EXEC_CONFIG).toEqual([PNPM_HOISTED_NODE_LINKER, PNPM_SKIP_DEPS_CHECK]);
+    expect(PNPM_MANAGED_TREE_EXEC_CONFIG).toEqual([
+      PNPM_HOISTED_NODE_LINKER,
+      PNPM_SKIP_DEPS_CHECK,
+      PNPM_IGNORE_WORKSPACE,
+    ]);
+  });
+});
+
+describe('managed trees and a parent pnpm workspace', () => {
+  // A Gezel home inside a pnpm workspace made the toolset install act on that
+  // workspace; with CI=true it stripped the workspace's dev dependencies.
+  it('installs and execs with the parent workspace ignored', () => {
+    expect(PNPM_IGNORE_WORKSPACE).toBe('--ignore-workspace');
+    expect(PNPM_MANAGED_TREE_INSTALL_CONFIG).toEqual([
+      PNPM_HOISTED_NODE_LINKER,
+      PNPM_IGNORE_WORKSPACE,
+    ]);
+    expect(PNPM_MANAGED_TREE_EXEC_CONFIG).toContain(PNPM_IGNORE_WORKSPACE);
   });
 });
 

@@ -22,11 +22,14 @@ When you use a cloud provider, the text of your conversation (and any files Geze
 Gezel also uses the internet for a few ordinary jobs:
 
 - **Downloads you start.** Models you choose to install (usually from Hugging Face), the on-device engines that run them (from gezel's own releases on GitHub, checked against pinned fingerprints), and knowledge catalogs you add.
-- **Tools it sets up.** On first start gezel installs its browser-automation tools, fetching Playwright from npm and a Chromium browser through Playwright's own installer. Other tools you or Gezel add later also come from npm.
+- **Tools it sets up.** On first start gezel installs its browser-automation tools, fetching Playwright from npm and a Chromium browser through Playwright's own installer. Other tools you or Gezel add later also come from npm, and so do the libraries a page Gezel writes needs, such as three.js or Chart.js, the first time a page uses one.
 - **Updates.** The desktop app checks gezel's GitHub releases for new versions; you can turn automatic checks off. Live catalog updates, if you switch them on, check npm about once a day.
-- **Web search, when you allow it.** Gezel can search and fetch web pages only once outside services are turned on in **Settings → Security & compliance**. What it searches for then goes to that search service: Wikipedia by default, or Brave if you add a Brave Search key.
+- **Web pages you ask it to keep.** Gezel saves copies of the websites a project follows and refreshes them on a schedule, at the default security level too. A web address you write in a message is saved when you send it, unless you press **×** first. Gezel fetches these pages itself and works from the copies. [Saved web pages](saved-web-pages.md) explains how.
+- **Connections that only read.** A connected feed or wiki refreshes on its own at the default level. Connections that can send or post move data only when you sync them, unless outside services are on.
+- **Public code.** At the default level a gezel can copy a public repository from GitHub, GitLab and four other public code hosts. Any other host needs outside services.
+- **Web search, when you allow it.** A gezel can search the web and open pages on its own only once outside services are turned on in **Settings → Security & compliance**. What it searches for then goes to that search service: Wikipedia by default, or Brave if you add a Brave Search key.
 
-Apart from web searches, none of these carry your conversations or files. The strictest level in **Settings → Security & compliance** also turns off update checks. [What leaves this computer](../technical/what-leaves-this-computer.md) sets out every kind of traffic against each security level.
+Apart from what you search for and the addresses of pages and repositories Gezel fetches, none of these carry your conversations or files. The strictest level in **Settings → Security & compliance** also turns off update checks, saved web pages and connections. [What leaves this computer](../technical/what-leaves-this-computer.md) sets out every kind of traffic against each security level.
 
 ## Credentials
 

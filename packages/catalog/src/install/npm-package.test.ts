@@ -31,7 +31,10 @@ afterEach(async () => {
   await rm(home, { recursive: true, force: true });
 });
 
-async function fixtureTarball(version = '1.0.0'): Promise<Buffer> {
+async function fixtureTarball(
+  version = '1.0.0',
+  installScript = 'process.exit(0);\n',
+): Promise<Buffer> {
   const fixture = join(home, `fixture-${version}`);
   await mkdir(join(fixture, 'package', 'dist'), { recursive: true });
   await writeFile(
@@ -39,7 +42,7 @@ async function fixtureTarball(version = '1.0.0'): Promise<Buffer> {
     JSON.stringify({ name: 'test-tool', version }),
   );
   await writeFile(join(fixture, 'package', 'dist', 'server.js'), 'export {};\n');
-  await writeFile(join(fixture, 'package', 'install'), 'process.exit(0);\n');
+  await writeFile(join(fixture, 'package', 'install'), installScript);
   const archive = join(home, `test-tool-${version}.tgz`);
   await tar.create({ cwd: fixture, file: archive, gzip: true }, ['package']);
   return readFile(archive);
@@ -142,6 +145,31 @@ describe('npm package toolset installer', () => {
       expect(result.tarballSha256).toBe(sha);
       expect(await readFile(join(result.installPath, 'dist', 'server.js'), 'utf8')).toContain(
         'export',
+      );
+    } finally {
+      await registry.close();
+    }
+  });
+
+  it('installs with the hoisted linker and ignores a parent pnpm workspace', async () => {
+    // A Gezel home inside a pnpm workspace made the staging install act on
+    // that workspace and relink its node_modules. The stand-in pnpm records
+    // the flags it was given.
+    const tarball = await fixtureTarball(
+      '1.0.0',
+      "require('node:fs').writeFileSync('pnpm-args.json', JSON.stringify(process.argv.slice(2)));\n",
+    );
+    const sha = createHash('sha256').update(tarball).digest('hex');
+    const registry = await serveRegistry(tarball);
+    try {
+      const result = await installNpmPackageToolset({
+        manifest: manifest(sha),
+        installRoot: join(home, 'installed'),
+        registry: registry.registry,
+      });
+      const args = JSON.parse(await readFile(join(result.installPath, 'pnpm-args.json'), 'utf8'));
+      expect(args).toEqual(
+        expect.arrayContaining(['--prod', '--config.node-linker=hoisted', '--ignore-workspace']),
       );
     } finally {
       await registry.close();
