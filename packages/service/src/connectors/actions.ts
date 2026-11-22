@@ -32,6 +32,7 @@ import { draftRecipients, enforceConsent } from './consent.js';
 import { corpusDirFor, createConnectorAdapter } from './manager.js';
 import { newDraftId } from './outbox.js';
 import { connectorCorpusStorage } from './storage.js';
+import { sendNeverDelivered } from './unreachable.js';
 
 const log = createLogger('connectors');
 
@@ -367,6 +368,27 @@ export class ConnectorActionManager {
           result = await adapter.runAction(action, committedInput);
         } catch (err) {
           const message = err instanceof Error ? err.message : String(err);
+          if (sendNeverDelivered(err)) {
+            // Nothing went out (no connection, or the service refused it), so
+            // it waits in the outbox again and Commit can retry it. Marked
+            // uncertain, an offline Approve could only be discarded.
+            const back = await this.paths(
+              project,
+              found.bindingId,
+              '_outbox',
+              `${found.safeId}.md`,
+            );
+            await mkdir(dirname(back.abs), { recursive: true });
+            await writeFileAtomic(
+              back.abs,
+              withFrontmatter(
+                { ...found.data, status: 'queued', error: `Not sent: ${message.slice(0, 280)}` },
+                found.body,
+              ),
+            );
+            await rm(sending.abs, { force: true });
+            throw err;
+          }
           await writeFileAtomic(
             sending.abs,
             withFrontmatter(

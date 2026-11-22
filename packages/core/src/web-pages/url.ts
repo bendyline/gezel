@@ -293,6 +293,23 @@ export function redactPageUrl(raw: string): string {
 const TRAILING = /[.,;:!?'"’”)\]}>]+$/;
 
 /**
+ * A markdown link or image, `[label](target "title")`. The chat composer
+ * stores every link it autolinks this way, so `[https://x](https://x)` is the
+ * usual shape of an address a person typed; read as running text, the
+ * address pattern swallowed the brackets and produced `https://x](https://x)`.
+ */
+const MARKDOWN_LINK =
+  /(!?)\[(?:[^[\]\n]|\[[^[\]\n]*\])*\]\(\s*<?((?:[^\s()<>]|\([^\s()<>]*\))+)>?\s*(?:"[^"\n]*"\s*|'[^'\n]*'\s*)?\)/g;
+
+/** The text with each markdown link replaced by its target and each image dropped. */
+function withMarkdownLinkTargets(text: string): string {
+  if (!text.includes('](')) return text;
+  return text.replace(MARKDOWN_LINK, (_match, image: string, target: string) =>
+    image ? ' ' : ` ${target} `,
+  );
+}
+
+/**
  * Web addresses written in a message: `https://…`, `http://…` and `www.…`.
  * Trailing punctuation is trimmed, a closing parenthesis is kept when the
  * address opened one, and duplicates are dropped. Returned normalized, in the
@@ -302,7 +319,7 @@ export function findUrlsInText(text: string, max = 10): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   const re = /\b(?:https?:\/\/|www\.)[^\s<>"'`]+/gi;
-  for (const m of text.matchAll(re)) {
+  for (const m of withMarkdownLinkTargets(text).matchAll(re)) {
     let raw = m[0];
     while (TRAILING.test(raw)) {
       const last = raw.at(-1);

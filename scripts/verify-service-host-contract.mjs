@@ -71,15 +71,37 @@ export function requiredLiteralsFromSource(source) {
   return { keys: [...keys].sort(), values: [...values].sort() };
 }
 
+/**
+ * The flags `build_child_cmdline()` puts on the daemon's command line, like
+ * `--disable-sigusr1`. They sit inside larger wide literals
+ * (`L"\\Gezel.exe\" --disable-sigusr1 \""`), so each flag is looked for on
+ * its own. 1.26326.112 added that flag to the source while the pinned
+ * native-v0.1.63 host still launched the daemon without it, and the env-key
+ * check above passed.
+ */
+export function requiredFlagsFromSource(source) {
+  const body = /std::wstring\s+build_child_cmdline\([^)]*\)\s*\{([\s\S]*?)\n\}/.exec(source);
+  if (!body) throw new Error('could not locate build_child_cmdline() in main.cpp');
+  const flags = new Set();
+  for (const [, literal] of body[1].matchAll(/L"((?:[^"\\]|\\.)*)"/g)) {
+    for (const [flag] of literal.matchAll(/--[a-z0-9][a-z0-9-]*/g)) flags.add(flag);
+  }
+  return [...flags].sort();
+}
+
 /** UTF-16LE, the encoding a wide string literal lands in. */
 export function binaryContainsWide(buffer, needle) {
   return buffer.includes(Buffer.from(needle, 'utf16le'));
 }
 
 async function main() {
-  const target = process.argv[2];
+  const args = process.argv.slice(2);
+  const strictFlags = args.includes('--strict-flags');
+  const target = args.find((arg) => !arg.startsWith('--'));
   if (!target) {
-    console.error('usage: verify-service-host-contract.mjs <path-to-gezel-service-host.exe>');
+    console.error(
+      'usage: verify-service-host-contract.mjs [--strict-flags] <path-to-gezel-service-host.exe>',
+    );
     process.exit(2);
   }
   const [binary, source] = await Promise.all([
@@ -100,8 +122,22 @@ async function main() {
     }
     process.exit(1);
   }
+  // A missing launch flag is reported, and fails only with --strict-flags:
+  // fixing it needs a native release, which a release build cannot cut.
+  const flags = requiredFlagsFromSource(source);
+  const missingFlags = flags.filter((flag) => !binaryContainsWide(binary, flag));
+  if (missingFlags.length > 0) {
+    const message = `${target} starts the daemon without ${missingFlags.join(', ')}, which build_child_cmdline() in this checkout passes. Cut a native-v* release and re-pin it with scripts/pin-native-release.mjs.`;
+    console.error(`[service-host] ${message}`);
+    if (process.env.GITHUB_ACTIONS) {
+      console.log(`::warning title=Service host launch flags::${message}`);
+    }
+    if (strictFlags) process.exit(1);
+  }
   console.log(
-    `[service-host] launch contract intact — ${keys.length} env keys and ${values.length} literal values present`,
+    `[service-host] launch contract intact — ${keys.length} env keys and ${values.length} literal values present${
+      missingFlags.length > 0 ? `; ${missingFlags.length} launch flag(s) missing` : ''
+    }`,
   );
 }
 

@@ -118,6 +118,69 @@ describe('FilterProxy', () => {
     expect(stats.connections).toBe(1);
   });
 
+  /** CONNECT, then the status line, or 'pending' when the allowed upstream never answers. */
+  function connectSettled(proxyPort: number, target: string): Promise<string> {
+    return new Promise<string>((resolve) => {
+      const s = net.connect(proxyPort, '127.0.0.1', () =>
+        s.write(`CONNECT ${target} HTTP/1.1\r\n\r\n`),
+      );
+      const done = (v: string) => {
+        s.destroy();
+        resolve(v);
+      };
+      s.once('data', (d) => done(d.toString('latin1').split('\r\n')[0] ?? ''));
+      s.on('error', () => done('error'));
+      setTimeout(() => done('pending'), 400);
+    });
+  }
+
+  it('refuses a typed host that first answered publicly and then answers privately', async () => {
+    // DNS rebinding: a pasted link serves its page from a public address, then
+    // its script asks the same name again and gets the router's.
+    // 198.51.100.0/24 is a documentation range: public to the proxy, routed nowhere.
+    let answer = ['198.51.100.7'];
+    const p = await proxy({ privateHosts: ['attacker.test'], resolve: async () => answer });
+    p.beginPage('attacker.test');
+    expect(await connectSettled(p.port, 'attacker.test:443')).not.toMatch(/403/);
+    answer = ['192.168.1.1'];
+    expect(await connectThrough(p.port, 'attacker.test:443')).toMatch(/403/);
+    p.endPage();
+    // The pin outlives the page, so the next page on that host is refused too.
+    p.beginPage('attacker.test');
+    expect(await connectThrough(p.port, 'attacker.test:443')).toMatch(/403/);
+    expect(p.endPage().refused.rebinding).toBe(1);
+  });
+
+  it('refuses a typed host whose first answer mixes public and private addresses', async () => {
+    const p = await proxy({
+      privateHosts: ['attacker.test'],
+      resolve: async () => ['198.51.100.7', '10.0.0.5'],
+    });
+    p.beginPage('attacker.test');
+    expect(await connectThrough(p.port, 'attacker.test:443')).toMatch(/403/);
+    expect(p.endPage().refused.rebinding).toBe(1);
+  });
+
+  it('refuses, and does not throw, when the page ends while a lookup is running', async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const p = await proxy({
+      privateHosts: ['wiki.corp'],
+      resolve: async () => {
+        await gate;
+        return ['10.0.0.5'];
+      },
+    });
+    p.beginPage('wiki.corp');
+    const reply = connectThrough(p.port, 'wiki.corp:443');
+    await new Promise((r) => setTimeout(r, 50));
+    p.endPage();
+    release();
+    expect(await reply).toMatch(/403/);
+  });
+
   it('keeps loopback and metadata out of reach for a typed host, in any IPv6 spelling', async () => {
     // The site the person typed answers its own name. A prefix check let the
     // IPv4-mapped forms through, because the private-address rule is waived

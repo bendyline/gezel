@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type GezelConfig, SECURITY_PRESETS } from '@bendyline/gezel';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Store } from '../../fs/store.js';
 import { FakePageCapturer } from '../../page-capture/fake-capturer.js';
 import { ConnectorManager } from '../manager.js';
@@ -14,6 +14,10 @@ import { WebsiteService } from './website-service.js';
 import { registerWebsiteAdapters } from './website.js';
 
 registerWebsiteAdapters();
+
+// A save runs a capture, a markdown conversion and a corpus write; a cold or
+// loaded worker took the first test past the default 5 s.
+vi.setConfig({ testTimeout: 30_000 });
 
 const MANIFEST = {
   schemaVersion: 1 as const,
@@ -161,6 +165,28 @@ describe('WebsiteService', () => {
       'https://other.test/article',
     ]);
     expect(list.pages.filter((p) => !p.path).every((p) => p.state === 'skipped')).toBe(true);
+  });
+
+  it('keeps saving pasted pages past the 25 addresses a followed connection allows', async () => {
+    const w = world();
+    await w.websites.savePage(w.project(), 'other.test/article');
+    const binding = (
+      w.project() as { connectors: { id: string; config: Record<string, unknown> }[] }
+    ).connectors[0]!;
+    const many = (n: number) =>
+      Array.from({ length: n }, (_, i) => `https://page${i}.example.test/`);
+    await w.connectors.patchBinding(w.project(), binding.id, {
+      config: { ...binding.config, sites: ['https://other.test/article', ...many(24)] },
+    });
+    const saved = await w.websites.savePage(w.project(), 'https://site.test/guide');
+    expect(saved.page.state).toBe('saved');
+
+    await w.connectors.patchBinding(w.project(), binding.id, {
+      config: { ...binding.config, sites: many(500) },
+    });
+    await expect(w.websites.savePage(w.project(), 'https://site.test/guide/deep')).rejects.toThrow(
+      /already keeps 500 pages/,
+    );
   });
 
   it('saves a pasted page into the connection that already found it, even past a redirect', async () => {

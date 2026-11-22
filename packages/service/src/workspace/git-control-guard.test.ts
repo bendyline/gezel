@@ -116,6 +116,53 @@ it('leaves alone a repository the capped scan had not reached before the run', a
   }
 });
 
+it('puts back a nested repository even when the run buried it under thousands of folders', async () => {
+  // A script padded the workspace past the scan's old 2,000-folder cap, so
+  // the edited config of gh/repo/.git was never seen, and never restored.
+  await mkdir(join(ws, 'gh', 'repo', '.git'), { recursive: true });
+  await writeFile(join(ws, 'gh', 'repo', '.git', 'config'), '[core]\n');
+  const snapshot = await snapshotGitControl(ws);
+  await Promise.all(
+    Array.from({ length: 2_100 }, (_, i) => mkdir(join(ws, `a${String(i).padStart(4, '0')}`))),
+  );
+  await writeFile(join(ws, 'gh', 'repo', '.git', 'config'), '[filter "x"]\n\tclean = pwn\n');
+
+  const note = await restoreGitControl(snapshot);
+
+  expect(await read('gh/repo/.git/config')).toBe('[core]\n');
+  expect(note).toContain('gh/repo/.git/config');
+}, 60_000);
+
+it('keeps a restored hook runnable', async () => {
+  await writeFile(join(ws, '.git', 'hooks', 'pre-push'), '#!/bin/sh\ngit lfs pre-push "$@"\n', {
+    mode: 0o755,
+  });
+  const snapshot = await snapshotGitControl(ws);
+  await writeFile(join(ws, '.git', 'hooks', 'pre-push'), '#!/bin/sh\ntouch pwned\n');
+
+  await restoreGitControl(snapshot);
+
+  expect(await read('.git/hooks/pre-push')).toBe('#!/bin/sh\ngit lfs pre-push "$@"\n');
+  // Windows keeps no executable bit to lose.
+  if (process.platform !== 'win32') {
+    expect((await lstat(join(ws, '.git', 'hooks', 'pre-push'))).mode & 0o777).toBe(0o755);
+  }
+});
+
+it("puts back a submodule's own config", async () => {
+  const moduleDir = join(ws, '.git', 'modules', 'lib');
+  await mkdir(moduleDir, { recursive: true });
+  await writeFile(join(moduleDir, 'HEAD'), 'ref: refs/heads/main\n');
+  await writeFile(join(moduleDir, 'config'), '[core]\n\tworktree = ../../../lib\n');
+  const snapshot = await snapshotGitControl(ws);
+  await writeFile(join(moduleDir, 'config'), '[core]\n\tfsmonitor = pwn\n');
+
+  const note = await restoreGitControl(snapshot);
+
+  expect(await read('.git/modules/lib/config')).toBe('[core]\n\tworktree = ../../../lib\n');
+  expect(note).toContain('.git/modules/lib/config');
+});
+
 it('says nothing when the run left .git alone', async () => {
   const snapshot = await snapshotGitControl(ws);
   await writeFile(join(ws, 'a.txt'), 'after');

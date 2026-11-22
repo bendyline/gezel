@@ -1397,7 +1397,7 @@ ${workspaceOrientation} ${workspaceDelegationGuidance}`;
             ? `**Browser tools are not part of this role's kit** (they are installed on this machine). Workspace HTML is runtime-checked automatically after each write${canValidate ? '; call `validate({ path: "index.html" })` for an explicit HTML/JavaScript lint plus headless-load gate' : ''}. If the user needs live browsing or scraping, suggest a web-focused teammate (Web Developer, Researcher, Designer) or ask them to retag your role. Don't emit fake \`<browser_*>\` markup.`
             : browserAutomationUnavailable
               ? "**No browser tools here.** You can't open, browse or scrape web pages in this app. If the person asks for that, say so plainly. Don't emit fake `<browser_*>` markup."
-              : "**Browser automation is not installed.** If the user asks you to browse or scrape, tell them the Playwright toolset hasn't been bootstrapped (Settings → Daemon). Don't emit fake `<browser_*>` markup.";
+              : "**Browser automation is not installed.** If the user asks you to browse or scrape, tell them Gezel's web browsing tools are not set up on this computer yet, and that restarting Gezel tries the setup again. Don't emit fake `<browser_*>` markup.";
 
   // Is the active step a "gate" — a phase the model must hold at until its
   // exit criteria are met, rather than advance past on its first attempt?

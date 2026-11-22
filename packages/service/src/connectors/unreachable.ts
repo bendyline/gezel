@@ -110,6 +110,47 @@ export function unreachableFrom(
   return { offline: !hasNetwork(), code: code ?? 'FETCH_FAILED', ...(host ? { host } : {}) };
 }
 
+/**
+ * Codes that mean no connection was ever made, so nothing was sent. A reset,
+ * a broken pipe or a timeout can come after the request went out, and are
+ * left out on purpose.
+ */
+const NEVER_CONNECTED = new Set([
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'ENETUNREACH',
+  'ENETDOWN',
+  'EHOSTUNREACH',
+  'EHOSTDOWN',
+  'ECONNREFUSED',
+  'UND_ERR_CONNECT_TIMEOUT',
+  // nodemailer, before the message is handed over: the address lookup, the
+  // connection, TLS, sign-in, or the server refusing the recipients.
+  'EDNS',
+  'ECONNECTION',
+  'ETLS',
+  'EAUTH',
+  'EENVELOPE',
+]);
+
+/**
+ * Whether an error proves a send never reached its service: no connection
+ * was made, or the service answered with a refusal (an HTTP 4xx other than
+ * 408). Anything else may have been delivered, and stays uncertain.
+ */
+export function sendNeverDelivered(err: unknown): boolean {
+  for (const e of chain(err)) {
+    if (e.name === 'AbortError') return false;
+    const code = typeof e.code === 'string' ? e.code : undefined;
+    if (code && NEVER_CONNECTED.has(code)) return true;
+    const status = e.status ?? e.statusCode;
+    if (typeof status === 'number' && status >= 400 && status < 500 && status !== 408) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** One plain sentence: what could not be reached, and why. */
 export function describeUnreachable(u: Unreachable, service?: string): string {
   const what = u.host ?? service ?? 'the service';

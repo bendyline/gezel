@@ -34,7 +34,12 @@ import {
   readSession,
   writeSession,
 } from './website-session.js';
-import { WEBSITE_TYPE_ID, parseWebsiteConfig, siteKey } from './website.js';
+import {
+  SAVED_PAGES_MAX_ADDRESSES,
+  WEBSITE_TYPE_ID,
+  parseWebsiteConfig,
+  siteKey,
+} from './website.js';
 
 const log = createLogger('connectors');
 
@@ -238,6 +243,11 @@ export class WebsiteService {
       binding = this.websiteBindings(project).find((b) => b.config?.savedPages === true);
       if (binding) {
         const sites = parseWebsiteConfig(binding.config).config.sites;
+        if (!sites.includes(url) && sites.length >= SAVED_PAGES_MAX_ADDRESSES) {
+          throw new Error(
+            `This project's Saved pages already keeps ${SAVED_PAGES_MAX_ADDRESSES} pages, the most it can. Remove some you no longer need, or follow the site with a connection of its own.`,
+          );
+        }
         const sessionPages = { ...((binding.config.sessionPages as Record<string, string>) ?? {}) };
         if (sessionId) sessionPages[url] = sessionId;
         if (!sites.includes(url) || sessionId) {

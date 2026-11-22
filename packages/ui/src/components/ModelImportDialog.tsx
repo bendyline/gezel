@@ -11,6 +11,7 @@ import { apiErrorMessage } from '../api-error.js';
 import { api } from '../api.js';
 import { announceModelInventoryChanged } from '../model-inventory.js';
 import { Dialog, Select } from '../primitives/index.js';
+import { localEngineSettingsLabel } from '../views/local-engine-label.js';
 import { HuggingFaceRepoLink } from './HuggingFaceRepoLink.js';
 import { InstallProgressRow } from './InstallProgressRow.js';
 import { formatContextWindow } from './model-context.js';
@@ -19,7 +20,7 @@ import { formatBytes } from './model-memory-copy.js';
 /**
  * Adding a model the catalog does not carry: from a Hugging Face link (a GGUF
  * repo, or an MLX build on Apple silicon), or from GGUF files on this
- * computer. Opened from Settings → Models, or by Hugging Face's "Use this
+ * computer. Opened from an engine's page in Settings, or by Hugging Face's "Use this
  * model" menu through `gezel://model/huggingface/<owner>/<name>`. Nothing
  * downloads or is added until the person confirms, and the review refuses a
  * model that fails a check. Afterwards the fitness check tries the model for
@@ -686,6 +687,18 @@ function ReviewBody({
   );
 }
 
+/**
+ * Where a model's row lives in Settings: its engine's page, named as the
+ * sidebar names it. "Settings → Models" named no page at all.
+ */
+function modelSettingsPlace(engine: ModelImportEngine): string {
+  const page = localEngineSettingsLabel(
+    engine === 'mlx' ? 'mlx' : 'llama-cpp',
+    window.__GEZEL__?.platform,
+  );
+  return `Settings → ${page}`;
+}
+
 function CheckingBody({ phase }: { phase: Extract<Phase, { kind: 'checking' }> }) {
   if (phase.probing) {
     return (
@@ -696,7 +709,7 @@ function CheckingBody({ phase }: { phase: Extract<Phase, { kind: 'checking' }> }
         </p>
         <p className="muted small">
           This can take a few minutes. You can close this window; the result appears beside the
-          model in Settings → Models.
+          model in {modelSettingsPlace(phase.engine)}.
         </p>
       </div>
     );
@@ -727,7 +740,7 @@ function CheckingBody({ phase }: { phase: Extract<Phase, { kind: 'checking' }> }
       <p className="muted small">
         {passed
           ? 'It is ready. Choose it in the model picker, or give it to a crew member in their settings.'
-          : 'Gezel will not pick this model for work on its own, but you can still choose it yourself. You can remove it in Settings → Models.'}
+          : `Gezel will not pick this model for work on its own, but you can still choose it yourself. You can remove it in ${modelSettingsPlace(phase.engine)}.`}
       </p>
     </div>
   );

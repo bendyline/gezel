@@ -13,7 +13,10 @@ import { buildTurnUsage } from '@bendyline/gezel-inference/internal/providers/us
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
 import { CLAUDE_CLI_AUTH_ENV, agentCliEnv, withMcpBootstrapCode } from '../agent-cli-env.js';
 import { isHttpSpec, isStdioSpec } from '../mcp-bridge.js';
-import { claudeCredentialDenyRules } from './credential-deny.js';
+import {
+  CLAUDE_PROJECT_SETTINGS_DENY_RULES,
+  claudeCredentialDenyRules,
+} from './credential-deny.js';
 import type { ClaudePermissionMode } from './provider.js';
 import {
   claudeRateLimitBuckets,
@@ -135,8 +138,21 @@ export interface WorkerTurnHooks {
   knownSecretValues?: Set<string>;
 }
 
+/**
+ * Whether this Claude Code takes `--setting-sources`, which arrived with
+ * 2.0. An older CLI refuses an option it does not know, so the worker leaves
+ * it out there rather than fail every turn. An unreadable version is
+ * assumed current.
+ */
+export function claudeSupportsSettingSources(version: string | undefined): boolean {
+  const m = /(\d+)\.\d+\.\d+/.exec(version ?? '');
+  return !m || Number(m[1]) >= 2;
+}
+
 export interface ClaudeWorkerOpts {
   binaryPath: string;
+  /** `claude --version` as detected, to pick the flags this CLI accepts. */
+  binaryVersion?: string;
   model: string;
   reasoningEffort?: ClaudeReasoningEffort;
   permissionMode: ClaudePermissionMode;
@@ -680,6 +696,18 @@ export class ClaudeWorker {
     // security posture's toolset ceiling and every tool clamp. A session
     // Gezel gives no servers must get none.
     args.push('--strict-mcp-config');
+    // The person's own settings only. A project's `.claude/settings*.json` is
+    // a file in the workspace a gezel can write, and print mode skips Claude
+    // Code's trust prompt, so a hook planted there ran commands as the person
+    // at a security level that had taken the gezel's shell away (1.26326.112
+    // release audit). The `--settings` file below is loaded either way.
+    if (claudeSupportsSettingSources(this.opts.binaryVersion)) {
+      args.push('--setting-sources', 'user');
+    } else {
+      log.warn(
+        `[anthropic-cli] Claude Code ${this.opts.binaryVersion} predates --setting-sources; update it so a folder's own .claude settings cannot load`,
+      );
+    }
     if (this.quotaSettingsPath) {
       args.push('--settings', this.quotaSettingsPath);
     }
@@ -742,9 +770,10 @@ export class ClaudeWorker {
       runtimeDir: this.opts.runtimeDir,
       projectId: this.opts.context.projectId,
       sessionId: this.opts.context.sessionId,
-      denyRules: claudeCredentialDenyRules(
-        this.opts.mcpServer?.env.GEZEL_HOME ?? process.env.GEZEL_HOME,
-      ),
+      denyRules: [
+        ...claudeCredentialDenyRules(this.opts.mcpServer?.env.GEZEL_HOME ?? process.env.GEZEL_HOME),
+        ...CLAUDE_PROJECT_SETTINGS_DENY_RULES,
+      ],
     });
   }
 

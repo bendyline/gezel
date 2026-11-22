@@ -15,7 +15,11 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { binaryContainsWide, requiredLiteralsFromSource } from './verify-service-host-contract.mjs';
+import {
+  binaryContainsWide,
+  requiredFlagsFromSource,
+  requiredLiteralsFromSource,
+} from './verify-service-host-contract.mjs';
 
 const execFileAsync = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
@@ -96,6 +100,41 @@ test('a complete binary passes and a stale one fails with the missing key named'
       assert.match(err.stderr, /pin-native-release/);
       return true;
     });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('the launch flags are derived from the real build_child_cmdline()', async () => {
+  const flags = requiredFlagsFromSource(await readFile(MAIN_CPP, 'utf8'));
+  // Without it, any process of the service's account could open the
+  // daemon's inspector (process._debugProcess on Windows).
+  assert.ok(flags.includes('--disable-sigusr1'), '--disable-sigusr1 must be required');
+});
+
+test('a host that starts the daemon without a launch flag is reported, and fails when strict', async () => {
+  // native-v0.1.63's host: every env key, but no --disable-sigusr1.
+  const dir = await mkdtemp(join(tmpdir(), 'gezel-host-flags-'));
+  try {
+    const { keys, values } = requiredLiteralsFromSource(await readFile(MAIN_CPP, 'utf8'));
+    const stale = join(dir, 'stale.exe');
+    await writeFile(stale, fakeBinary([...keys, ...values, 'Gezel.exe" "']));
+    const lenient = await execFileAsync(process.execPath, [SCRIPT, stale]);
+    assert.match(lenient.stderr, /without --disable-sigusr1/);
+    assert.match(lenient.stdout, /1 launch flag\(s\) missing/);
+    await assert.rejects(
+      execFileAsync(process.execPath, [SCRIPT, '--strict-flags', stale]),
+      (err) => {
+        assert.equal(err.code, 1);
+        assert.match(err.stderr, /pin-native-release/);
+        return true;
+      },
+    );
+
+    const current = join(dir, 'current.exe');
+    await writeFile(current, fakeBinary([...keys, ...values, 'Gezel.exe" --disable-sigusr1 "']));
+    const ok = await execFileAsync(process.execPath, [SCRIPT, '--strict-flags', current]);
+    assert.doesNotMatch(ok.stdout, /missing/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

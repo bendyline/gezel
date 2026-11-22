@@ -125,6 +125,8 @@ export async function runWorkspaceScript(
       input: '',
       timeoutMs: timeout,
       extraReadPaths: [artifactsDir],
+      // The artifacts drawer is read-only to a script; a link into it would carry writes.
+      linkTargets: 'write',
       stripTypes: true,
       denyNet: await workspaceScriptDeniesNetwork(store),
       scriptArgs: opts.args ?? [],

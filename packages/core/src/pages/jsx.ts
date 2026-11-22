@@ -21,10 +21,19 @@ function attribute(part: HtmlElementPart, name: string) {
   return part.attributes.find((entry) => entry.name === name);
 }
 
-/** A script whose body is JSX for an in-browser compiler. */
-export function isInlineJsxScript(part: HtmlElementPart): boolean {
+function isJsxScript(part: HtmlElementPart): boolean {
   if (part.tag !== 'script') return false;
   return JSX_TYPES.has(attribute(part, 'type')?.value.trim().toLowerCase() ?? '');
+}
+
+/**
+ * A script whose body is JSX for an in-browser compiler. One with a `src`
+ * is not inline: its empty body was compiled into an empty module and the
+ * Babel tag removed, so `<script type="text/babel" src="app.jsx">` pages
+ * rendered blank (1.26326.112 release audit). Those are left for Babel.
+ */
+export function isInlineJsxScript(part: HtmlElementPart): boolean {
+  return isJsxScript(part) && !attribute(part, 'src');
 }
 
 /** Babel's in-browser compiler, by any CDN spelling. */
@@ -64,7 +73,9 @@ export function compileInlineJsx(
       : `<script type="module">${compiled.code.replace(/<\/(script)/gi, '<\\/$1')}</script>`;
     edits.push({ start: part.start, end: part.end, text });
   }
-  for (const part of parts) {
+  // Babel stays while a JSX script it would fetch and compile itself remains.
+  const babelStillNeeded = parts.some((part) => isJsxScript(part) && attribute(part, 'src'));
+  for (const part of babelStillNeeded ? [] : parts) {
     const src = attribute(part, 'src')?.value;
     if (part.tag === 'script' && src && isBabelStandaloneUrl(src)) {
       edits.push({ start: part.start, end: part.end, text: '' });

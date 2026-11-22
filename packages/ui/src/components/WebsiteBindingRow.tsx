@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { apiErrorMessage } from '../api-error.js';
 import { api } from '../api.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import {
@@ -104,7 +105,7 @@ export function WebsiteBindingRow({
     try {
       await work();
     } catch (err) {
-      onNotice(err instanceof Error ? err.message : String(err), true);
+      onNotice(apiErrorMessage(err), true);
     } finally {
       setBusy(null);
     }

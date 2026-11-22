@@ -474,8 +474,13 @@ binary wrapped in:
    anywhere. Where nothing confines the file system by real path (Linux, Windows without the
    container) the run is refused when its folder holds a link that resolves outside the
    granted roots, dangling links included (`sandbox/escaping-links.ts`, at most 500,000
-   entries, refused past that). A script cannot make such a link: `symlink`, `link` and
-   renames out are all refused under `--permission`.
+   entries, refused past that). Workspace scripts (`run_nodejs_script`, `derive_file`) count
+   only their write roots as granted (`linkTargets: 'write'`), since a write through a link
+   into the read-only artifacts drawer lands there. A link to a root-owned file this account
+   cannot write (`.venv/bin/python3 -> /usr/bin/python3`) is allowed on POSIX: it reaches
+   nothing a script could not read by name, and the kernel refuses writes through it. A script
+   cannot make such a link: `symlink`, `link` and renames out are all refused under
+   `--permission`.
 
 **The daemon's own inspector.** Any process of the account can open a Node process's
 inspector — SIGUSR1 on POSIX, `process._debugProcess(pid)` on Windows — and then run code in
@@ -589,6 +594,15 @@ Three more layers keep credentials out of what an agent's own tools can reach at
 - **Deny rules.** Claude's settings file denies `Read`/`Edit` of the credential files under
   the Gezel home (`anthropic-cli/credential-deny.ts`); a shell ignores those rules, which is
   why the shell itself is gated.
+- **No settings from the workspace.** A project's `.claude/settings*.json` (and anything in
+  `.codex/`) is a file in the workspace, and a hook it names runs as the person when the CLI
+  starts there; print mode skips Claude Code's trust prompt, so a gezel that planted one got a
+  command run below `free` (1.26326.112 release audit). The Claude worker passes
+  `--setting-sources user`, so only the person's own settings and Gezel's `--settings` file
+  load; the deny rules also cover `Edit(**/.claude/settings*.json)`; and the Store and the
+  change-proposal drafter refuse a gezel's write to those paths
+  (`assertNotAgentCliSettingsPath` in inference `fs/safe-paths.ts`). The person may still
+  edit them.
 - **One-shots run without tools.** A session built with no context (an about, a summary, a
   script's `llm.oneShot`) runs Claude with no built-ins in `plan` mode and Codex in its
   read-only sandbox with the shell off, each in an empty folder. Codex's had run in the

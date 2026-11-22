@@ -23,6 +23,20 @@ const REPO_RULE: PromptConnectorRule = {
 };
 
 describe('findPromptConnectorCandidates', () => {
+  it('offers the addresses in a draft the composer stored as markdown links', () => {
+    const draft =
+      'Can you summarize [https://example.com](https://example.com)? Also [https://www.iana.org/help/example-domains](https://www.iana.org/help/example-domains) please.';
+    expect(
+      findPromptConnectorCandidates(draft).map(({ subject, label }) => ({ subject, label })),
+    ).toEqual([
+      { subject: 'https://example.com/', label: 'example.com' },
+      {
+        subject: 'https://www.iana.org/help/example-domains',
+        label: 'www.iana.org/help/example-domains',
+      },
+    ]);
+  });
+
   it('offers each web address in a draft as a page to include', () => {
     expect(
       findPromptConnectorCandidates('Can you summarize www.microsoft.com and gezel.com? No.'),

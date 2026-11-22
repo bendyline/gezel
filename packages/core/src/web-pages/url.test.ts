@@ -110,4 +110,34 @@ describe('findUrlsInText', () => {
       'https://a.test/',
     ]);
   });
+
+  // The chat composer stores every address it autolinks as a markdown link.
+  it('reads the target of a markdown link, as the composer stores a typed address', () => {
+    expect(
+      findUrlsInText(
+        'Can you summarize [https://example.com](https://example.com) in two short sentences? Also [https://www.iana.org/help/example-domains](https://www.iana.org/help/example-domains) please.',
+      ),
+    ).toEqual(['https://example.com/', 'https://www.iana.org/help/example-domains']);
+  });
+
+  it('follows the target, not the label, and keeps parentheses inside the target', () => {
+    expect(
+      findUrlsInText(
+        'See [the guild article](https://en.wikipedia.org/wiki/Guild_(organization) "Guilds") and [www.a.test](https://b.test/page).',
+      ),
+    ).toEqual(['https://en.wikipedia.org/wiki/Guild_(organization)', 'https://b.test/page']);
+  });
+
+  it('skips markdown images and finds angle-bracket autolinks', () => {
+    expect(
+      findUrlsInText('![chart](https://img.test/chart.png) <https://docs.test/start> done'),
+    ).toEqual(['https://docs.test/start']);
+  });
+
+  it('stays linear on long unclosed link syntax', () => {
+    const text = `[x](https://a.test/${' '.repeat(50_000)}`;
+    const started = performance.now();
+    expect(findUrlsInText(text)).toEqual(['https://a.test/']);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
 });

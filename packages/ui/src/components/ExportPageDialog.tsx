@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { apiErrorMessage } from '../api-error.js';
 import { api } from '../api.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { downloadBlob } from './DocumentExport/download-blob.js';
@@ -51,7 +52,7 @@ export function ExportPageDialog({
       if (exported.notes.length) setNotes(exported.notes);
       else close();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(apiErrorMessage(err));
     }
   };
 

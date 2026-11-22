@@ -280,7 +280,7 @@ describe('renderAvailableToolsBlock — bridge-failed override', () => {
     expect(out).toContain('MCP bridge failed');
     expect(out).toContain('function-calling schema is **empty**');
     expect(out).toContain('Do NOT emit `<tool_call>`');
-    expect(out).toContain('My tool bridge failed to start');
+    expect(out).toContain("My tools didn't start");
   });
 
   it('renders the bridge-failed notice even for large/cloud tiers (which normally skip the block)', () => {

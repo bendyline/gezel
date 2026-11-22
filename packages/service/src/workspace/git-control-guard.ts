@@ -1,5 +1,6 @@
 import type { Dirent } from 'node:fs';
 import {
+  chmod,
   lstat,
   mkdir,
   readFile,
@@ -37,7 +38,18 @@ const CONTROL_FILES = ['config', 'config.worktree', 'commondir', join('info', 'a
 const HOOKS = 'hooks';
 const SCAN_DEPTH = 2;
 const MAX_DIRS_SCANNED = 2_000;
+/**
+ * The scan after a run looks further. Every repository the snapshot saw is
+ * checked by its own path, so this bounds only the search for new ones; a
+ * script that made thousands of folders first had hidden a new `.git` from a
+ * scan stopped at 2,000 (1.26326.112 release audit).
+ */
+const MAX_DIRS_SCANNED_AFTER_RUN = 50_000;
 const SKIP_DIRS = new Set(['node_modules']);
+/** Submodule git directories under `.git/modules`: how deep, and how many. */
+const MODULES_DIR = 'modules';
+const MODULE_SCAN_DEPTH = 3;
+const MAX_MODULE_GIT_DIRS = 50;
 
 type EntryKind = 'dir' | 'file' | 'link';
 
@@ -52,6 +64,12 @@ type GitEntrySnapshot =
       /** Every name in `hooks/` (files, and anything else, which is left alone). */
       hookNames: Set<string>;
       hookFiles: Map<string, Buffer>;
+      /**
+       * Permission bits of each control file and hook (`hooks/<name>`), so a
+       * hook put back still runs: rewritten without them, an edited
+       * `pre-commit` or Git LFS `pre-push` came back disabled.
+       */
+      modes: Map<string, number>;
       /**
        * Control folders that were already links (a team's shared hooks
        * folder) → their targets. Left alone while they still point there.
@@ -78,9 +96,54 @@ export async function snapshotGitControl(workspaceDir: string): Promise<GitContr
   const scan = await findGitEntries(workspaceDir);
   for (const [path, kind] of scan.found) {
     const snapshot = await snapshotEntry(path, kind);
-    if (snapshot) entries.set(path, snapshot);
+    if (!snapshot) continue;
+    entries.set(path, snapshot);
+    // A submodule's git directory lives in `.git/modules/<name>`, with its
+    // own config and hooks that git reads when it works in the submodule.
+    if (snapshot.kind !== 'dir' || snapshot.linkedDirs.size > 0) continue;
+    for (const moduleDir of await findModuleGitDirs(join(path, MODULES_DIR))) {
+      const moduleSnapshot = await snapshotEntry(moduleDir, 'dir');
+      if (moduleSnapshot) entries.set(moduleDir, moduleSnapshot);
+    }
   }
   return { root: workspaceDir, entries, truncated: scan.truncated, takenAt };
+}
+
+/** Git directories below `.git/modules` (they hold a `HEAD` and a `config`). */
+async function findModuleGitDirs(modulesDir: string): Promise<string[]> {
+  const found: string[] = [];
+  let frontier = [modulesDir];
+  for (let depth = 0; depth < MODULE_SCAN_DEPTH && frontier.length > 0; depth++) {
+    const next: string[] = [];
+    for (const dir of frontier) {
+      for (const entry of await readDirEntries(dir)) {
+        if (!entry.isDirectory()) continue;
+        const full = join(dir, entry.name);
+        const isGitDir =
+          (await readRegularFile(join(full, 'HEAD'))) !== null &&
+          (await lstat(join(full, 'config')).catch(() => null))?.isFile() === true;
+        if (isGitDir) {
+          found.push(full);
+          if (found.length >= MAX_MODULE_GIT_DIRS) return found;
+          // A nested submodule's git directory is inside its parent's.
+          next.push(join(full, MODULES_DIR));
+        } else {
+          next.push(full);
+        }
+      }
+    }
+    frontier = next;
+  }
+  return found;
+}
+
+/** What is at `path` now: a folder, file or link, or undefined when nothing is. */
+async function entryKindAt(path: string): Promise<EntryKind | undefined> {
+  const stat = await lstat(path).catch(() => null);
+  if (!stat) return undefined;
+  if (stat.isSymbolicLink()) return 'link';
+  if (stat.isDirectory()) return 'dir';
+  return 'file';
 }
 
 /**
@@ -101,11 +164,15 @@ export async function restoreGitControl(snapshot: GitControlSnapshot): Promise<s
   const rel = (path: string) => relative(snapshot.root, path).split(sep).join('/');
   const note = (path: string) => restored.push(rel(path));
 
-  const now = (await findGitEntries(snapshot.root)).found;
-  const vanished = [...snapshot.entries].filter(
-    (entry): entry is [string, Extract<GitEntrySnapshot, { kind: 'dir' }>] =>
-      entry[1].kind === 'dir' && !now.has(entry[0]),
-  );
+  const scan = await findGitEntries(snapshot.root, MAX_DIRS_SCANNED_AFTER_RUN);
+  const now = scan.found;
+  // A repository the snapshot saw is looked up by its own path, so a scan
+  // the run padded past its folder cap cannot hide one from being restored.
+  const kindAt = async (path: string) => now.get(path) ?? (await entryKindAt(path));
+  const vanished: [string, Extract<GitEntrySnapshot, { kind: 'dir' }>][] = [];
+  for (const [path, before] of snapshot.entries) {
+    if (before.kind === 'dir' && (await kindAt(path)) !== 'dir') vanished.push([path, before]);
+  }
   for (const [path, kind] of now) {
     if (snapshot.entries.has(path)) continue;
     if (kind !== 'dir') {
@@ -131,7 +198,7 @@ export async function restoreGitControl(snapshot: GitControlSnapshot): Promise<s
   }
 
   for (const [path, before] of snapshot.entries) {
-    const kind = now.get(path);
+    const kind = await kindAt(path);
     if (before.kind === 'dir') {
       if (kind === 'dir') {
         for (const changed of await restoreGitDir(path, before)) note(join(path, changed));
@@ -165,6 +232,11 @@ export async function restoreGitControl(snapshot: GitControlSnapshot): Promise<s
   if (setAside.length > 0) {
     notes.push(
       `[gezel] Set aside ${setAside.join(', ')}: the script made a git repository, and git could run commands from its files. Nothing in it was deleted; rename it back to .git if you trust it.`,
+    );
+  }
+  if (scan.truncated) {
+    notes.push(
+      `[gezel] The script left more than ${MAX_DIRS_SCANNED_AFTER_RUN.toLocaleString('en-US')} folders, so Gezel could not check all of them for a .git folder it made. Remove the folders it does not need.`,
     );
   }
   return notes.length > 0 ? notes.join('\n') : null;
@@ -212,9 +284,15 @@ async function snapshotEntry(path: string, kind: EntryKind): Promise<GitEntrySna
     if (target !== null) linkedDirs.set(name, target);
   }
   const files = new Map<string, Buffer | null>();
+  const modes = new Map<string, number>();
+  const keepMode = async (name: string) => {
+    const stat = await lstat(join(path, name)).catch(() => null);
+    if (stat?.isFile()) modes.set(name, stat.mode & 0o7777);
+  };
   for (const name of CONTROL_FILES) {
     if (linkedDirs.has(firstSegment(name))) continue;
     files.set(name, await readRegularFile(join(path, name)));
+    await keepMode(name);
   }
   const hookNames = new Set<string>();
   const hookFiles = new Map<string, Buffer>();
@@ -222,9 +300,11 @@ async function snapshotEntry(path: string, kind: EntryKind): Promise<GitEntrySna
     hookNames.add(entry.name);
     if (!entry.isFile()) continue;
     const content = await readFile(join(path, HOOKS, entry.name)).catch(() => null);
-    if (content) hookFiles.set(entry.name, content);
+    if (!content) continue;
+    hookFiles.set(entry.name, content);
+    await keepMode(join(HOOKS, entry.name));
   }
-  return { kind: 'dir', files, hookNames, hookFiles, linkedDirs };
+  return { kind: 'dir', files, hookNames, hookFiles, linkedDirs, modes };
 }
 
 /** Restore one git directory's control files; the relative paths changed. */
@@ -258,7 +338,7 @@ async function restoreGitDir(
     );
     if (content === null ? !exists : current?.equals(content)) continue;
     await removeEntry(full);
-    if (content !== null) await writeBeneath(gitDir, name, content);
+    if (content !== null) await writeBeneath(gitDir, name, content, before.modes.get(name));
     changed.push(name);
   }
 
@@ -271,9 +351,19 @@ async function restoreGitDir(
   }
   for (const [name, content] of before.hookFiles) {
     const full = join(hooksDir, name);
-    if ((await readRegularFile(full))?.equals(content)) continue;
+    const mode = before.modes.get(join(HOOKS, name));
+    if ((await readRegularFile(full))?.equals(content)) {
+      // Same bytes, but a script can still take away the bit that runs it,
+      // or add one to a sample hook.
+      const stat = await lstat(full).catch(() => null);
+      if (mode !== undefined && stat && (stat.mode & 0o7777) !== mode) {
+        await chmod(full, mode).catch(() => {});
+        changed.push(join(HOOKS, name));
+      }
+      continue;
+    }
     await removeEntry(full);
-    await writeBeneath(gitDir, join(HOOKS, name), content);
+    await writeBeneath(gitDir, join(HOOKS, name), content, mode);
     changed.push(join(HOOKS, name));
   }
   return changed;
@@ -286,6 +376,7 @@ async function restoreGitDir(
  */
 async function findGitEntries(
   root: string,
+  maxDirs = MAX_DIRS_SCANNED,
 ): Promise<{ found: Map<string, EntryKind>; truncated: boolean }> {
   const found = new Map<string, EntryKind>();
   let frontier = [root];
@@ -293,7 +384,7 @@ async function findGitEntries(
   for (let depth = 0; depth <= SCAN_DEPTH && frontier.length > 0; depth++) {
     const next: string[] = [];
     for (const dir of frontier) {
-      if (++scanned > MAX_DIRS_SCANNED) return { found, truncated: true };
+      if (++scanned > maxDirs) return { found, truncated: true };
       for (const entry of await readDirEntries(dir)) {
         const full = join(dir, entry.name);
         if (entry.name.toLowerCase() === '.git') {
@@ -348,8 +439,16 @@ async function removeEntry(path: string): Promise<void> {
   await rm(path, { recursive: true, force: true });
 }
 
-/** Write `rel` beneath `gitDir`, replacing any link on the way rather than writing through it. */
-async function writeBeneath(gitDir: string, rel: string, content: Buffer): Promise<void> {
+/**
+ * Write `rel` beneath `gitDir`, replacing any link on the way rather than
+ * writing through it, with the permission bits it had (`mode`) when known.
+ */
+async function writeBeneath(
+  gitDir: string,
+  rel: string,
+  content: Buffer,
+  mode?: number,
+): Promise<void> {
   const parts = rel.split(sep);
   let dir = gitDir;
   for (const part of parts.slice(0, -1)) {
@@ -361,4 +460,6 @@ async function writeBeneath(gitDir: string, rel: string, content: Buffer): Promi
   const full = join(gitDir, rel);
   await mkdir(dirname(full), { recursive: true });
   await writeFile(full, content);
+  // The umask applies to a new file's mode, so set it afterwards.
+  if (mode !== undefined) await chmod(full, mode).catch(() => {});
 }

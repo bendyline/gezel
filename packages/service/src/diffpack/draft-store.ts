@@ -9,6 +9,7 @@ import {
 } from '@bendyline/gezel';
 import { writeFileAtomic } from '@bendyline/gezel-inference/internal/fs/atomic';
 import {
+  assertNotAgentCliSettingsPath,
   assertNotGitControlPath,
   resolveInside,
   safeJoin,
@@ -212,11 +213,16 @@ export class DiffpackDraftStore {
   /**
    * Refused while drafting, not only at apply: a proposal that touches `.git`
    * could never be applied (the Store refuses it), and the gezel should hear
-   * so now rather than after the person reviewed it.
+   * so now rather than after the person reviewed it. An agent CLI's project
+   * settings are refused here too: applying is the person's click, which the
+   * Store lets through, but the text is a gezel's.
    */
   private async refuseGitControl(projectId: string, ...paths: string[]): Promise<void> {
     const workspaceDir = await this.store.projectWorkspaceDir(projectId);
-    for (const path of paths) await assertNotGitControlPath(workspaceDir, path);
+    for (const path of paths) {
+      await assertNotGitControlPath(workspaceDir, path);
+      await assertNotAgentCliSettingsPath(workspaceDir, path);
+    }
   }
 
   private async commit(

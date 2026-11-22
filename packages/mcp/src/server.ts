@@ -10927,29 +10927,34 @@ server.tool(
         'Workspace-relative path to write the clip at (e.g. `assets/hero.mp4`). Must be a relative path with no `..` segments and a `.mp4` / `.webm` extension.',
       ),
   },
-  async (args) => {
+  async (args, extra) => {
     try {
-      const res = await api.generateVideo({
-        prompt: args.prompt,
-        ...(args.negativePrompt ? { negativePrompt: args.negativePrompt } : {}),
-        ...(args.model ? { model: args.model } : {}),
-        ...(args.width ? { width: args.width } : {}),
-        ...(args.height ? { height: args.height } : {}),
-        ...(args.numFrames ? { numFrames: args.numFrames } : {}),
-        ...(args.fps ? { fps: args.fps } : {}),
-        ...(args.steps ? { steps: args.steps } : {}),
-        ...(args.seed !== undefined ? { seed: args.seed } : {}),
-        ...(args.inputImage ? { inputImage: args.inputImage } : {}),
-        ...(args.requireImageToVideo ? { requireImageToVideo: true } : {}),
-        ...(args.aspectRatio ? { aspectRatio: args.aspectRatio } : {}),
-        ...(args.saveAs ? { saveAs: args.saveAs } : {}),
-        projectId,
-        ...(gezelId ? { gezelId } : {}),
-        ...(sessionId ? { sessionId } : {}),
-        // Inline poster frame so the bridge can attach a thumbnail under
-        // the tool call (chat can't embed the clip itself).
-        inline: true,
-      });
+      const res = await api.generateVideo(
+        {
+          prompt: args.prompt,
+          ...(args.negativePrompt ? { negativePrompt: args.negativePrompt } : {}),
+          ...(args.model ? { model: args.model } : {}),
+          ...(args.width ? { width: args.width } : {}),
+          ...(args.height ? { height: args.height } : {}),
+          ...(args.numFrames ? { numFrames: args.numFrames } : {}),
+          ...(args.fps ? { fps: args.fps } : {}),
+          ...(args.steps ? { steps: args.steps } : {}),
+          ...(args.seed !== undefined ? { seed: args.seed } : {}),
+          ...(args.inputImage ? { inputImage: args.inputImage } : {}),
+          ...(args.requireImageToVideo ? { requireImageToVideo: true } : {}),
+          ...(args.aspectRatio ? { aspectRatio: args.aspectRatio } : {}),
+          ...(args.saveAs ? { saveAs: args.saveAs } : {}),
+          projectId,
+          ...(gezelId ? { gezelId } : {}),
+          ...(sessionId ? { sessionId } : {}),
+          // Inline poster frame so the bridge can attach a thumbnail under
+          // the tool call (chat can't embed the clip itself).
+          inline: true,
+        },
+        // The call's own cancel: a turn that stops, or a bridge that gives
+        // up, stops the render instead of leaving it running.
+        { signal: extra.signal },
+      );
       const { meta, artifactPath, workspacePath, b64Poster, posterPath, posterMimeType } = res;
       const workspaceLine = workspacePath
         ? `\n\nTo display this video in HTML, copy this exact tag verbatim — do not add any prefix, do not change the filename:\n\`<video src="${workspacePath}" controls></video>\``
