@@ -1,3 +1,15 @@
+## @bendyline/gezel-cli [1.3.5](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-cli%401.3.4...%40bendyline%2Fgezel-cli%401.3.5) (2026-11-22)
+
+
+### Dependencies
+
+* **@bendyline/gezel:** upgraded to 1.3.5
+* **@bendyline/gezel-app-sdk:** upgraded to 1.2.5
+* **@bendyline/gezel-catalog:** upgraded to 1.3.5
+* **@bendyline/gezel-client:** upgraded to 1.3.5
+* **@bendyline/gezel-knowledge:** upgraded to 1.2.13
+* **@bendyline/gezel-service:** upgraded to 1.3.5
+
 ## @bendyline/gezel-cli [1.3.4](https://github.com/bendyline/gezel/compare/%40bendyline%2Fgezel-cli%401.3.3...%40bendyline%2Fgezel-cli%401.3.4) (2026-11-20)
 
 
