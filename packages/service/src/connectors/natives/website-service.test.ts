@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type GezelConfig, SECURITY_PRESETS } from '@bendyline/gezel';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Store } from '../../fs/store.js';
 import { FakePageCapturer } from '../../page-capture/fake-capturer.js';
 import { ConnectorManager } from '../manager.js';
@@ -14,6 +14,10 @@ import { WebsiteService } from './website-service.js';
 import { registerWebsiteAdapters } from './website.js';
 
 registerWebsiteAdapters();
+
+// A save runs a capture, a markdown conversion and a corpus write; a cold or
+// loaded worker took the first test past the default 5 s.
+vi.setConfig({ testTimeout: 30_000 });
 
 const MANIFEST = {
   schemaVersion: 1 as const,

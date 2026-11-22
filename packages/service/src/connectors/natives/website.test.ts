@@ -3,7 +3,7 @@
 import '@bendyline/squisq-formats';
 import { readFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FakePageCapturer } from '../../page-capture/fake-capturer.js';
 import { syncWithAdapter } from '../manager.js';
 import {
@@ -22,6 +22,11 @@ import type { ConnectorBindingRef, NormalizedRecord, SyncTrigger } from '../type
 import { crawlPageFor, readCrawlState } from './website-crawl.js';
 import { writeSession } from './website-session.js';
 import { WebsiteAdapter, parseWebsiteConfig } from './website.js';
+
+// Each pass converts pages to markdown and writes a corpus; in a full local
+// service run (27 minutes of parallel workers) the first conformance passes
+// went past the default 5 s while CI's ran in well under it.
+vi.setConfig({ testTimeout: 30_000 });
 
 const MINUTE = 60_000;
 const START = Date.parse('2026-11-10T10:00:00Z');
