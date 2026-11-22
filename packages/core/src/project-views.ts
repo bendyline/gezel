@@ -95,6 +95,9 @@ export function defaultProjectView(p: ProjectViewSubject): ProjectViewId {
     case 'mixed':
       return 'gallery';
     default:
+      // Nothing in a folder says what the project is, but it follows sites:
+      // those pages are its content, and a Village of an empty workspace isn't.
+      if (projectFollowsWebsites(p) && !resolveProjectTypeId(p)) return 'web';
       return isVillageProject(p) ? 'village' : 'gallery';
   }
 }

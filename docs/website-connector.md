@@ -78,8 +78,10 @@ sandboxed browser can run, that is a **browser session**:
   private, loopback, link-local, metadata and this machine's own addresses,
   and connects to the address it checked, which closes DNS rebinding. A host
   the person typed may resolve privately (an intranet wiki), only while a
-  page on that host is being captured; cloud metadata never. Per page: 30 MB,
-  400 connections, 80 hosts.
+  page on that host is being captured; loopback and cloud metadata never, in
+  any spelling (an IPv4-mapped AAAA answer is judged as its IPv4 address,
+  `neverReachableKind` in `utils/ssrf.ts`). Per page: 30 MB, 400 connections,
+  80 hosts. Nothing connects between pages.
 - **UDP is closed by the profile.** The worker seeds the fresh profile with
   `webrtc.ip_handling_policy = disable_non_proxied_udp`; QUIC is off by flag.
   Measured 2026-11-16 on Chrome for Testing 151: without the preference, WebRTC
@@ -163,7 +165,12 @@ The person presses **Sign in…** on the connection's row. The daemon opens a
 sandbox (it runs as the logged-in user: connectors live in the product
 daemon, which the app spawns per user). The window first shows a page naming
 Gezel and the host, then the site. Chrome's own address bar is the
-anti-phishing surface. Gezel sends the window no input. The window launches
+anti-phishing surface. Gezel sends the window no input. Its page, the site
+being signed in to, begins before the window opens (a sign-in has no capture
+request to begin one, and the proxy refuses everything between pages), with a
+larger budget than a capture's, `SIGN_IN_NETWORK_BUDGET` (400 MB, 4,000
+connections, 400 hosts), because single sign-on passes through identity
+providers and their CDNs. The window launches
 without Chrome's automation marker, since a person drives it; capture
 browsers stay honest about automation.
 

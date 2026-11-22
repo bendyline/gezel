@@ -34,7 +34,8 @@ export type RestrictedFeature =
   | 'engine-download'
   | 'python'
   | 'npm'
-  | 'connector-component';
+  | 'connector-component'
+  | 'page-library';
 
 export interface ResolvedDistributionPolicy {
   /** Echoed for UI/telemetry; never read by enforcement. */
@@ -57,6 +58,12 @@ export interface ResolvedDistributionPolicy {
   /** Whether workspace scripts may install packages from a registry. */
   allowNpmInstalls: boolean;
   /**
+   * Whether page libraries (docs/page-libraries.md) may be downloaded. A store
+   * build ships a fixed set instead: it runs only inside a sandboxed page, but
+   * whether that counts as downloaded code under store rules is unsettled.
+   */
+  allowPageLibraryDownloads: boolean;
+  /**
    * Whether the unauthenticated Ollama-emulation listener may bind. The
    * authenticated `/v1` surface for connected apps is unaffected.
    */
@@ -77,6 +84,8 @@ const STORE_REFUSALS: Record<RestrictedFeature, string> = {
   npm: 'This build cannot install packages. Write dependency-free code using Node built-ins instead.',
   'connector-component':
     'This connection needs a component Gezel downloads when you connect, which this build cannot do. Install Gezel from gezel.com to use it.',
+  'page-library':
+    'This build comes with a fixed set of page libraries and cannot download more. Install Gezel from gezel.com to add others.',
 };
 
 function standardRefusal(feature: RestrictedFeature): string {
@@ -107,6 +116,7 @@ export function resolveDistributionProfile(
     allowEngineBinaryDownloads: !store,
     pythonProvisioning: store ? 'frozen-only' : 'full',
     allowNpmInstalls: !store,
+    allowPageLibraryDownloads: !store,
     allowOllamaEmulation: !store,
     refusalReason: store ? (feature) => STORE_REFUSALS[feature] : standardRefusal,
   };

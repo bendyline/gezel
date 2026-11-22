@@ -729,7 +729,7 @@ export class GitManager {
    */
   async commit(
     project: ProjectDetail,
-    opts: { message: string; allowEmpty?: boolean },
+    opts: { message: string; allowEmpty?: boolean; personStarted?: boolean },
   ): Promise<{ sha: string; filesChanged: number }> {
     return this.withLock(project.id, async () => {
       const resolved = await this.resolveCheckout(project);
@@ -753,7 +753,7 @@ export class GitManager {
       const idArgs = ['-c', `user.name=${name}`, '-c', `user.email=${email}`];
       const commitArgs = [...idArgs, 'commit', '-m', opts.message];
       if (opts.allowEmpty) commitArgs.push('--allow-empty');
-      await runGit(commitArgs, { cwd: resolved.dir });
+      await runGit(commitArgs, { cwd: resolved.dir, personStarted: opts.personStarted === true });
       const sha = (await this.headSha(resolved.dir)) ?? '';
       // Count files in the new commit so the UI can echo "3 files saved".
       const { stdout } = await runGit(['show', '--name-only', '--format=', sha], {
@@ -776,6 +776,7 @@ export class GitManager {
    */
   async push(
     project: ProjectDetail,
+    opts: { personStarted?: boolean } = {},
   ): Promise<{ pushed: boolean; rejected?: 'non-fast-forward' | 'auth' | 'unknown' }> {
     return this.withLock(project.id, async () => {
       const resolved = await this.resolveCheckout(project);
@@ -783,7 +784,11 @@ export class GitManager {
         throw new Error(`No checkout exists for project ${project.id}; clone first.`);
       }
       if (!(await isGitInstalled())) throw new GitNotInstalledError();
-      return this.pushDir(resolved.dir, await this.checkoutCredentialArgs(project, resolved));
+      return this.pushDir(
+        resolved.dir,
+        await this.checkoutCredentialArgs(project, resolved),
+        opts.personStarted === true,
+      );
     });
   }
 
@@ -795,6 +800,7 @@ export class GitManager {
   private async pushDir(
     dir: string,
     credentials: GitCredentialArgs,
+    personStarted = false,
   ): Promise<{ pushed: boolean; rejected?: 'non-fast-forward' | 'auth' | 'unknown' }> {
     const branch = await this.currentBranch(dir);
     if (!branch) {
@@ -805,6 +811,7 @@ export class GitManager {
       await runGit([...baseArgs, 'push', '--set-upstream', 'origin', branch], {
         cwd: dir,
         redact,
+        personStarted,
       });
       return { pushed: true };
     } catch (err) {
@@ -1406,7 +1413,11 @@ export class GitManager {
    *   - 'auth' / 'offline'  fetch or push could not reach GitHub
    *   - 'error'       anything else, with a human-readable message
    */
-  async sync(project: ProjectDetail): Promise<GitSyncResponse> {
+  async sync(
+    project: ProjectDetail,
+    opts: { personStarted?: boolean } = {},
+  ): Promise<GitSyncResponse> {
+    const personStarted = opts.personStarted === true;
     return this.withLock(project.id, async () => {
       const resolved = await this.resolveCheckout(project);
       if (!resolved.exists) {
@@ -1454,7 +1465,7 @@ export class GitManager {
         if (!upstream) {
           // Brand-new branch: nothing to receive — publish it.
           const toPush = await this.unpushedCount(dir);
-          const res = await this.pushDir(dir, { baseArgs, redact });
+          const res = await this.pushDir(dir, { baseArgs, redact }, personStarted);
           if (!res.pushed) return this.pushFailureToSync(res, { pulled, pushed, branch });
           pushed += toPush;
           await this.persistCheckoutState(project, dir, { branch, synced: true });
@@ -1463,7 +1474,11 @@ export class GitManager {
         const counts = (await this.aheadBehindRefs(dir, upstream)) ?? { ahead: 0, behind: 0 };
         if (counts.behind > 0) {
           if (counts.ahead === 0) {
-            await runGit([...baseArgs, 'merge', '--ff-only', upstream], { cwd: dir, redact });
+            await runGit([...baseArgs, 'merge', '--ff-only', upstream], {
+              cwd: dir,
+              redact,
+              personStarted,
+            });
           } else {
             const mergeRes = await runGit(
               [
@@ -1474,7 +1489,7 @@ export class GitManager {
                 'Combined your changes with updates from GitHub',
                 upstream,
               ],
-              { cwd: dir, redact, acceptExitCodes: [1] },
+              { cwd: dir, redact, acceptExitCodes: [1], personStarted },
             );
             if (mergeRes.code === 1) {
               if (await this.isMergeInProgress(dir)) {
@@ -1502,7 +1517,7 @@ export class GitManager {
           pulled += counts.behind;
         }
         if (counts.ahead > 0 || merged) {
-          const res = await this.pushDir(dir, { baseArgs, redact });
+          const res = await this.pushDir(dir, { baseArgs, redact }, personStarted);
           if (!res.pushed) {
             if (res.rejected === 'non-fast-forward' && attempt === 0) continue;
             return this.pushFailureToSync(res, { pulled, pushed, branch });
@@ -1624,7 +1639,7 @@ export class GitManager {
   /** Commit the merge once every conflict is settled. */
   async completeMerge(
     project: ProjectDetail,
-    opts: { message?: string } = {},
+    opts: { message?: string; personStarted?: boolean } = {},
   ): Promise<{ sha: string }> {
     return this.withLock(project.id, async () => {
       const resolved = await this.resolveCheckout(project);
@@ -1641,7 +1656,7 @@ export class GitManager {
       const args = message
         ? [...idArgs, 'commit', '-m', message]
         : [...idArgs, 'commit', '--no-edit'];
-      await runGit(args, { cwd: dir });
+      await runGit(args, { cwd: dir, personStarted: opts.personStarted === true });
       const sha = (await this.headSha(dir)) ?? '';
       return { sha };
     });

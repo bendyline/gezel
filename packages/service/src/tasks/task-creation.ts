@@ -13,6 +13,7 @@ import {
   resolveAutoTaskStrategy,
 } from '@bendyline/gezel';
 import type { CatalogService } from '@bendyline/gezel-catalog';
+import type { PageLibraryManager } from '@bendyline/gezel-inference/internal/page-libraries/manager';
 import type { ChatEventBus } from '../chat/events.js';
 import type { ChatManager } from '../chat/manager.js';
 import type { Store } from '../fs/store.js';
@@ -34,6 +35,8 @@ interface TaskCreationDependencies {
   chat: ChatManager;
   chatEvents: ChatEventBus;
   tasks: TaskManager;
+  /** Starts the page libraries a book's steps declare (docs/page-libraries.md). */
+  pageLibraries?: PageLibraryManager;
 }
 
 export async function wireTaskCreation({
@@ -43,6 +46,7 @@ export async function wireTaskCreation({
   chat,
   chatEvents,
   tasks,
+  pageLibraries,
 }: TaskCreationDependencies) {
   // Role auto-assignment: a craftbook step's `suggestedRole` resolves
   // to a concrete gezel id (roster match → gilde template → bespoke)
@@ -313,6 +317,28 @@ export async function wireTaskCreation({
       );
     }
     if (task.status === 'active') introduceAtKickoff(task, entry);
+    // Libraries a step's page uses start downloading now, so the first look
+    // at the page does not wait on one (docs/page-libraries.md). Gated like
+    // any automatic download; the wait is zero and the downloads run on.
+    const libraries = new Set(task.craftbook.steps.flatMap((s) => s.libraries ?? []));
+    if (pageLibraries && libraries.size) {
+      void pageLibraries
+        .usableLines()
+        .then((lines) =>
+          pageLibraries.ensure(
+            [...libraries].flatMap((id) => {
+              const own = lines.filter((line) => line.library === id);
+              const chosen =
+                own.find((line) => line.module?.default) ??
+                own.find((line) => line.classic?.default) ??
+                own[0];
+              return chosen ? [chosen] : [];
+            }),
+            { waitMs: 0 },
+          ),
+        )
+        .catch((err) => log.warn(`[tasks] page libraries for ${task.ref}: ${String(err)}`));
+    }
     // A book that verifies its work by running project commands
     // (`commandEvidence` gates) declares them as `commands` needs; raise
     // their first-use approval questions NOW so the user answers at

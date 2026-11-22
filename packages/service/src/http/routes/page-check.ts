@@ -12,6 +12,7 @@ import {
   resolvePlaywrightInstall,
   runPageCheck,
 } from '../../page-check/runner.js';
+import { ensurePageLibrariesForPage } from '../../page-libraries/service.js';
 import type { ServiceContext } from '../context.js';
 import {
   type PreviewCapabilityStore,
@@ -20,6 +21,14 @@ import {
 } from '../preview-capability.js';
 
 const log = createLogger('http');
+
+/**
+ * How long a page check waits for the libraries its page needs. A small
+ * library arrives in a second or two; three.js takes longer on a slow line.
+ * The download keeps going after the wait, and the check says the page has
+ * not run yet rather than reporting a missing library as the page's error.
+ */
+const PAGE_LIBRARY_WAIT_MS = 15_000;
 
 /** The preview's own rule (`previewAllowsExternalNetwork`), failing closed. */
 async function pageMayReachNetwork(ctx: ServiceContext): Promise<boolean> {
@@ -71,6 +80,21 @@ export function pageCheckRoutes(ctx: ServiceContext, capabilities: PreviewCapabi
     }
     if (!(await isChromiumReady(ctx.home, installPath))) {
       return respond({ ran: false, reason: 'chromium-not-installed' });
+    }
+    if (ctx.pageLibraries) {
+      const needs = await ensurePageLibrariesForPage({
+        store: ctx.store,
+        manager: ctx.pageLibraries,
+        projectId,
+        entry: entryPath,
+        waitMs: PAGE_LIBRARY_WAIT_MS,
+      }).catch((err: unknown) => {
+        log.warn(`[page-check] could not read what ${projectId}/${entryPath} needs: ${err}`);
+        return null;
+      });
+      if (needs?.ensure.pending.length) {
+        return respond({ ran: false, reason: 'page-libraries-pending' });
+      }
     }
 
     const minted = capabilities.mint({

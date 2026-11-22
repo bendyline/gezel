@@ -28,6 +28,7 @@ export function compilePreviewModule(
   path: string,
   format: 'esm' | 'commonjs',
 ): CompiledPreviewModule {
+  const runtime = jsxRuntimeFor(source, path);
   const output = ts.transpileModule(source, {
     fileName: path,
     reportDiagnostics: true,
@@ -37,7 +38,12 @@ export function compilePreviewModule(
       esModuleInterop: true,
       isolatedModules: true,
       allowJs: true,
-      jsx: ts.JsxEmit.React,
+      // A module that imports React or Preact gets their automatic runtime,
+      // as Vite would compile it, so it need not import React to use JSX.
+      // One that imports neither uses the page's global React.
+      ...(runtime
+        ? { jsx: ts.JsxEmit.ReactJSX, jsxImportSource: runtime }
+        : { jsx: ts.JsxEmit.React }),
     },
   });
   const errors = (output.diagnostics ?? [])
@@ -57,6 +63,95 @@ export function compilePreviewModule(
       imports.push({ specifier: file.fileName, start, end });
   }
   return { code, imports, errors };
+}
+
+/**
+ * The imports a file makes, at their offsets in the source as written: static
+ * `import` and `export … from`, and `import()` of a literal. For a file that
+ * is served as it stands and only has an address swapped, so nothing is
+ * re-emitted. It reads the syntax tree, where `compilePreviewModule`'s list
+ * comes from a text scan that is only safe on the compiler's own output: on
+ * hand-minified code a regex literal holding a quote hides every import
+ * after it.
+ */
+export function scanPreviewModuleImports(source: string, path: string): PreviewModuleImport[] {
+  const file = ts.createSourceFile(path, source, ts.ScriptTarget.ES2022, false);
+  const imports: PreviewModuleImport[] = [];
+  const add = (node: ts.Node | undefined): void => {
+    if (!node || !(ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node))) return;
+    const start = node.getStart(file) + 1;
+    const end = node.end - 1;
+    if (source.slice(start, end) === node.text) imports.push({ specifier: node.text, start, end });
+  };
+  const visit = (node: ts.Node): void => {
+    // `import type` loads nothing; the compiler drops it.
+    if (ts.isImportDeclaration(node)) {
+      if (!node.importClause?.isTypeOnly) add(node.moduleSpecifier);
+    } else if (ts.isExportDeclaration(node)) {
+      if (!node.isTypeOnly) add(node.moduleSpecifier);
+    } else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+      add(node.arguments[0]);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return imports;
+}
+
+/** The automatic JSX runtime a JSX file is compiled for, or null for the classic `React.createElement`. */
+function jsxRuntimeFor(source: string, path: string): 'react' | 'preact' | null {
+  if (!/\.(?:[cm]?tsx|jsx)$/i.test(path)) return null;
+  const imported = ts
+    .preProcessFile(source, true, false)
+    .importedFiles.map((file) => file.fileName);
+  if (imported.some((name) => name === 'preact' || name.startsWith('preact/'))) return 'preact';
+  if (
+    imported.some(
+      (name) =>
+        name === 'react' ||
+        name.startsWith('react/') ||
+        name === 'react-dom' ||
+        name.startsWith('react-dom/'),
+    )
+  )
+    return 'react';
+  // A script (no imports or exports: Babel's in-page JSX) and a module that
+  // reaches for a global `React` both use the page's React from a script tag.
+  // Any other JSX module is written for React's automatic runtime, as Vite
+  // compiles it: a component file need not import React to use JSX, and
+  // React 19 sets no global for the classic runtime to find.
+  const file = ts.createSourceFile(path, source, ts.ScriptTarget.ES2022, true, ts.ScriptKind.TSX);
+  return isModule(file) && !namesGlobalReact(file) ? 'react' : null;
+}
+
+function isModule(file: ts.SourceFile): boolean {
+  return file.statements.some(
+    (statement) =>
+      ts.isImportDeclaration(statement) ||
+      ts.isImportEqualsDeclaration(statement) ||
+      ts.isExportDeclaration(statement) ||
+      ts.isExportAssignment(statement) ||
+      (ts.canHaveModifiers(statement) &&
+        (ts.getModifiers(statement) ?? []).some(
+          (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
+        )),
+  );
+}
+
+function namesGlobalReact(file: ts.SourceFile): boolean {
+  let found = false;
+  const visit = (node: ts.Node): void => {
+    if (found) return;
+    if (ts.isIdentifier(node) && node.text === 'React') {
+      const parent = node.parent;
+      // `obj.React` is a property, not the global.
+      if (!(parent && ts.isPropertyAccessExpression(parent) && parent.name === node)) found = true;
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return found;
 }
 
 function describe(diagnostic: ts.Diagnostic, path: string): string {

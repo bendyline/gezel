@@ -859,9 +859,13 @@ unsandboxed Copilot) are not covered; see §14.
   runs `git ls-files` in every workspace and in the shared library on its own, so a
   gezel-written `core.fsmonitor` once ran as the daemon's account with no click. `runGit`
   (`git/git.ts`) and `run_git` share `git/config-overrides.ts`: `core.fsmonitor=false` and an
-  empty `core.hooksPath` on every call, `--no-ext-diff --no-textconv` for diff/log/show. A
-  consequence: a commit made from Gezel skips the repository's pre-commit hooks. Clean/smudge
-  filters are not switched off (that needs each driver's name), so they rest on the next rule.
+  empty `core.hooksPath` on every call, `--no-ext-diff --no-textconv` for diff/log/show. The
+  one exception is a commit, merge or push the person starts from the app (`isOwnerCaller`,
+  `runGit({ personStarted })`): its hooks run, as from a terminal, because Git LFS uploads
+  objects in `pre-push` and secret scanners live in `pre-commit`; fsmonitor stays off. Git a
+  gezel asks for never runs hooks, since a gezel can write a hooks folder in the working tree
+  (husky's `.husky/`). Clean/smudge filters are not switched off (that needs each driver's
+  name), so they rest on the next rule.
 - **Gezel never writes inside a `.git` folder.** `assertNotGitControlPath` (`safe-paths.ts`)
   refuses a `.git` segment in any case, with a trailing dot or space or an NTFS stream suffix,
   and again on the real path, so a link or the Windows short name `GIT~1` cannot stand in for

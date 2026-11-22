@@ -25,6 +25,7 @@ import {
   isSharedLibraryProject,
   listProjectTypes,
   normalizeCodexPermissionMode,
+  projectFollowsWebsites,
   projectHoldsCode,
   projectManagedWorkspaceWritable,
   projectViewsTabDefault,
@@ -413,7 +414,7 @@ const DEVELOPER_PROJECT_TABS: ReadonlySet<ConfigurableProjectTab> = new Set([
  * where every project's finished work lands; composer drafts no longer list
  * there, which was the bakery's complaint about it. `map` is the Views tab
  * (the Village's old key): shown when a view fits a code project, a watched
- * folder, or debug mode.
+ * folder, a project that follows web sites, or debug mode.
  */
 function projectTabIsVisible(
   project: Pick<
@@ -424,6 +425,7 @@ function projectTabIsVisible(
     | 'properties'
     | 'projectType'
     | 'github'
+    | 'connectors'
   >,
   tab: ConfigurableProjectTab,
   opts: { debugMode?: boolean } = {},
@@ -433,9 +435,11 @@ function projectTabIsVisible(
   const developerView = opts.debugMode === true || projectHoldsCode(project);
   if (tab === 'map') {
     const kind = folderKindOf(project);
+    // A project that follows web sites reads them in the Web pages view,
+    // folder or not; it used to have no Views tab to find them in.
     return (
       projectViewsTabDefault(project, OFFERED_PROJECT_VIEWS) &&
-      (developerView || (kind !== undefined && kind !== 'code'))
+      (developerView || (kind !== undefined && kind !== 'code') || projectFollowsWebsites(project))
     );
   }
   return DEVELOPER_PROJECT_TABS.has(tab) ? developerView : true;

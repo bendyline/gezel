@@ -242,6 +242,28 @@ test('only the store lanes ship weights', () => {
   assert.doesNotMatch(base, /stage-model-pack/);
 });
 
+test('only the store lanes ship page libraries, and both stage them', () => {
+  // A store build may not download code, so the libraries pages load ship
+  // inside it; a direct download fetches the ones its pages use
+  // (docs/page-libraries.md). Child arrays replace the base's, so each store
+  // config must name the folder itself, and each lane must stage it.
+  for (const config of [MAS_CONFIG, APPX_CONFIG]) {
+    assert.match(read(config), /from: dist\/page-libraries/, `${config} must ship page libraries`);
+  }
+  for (const workflow of [
+    '.github/workflows/release-mas.yml',
+    '.github/workflows/release-msix.yml',
+  ]) {
+    assert.match(
+      read(workflow),
+      /seed-page-libraries\.mjs --out packages\/app\/dist\/page-libraries --allow-empty/,
+      `${workflow} must stage the page libraries it ships`,
+    );
+  }
+  assert.doesNotMatch(read('packages/app/electron-builder.yml'), /page-libraries/);
+  assert.doesNotMatch(read('.github/workflows/release-electron.yml'), /seed-page-libraries/);
+});
+
 test('both store configs stage the channel marker', () => {
   // Without it a packaged store build reads as a direct download: it would
   // take the managing supervisor ladder and try to download code the stores

@@ -8,6 +8,7 @@ import {
   isAllowedPreviewResourceRequest,
   isAllowedRendererPermission,
   isAllowedTopLevelNavigation,
+  isConnectionErrorPageMessage,
   isExactApprovedPath,
   isExternalRendererNetworkRequest,
   isPreviewDocumentUrl,
@@ -240,6 +241,27 @@ describe('Electron boundary policies', () => {
       expect(trusted(url), url).toBe(false);
     }
     expect(isTrustedAppDocumentUrl(`${origin}/`, [], splash)).toBe(false);
+  });
+
+  it('lets the connection-error page reach only its Reconnect channel', () => {
+    // The page is a data: URL so it renders with the service down. Refusing it
+    // every channel left its Reconnect button permanently broken.
+    const page = `data:text/html;charset=utf-8,${encodeURIComponent('<button>Reconnect</button>')}`;
+    expect(isConnectionErrorPageMessage(page, page, 'gezel:restart-service')).toBe(true);
+    expect(isConnectionErrorPageMessage(page, page, 'gezel:current-connection')).toBe(false);
+    expect(isConnectionErrorPageMessage(page, page, 'gezel:install-update')).toBe(false);
+    expect(isConnectionErrorPageMessage(`${page}x`, page, 'gezel:restart-service')).toBe(false);
+    expect(
+      isConnectionErrorPageMessage('data:text/html,pwned', page, 'gezel:restart-service'),
+    ).toBe(false);
+    expect(isConnectionErrorPageMessage(page, null, 'gezel:restart-service')).toBe(false);
+    expect(
+      isConnectionErrorPageMessage(
+        'https://127.0.0.1:4312/',
+        'https://127.0.0.1:4312/',
+        'gezel:restart-service',
+      ),
+    ).toBe(false);
   });
 
   it('recognizes only preview URLs on the exact daemon origin', () => {

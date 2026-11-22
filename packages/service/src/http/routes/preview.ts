@@ -9,14 +9,30 @@ import {
   resolveSecurityPolicy,
 } from '@bendyline/gezel';
 import { realpathContained, safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
-import { compilePreviewModule } from '@bendyline/gezel-script-runtime/preview-module';
+import { PageLibraryStore } from '@bendyline/gezel-inference/internal/page-libraries/store';
+import {
+  compilePreviewModule,
+  scanPreviewModuleImports,
+} from '@bendyline/gezel-script-runtime/preview-module';
+import {
+  type InlineJsxCompiled,
+  type PageLibraryContext,
+  compileInlineJsx,
+  isPageLibrarySpecifier,
+  mentionsPageLibraryAddress,
+  pageLibraryFileUrl,
+  resolvePageLibraryUrl,
+  rewriteModuleLibraryImports,
+  rewritePageLibraries,
+} from '@bendyline/gezel/pages';
 import { Hono } from 'hono';
+import { projectPinsReader } from '../../page-libraries/service.js';
 import { projectPageTypographyStyle } from '../../project-type/page-typography.js';
 import { resolvePageTools } from '../../project-type/script-tools.js';
 import type { ServiceContext } from '../context.js';
 import { isMediaType, mediaFileResponse } from '../media-response.js';
 import { mimeTypeForPath } from '../mime.js';
-import type { PreviewCapabilityStore } from '../preview-capability.js';
+import { type PreviewCapabilityStore, normalizePreviewPath } from '../preview-capability.js';
 import { buildPageApiShim } from './page-api-shim.js';
 
 /**
@@ -265,14 +281,40 @@ async function firstPreviewFile(
  * every importer of a module asks for it by one URL: the browser keys modules
  * by the URL requested, and two spellings would run the same module twice.
  */
-async function previewModuleSource(baseDir: string, path: string, source: string): Promise<string> {
+async function previewModuleSource(
+  baseDir: string,
+  path: string,
+  source: string,
+  libraries?: PageLibraryContext,
+): Promise<string> {
   const compiled = compilePreviewModule(source, path, 'esm');
   if (compiled.errors.length) return previewProblemModule(compiled.errors.slice(0, 3).join('\n'));
   let code = compiled.code;
   for (const found of [...compiled.imports].reverse()) {
     const target = resolvePreviewImport(found.specifier, path);
-    // A URL loads or not under the page's network policy, as any page's would.
-    if (target.kind === 'url') continue;
+    if (target.kind === 'url') {
+      // A library the shelf carries loads from it. Any other URL loads or not
+      // under the page's network policy, as any page's would.
+      const file = libraries
+        ? resolvePageLibraryUrl(libraries.lines, found.specifier, 'module')
+        : null;
+      if (file) {
+        code =
+          code.slice(0, found.start) +
+          pageLibraryFileUrl(libraries!.base, file) +
+          code.slice(found.end);
+      }
+      continue;
+    }
+    // The page's import map answers a library by name, so every importer
+    // reaches it by one address and it runs once.
+    if (
+      target.kind === 'package' &&
+      libraries &&
+      isPageLibrarySpecifier(libraries.lines, found.specifier)
+    ) {
+      continue;
+    }
     const file =
       target.kind === 'file' ? await firstPreviewFile(baseDir, target.candidates) : undefined;
     if (!file) {
@@ -289,6 +331,16 @@ async function previewModuleSource(baseDir: string, path: string, source: string
 }
 
 /**
+ * A warning in the page's console for each library swap worth knowing about:
+ * a version the shelf does not carry, answered by another. A warning, not an
+ * error, so the page check does not count a working page as failed.
+ */
+function pageLibraryNotes(notes: readonly string[]): string {
+  const text = JSON.stringify(notes.join('\n')).replace(/</g, '\\u003c');
+  return `<script>console.warn(${text});</script>`;
+}
+
+/**
  * Prepare standalone HTML for the preview sandbox.
  *
  * Chromium's generated `LICENSES.chromium.html` is authored for the privileged
@@ -300,9 +352,18 @@ async function previewModuleSource(baseDir: string, path: string, source: string
  */
 export function preparePreviewHtml(
   html: string,
-  opts: { pageApi?: PageApiBootstrap } = {},
+  opts: {
+    pageApi?: PageApiBootstrap;
+    libraries?: PageLibraryContext;
+    /** Compiles `<script type="text/babel">` here, as Babel would in the browser. */
+    compileJsx?: (code: string, path: string) => InlineJsxCompiled;
+  } = {},
 ): string {
   let out = html.replace(BROWSER_INTERNAL_LINK_RE, '');
+  if (opts.compileJsx) out = compileInlineJsx(out, opts.compileJsx);
+  // Library addresses first, while the page's own tags are still as written.
+  const libraries = opts.libraries ? rewritePageLibraries(out, opts.libraries) : null;
+  if (libraries) out = libraries.html;
   // Source modules are compiled as they are served. A `.ts` file can only be
   // a module, whatever its tag says, and a root-absolute source (`/src/main.ts`,
   // as Vite writes it) means the page's own folder, not the preview server's.
@@ -319,8 +380,12 @@ export function preparePreviewHtml(
   const headMatch = out.match(/<head[^>]*>/i);
   // Order matters: log shim first (so page-api shim errors are captured),
   // then the page API (so `window.gezel` exists before any page script).
+  // The import map has to come before the page's first module script; the
+  // shims around it are plain scripts and do not count as one.
   const shims =
     PREVIEW_LOG_SHIM +
+    (libraries?.importMap ?? '') +
+    (libraries?.notes.length ? pageLibraryNotes(libraries.notes) : '') +
     (opts.pageApi ? projectPageTypographyStyle() + buildPageApiShim(opts.pageApi) : '') +
     PREVIEW_SCROLLBAR_SHIM;
   if (headMatch) {
@@ -361,8 +426,71 @@ export function preparePreviewHtml(
  */
 const MODULE_FETCH_DESTINATIONS = new Set(['script', 'worker', 'sharedworker']);
 
+/** A plain script past this size is served as written, without looking for CDN imports. */
+const MAX_SCANNED_MODULE_BYTES = 512 * 1024;
+
 export function previewRoutes(ctx: ServiceContext, capabilities: PreviewCapabilityStore): Hono {
   const app = new Hono();
+  // The daemon's shelf, or one opened on first use for a context built
+  // without it. A context with no home has no shelf at all.
+  let ownStore: PageLibraryStore | undefined;
+  const shelf = (): PageLibraryStore | undefined => {
+    if (ctx.pageLibraries) return ctx.pageLibraries.store;
+    if (!ownStore && typeof ctx.home === 'string')
+      ownStore = new PageLibraryStore({ home: ctx.home });
+    return ownStore;
+  };
+  const pinsFor = ctx.store ? projectPinsReader(ctx.store) : null;
+
+  /** What a page under this lease may load from the shelf, or nothing when the shelf is empty. */
+  const librariesFor = async (
+    capability: string,
+    projectId?: string,
+  ): Promise<PageLibraryContext | undefined> => {
+    const lines =
+      (await shelf()
+        ?.lines()
+        .catch(() => [])) ?? [];
+    if (!lines.length) return undefined;
+    const pins = projectId && pinsFor ? await pinsFor(projectId) : undefined;
+    return {
+      lines,
+      base: `/preview/${capability}/lib/`,
+      ...(pins && Object.keys(pins).length ? { pins } : {}),
+      scanImports: (code) => scanPreviewModuleImports(code, 'inline.js'),
+    };
+  };
+
+  // The page-library shelf (docs/page-libraries.md). Under the capability so
+  // it is the page's own origin for the strict CSP, the plain-HTTP preview
+  // listener and the page check alike. One address per file and never a
+  // redirect: the browser keys a module by the URL it asked for, and a second
+  // address would run a library twice on one page. Registered ahead of the
+  // project handler, whose `:source` would otherwise claim `lib`.
+  app.get('/:capability/lib/:library/:version/*', async (c) => {
+    const lease = capabilities.authorizeLease(c.req.param('capability'));
+    if (!lease.ok) {
+      return lease.reason === 'expired'
+        ? c.json({ error: 'preview capability expired' }, 410)
+        : c.json({ error: 'invalid preview capability' }, 401);
+    }
+    let path: string | null;
+    try {
+      path = normalizePreviewPath(decodeURIComponent(c.req.path.split('/').slice(6).join('/')));
+    } catch {
+      return c.json({ error: 'bad path' }, 400);
+    }
+    if (!path) return c.json({ error: 'not found' }, 404);
+    const written = await shelf()?.globalModule(
+      c.req.param('library'),
+      c.req.param('version'),
+      path,
+    );
+    if (written) return c.body(written, 200, previewHeaders('text/javascript; charset=utf-8'));
+    const full = await shelf()?.file(c.req.param('library'), c.req.param('version'), path);
+    if (!full) return c.json({ error: 'not found' }, 404);
+    return c.body(new Uint8Array(await readFile(full)), 200, previewHeaders(mimeTypeForPath(path)));
+  });
 
   app.get('/:capability/:source/:projectId/*', async (c) => {
     const capability = c.req.param('capability');
@@ -471,10 +599,29 @@ export function previewRoutes(ctx: ServiceContext, capabilities: PreviewCapabili
         return c.redirect(`${c.req.path}/`, 308);
       }
       if (isPreviewCompiledPath(filePath)) {
-        const code = await previewModuleSource(baseDir, filePath, await readFile(full, 'utf8'));
+        const code = await previewModuleSource(
+          baseDir,
+          filePath,
+          await readFile(full, 'utf8'),
+          await librariesFor(capability, projectId),
+        );
         return c.body(code, 200, previewHeaders('text/javascript; charset=utf-8'));
       }
       const mime = mimeTypeForPath(filePath);
+      // A plain script is served as written, except for CDN imports of a
+      // library the shelf carries. Parsed only when it names a CDN at all.
+      if (/\.m?js$/i.test(filePath) && s.size <= MAX_SCANNED_MODULE_BYTES) {
+        const libraries = await librariesFor(capability, projectId);
+        const source = libraries ? await readFile(full, 'utf8') : '';
+        if (libraries && mentionsPageLibraryAddress(source, libraries.lines)) {
+          const rewritten = rewriteModuleLibraryImports(
+            source,
+            scanPreviewModuleImports(source, filePath),
+            libraries,
+          );
+          if (rewritten.code !== source) return c.body(rewritten.code, 200, previewHeaders(mime));
+        }
+      }
       if (isMediaType(mime))
         return mediaFileResponse({
           path: full,
@@ -484,7 +631,10 @@ export function previewRoutes(ctx: ServiceContext, capabilities: PreviewCapabili
           headers: previewHeaders(mime),
         });
       if (mime.startsWith('text/html')) {
-        const html = preparePreviewHtml((await readFile(full)).toString('utf8'));
+        const html = preparePreviewHtml((await readFile(full)).toString('utf8'), {
+          libraries: await librariesFor(capability, projectId),
+          compileJsx: (code, path) => compilePreviewModule(code, path, 'esm'),
+        });
         const allowExternalNetwork = await previewAllowsExternalNetwork(ctx);
         return c.body(html, 200, previewHeaders(mime, allowExternalNetwork));
       }

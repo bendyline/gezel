@@ -107,6 +107,11 @@ import { opencodeSetupRoutes } from './routes/opencode-setup.js';
 import { pageCheckRoutes } from './routes/page-check.js';
 import { pageImportRoutes } from './routes/page-imports.js';
 import { pageInvokeRoutes } from './routes/page-invoke.js';
+import {
+  pageLibraryRoutes,
+  projectPageExportRoutes,
+  projectPageLibraryRoutes,
+} from './routes/page-libraries.js';
 import { pageReadRoutes } from './routes/page-read.js';
 import { pageTableRoutes } from './routes/page-tables.js';
 import { peopleWipeRoutes, projectPeopleRoutes } from './routes/people.js';
@@ -609,6 +614,8 @@ export function buildApp(baseCtx: ServiceContext, options: BuildAppOptions = {})
     previewCapabilityRoutes(ctx, previewCapabilities, options.previewBrowserOrigin ?? (() => null)),
   );
   app.route('/api/projects', pageCheckRoutes(ctx, previewCapabilities));
+  app.route('/api/projects', projectPageLibraryRoutes(ctx));
+  app.route('/api/projects', projectPageExportRoutes(ctx));
   app.route('/api/projects', previewLogRoutes(ctx));
   // Interactive type pages: the first-party bridge relaying page tool
   // invokes at /api/projects/:id/page-invoke (see routes/page-invoke.ts).
@@ -727,6 +734,7 @@ export function buildApp(baseCtx: ServiceContext, options: BuildAppOptions = {})
   app.route('/api/ambient-dashboard', ambientDashboardRoutes(ctx));
   app.route('/api/system-toolsets', systemToolsetRoutes(ctx));
   app.route('/api/gilde-updates', gildeUpdateRoutes(ctx));
+  app.route('/api/page-libraries', pageLibraryRoutes(ctx));
   app.route('/api/knowledge', knowledgeRoutes(ctx));
   app.route('/api/relevance-model', relevanceModelRoutes(ctx));
   app.route('/api/media-search', mediaSearchRoutes(ctx));

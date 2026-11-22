@@ -20,7 +20,6 @@ import {
   isSharedLibraryProject,
   isTaskWorkAllowed,
   lastNightShiftWindow,
-  nightShiftDayKey,
   nowIso,
   onSuspension,
   parseTaskRef,
@@ -85,7 +84,7 @@ import {
   settleIssuesForDraftingTask,
 } from './diffpack/issue-lifecycle.js';
 import { DiffpackManager } from './diffpack/manager.js';
-import { planProjectNightFixes, releaseStaleNightFixes } from './diffpack/night-fix-planner.js';
+import { releaseStaleNightFixes } from './diffpack/night-fix-planner.js';
 import { ProjectDigestGenerator } from './digest/generator.js';
 import { prepareNativeEngines } from './engine-discovery.js';
 import { LookoutManager } from './lookouts/manager.js';
@@ -143,20 +142,15 @@ import { invalidateModelsCache } from './http/routes/models.js';
 import { buildApp, buildPreviewApp } from './http/server.js';
 import { createTokenStore } from './http/token-store.js';
 import { VISION_RASTER_FORMATS } from './index-store/ai-shadow.js';
-import { writeNightlyCodebaseReport } from './index-store/codebase-report.js';
 import { ContentIndex } from './index-store/content-index.js';
-import { writeNightlyDocumentsReport } from './index-store/documents-report.js';
 import { IndexEnrichmentManager } from './index-store/enrichment-manager.js';
 import { GlobalIndexManager } from './index-store/global-index-manager.js';
 import { GlobalIndex } from './index-store/global-index.js';
 import { readImageStaticMeta } from './index-store/image-meta.js';
 import { migrateWorkspaceIndexes } from './index-store/index-placement.js';
 import { IndexingJobControl, ensureIndexingJobTask } from './index-store/indexing-job.js';
-import { albumMediaDeps, storeAllAlbumPhotos } from './index-store/photo-albums.js';
-import { writeNightlyPhotoReport } from './index-store/photo-report.js';
 import { toDecodableRaster } from './index-store/raster-normalize.js';
 import { ensureIndexFresh } from './index-store/readiness.js';
-import { writeNightlyCodeFolderFiles } from './issue-triage/handoff-report.js';
 import { KeurmeesterDigestGenerator } from './keurmeester/digest.js';
 import { KeurmeesterManager } from './keurmeester/manager.js';
 import { createSharedKnowledgeInstaller } from './knowledge/shared-install.js';
@@ -172,6 +166,7 @@ import { MemoryCompactor } from './memory/compaction.js';
 import { MemoryHealthMonitor } from './memory/health.js';
 import { MemoryManager } from './memory/manager.js';
 import { openModelWorkers, shutdownModelWorkers } from './model-workers.js';
+import { createPageLibraryManager } from './page-libraries/service.js';
 
 import {
   buildChatModelInstallRegistries,
@@ -273,6 +268,7 @@ import { NightShiftQuotaGate } from './tasks/night-quota-gate.js';
 import { postNightShiftReviewCard } from './tasks/night-review-card.js';
 import { NightShiftManager } from './tasks/night-shift-manager.js';
 import { createOutcomeReviewRestore, createOutcomeReviewer } from './tasks/outcome-review.js';
+import { runProjectNightWork } from './tasks/project-night-work.js';
 import { gatherTaskReferences } from './tasks/references.js';
 import { TaskRunner } from './tasks/runner.js';
 import { runActivationGate, runSpawnFanout } from './tasks/runtime-activation.js';
@@ -606,6 +602,7 @@ export async function startProductService(
     contentRoot: () => gildeUpdates.contentDataDir(),
     importedChatModels: createImportedChatModelReader({ home }),
   });
+  const pageLibraries = createPageLibraryManager({ home, store, catalog });
   // The shared library's AI tier (summaries, media shadows) is gated on a
   // Boekwachter being on its roster, so a freshly created library opts in
   // once here. An install that already has the seat filled recruits only
@@ -760,6 +757,7 @@ export async function startProductService(
   const appToolRelays = new AppToolRelayRegistry();
 
   const chat = new ChatManager({
+    pageLibraryLines: () => pageLibraries.usableLines(),
     store,
     events: chatEvents,
     memory,
@@ -1158,7 +1156,7 @@ export async function startProductService(
     introduceFreshHire,
     fileOwnerStepCard,
     resolveRole: roleResolverClosure,
-  } = await wireTaskCreation({ home, store, catalog, chat, chatEvents, tasks });
+  } = await wireTaskCreation({ home, store, catalog, chat, chatEvents, tasks, pageLibraries });
 
   // Wire the craftbook resolver: project-local books shadow local
   // templates, which shadow the bundled catalog. Shared with the
@@ -1939,44 +1937,20 @@ export async function startProductService(
       contentIndex.drainWorkspaceTablesAtNight(projectId),
     nightShiftWindow: () => nightShift.currentWindow(),
   };
-  const runProjectNightWork = async (projectId: string): Promise<void> => {
-    const project = await store.getProject(projectId);
-    if (!project || !projectNightWorkEnabled(project)) return;
-    const plan = await planProjectNightFixes(nightFixDeps, projectId).catch((err) => {
-      log.warn(`[diffpack] night fix planning failed for ${projectId}: ${String(err)}`);
-      return null;
-    });
-    if (plan?.taskRef) {
-      log.info(`[diffpack] night fixing planned for ${projectId} (${plan.issueCount} issue(s))`);
-    }
-    await runProjectObservationNightly(observationDeps, projectId).catch((err) =>
-      log.warn(`[observations] nightly maintenance failed for ${projectId}: ${String(err)}`),
-    );
-    // Keyed to the night, not the clock: a night crossing midnight wrote
-    // photos-10-07 and codebase-10-08 for the same run (2026-10-08).
-    const now = opts.nightShiftNow?.() ?? new Date();
-    const night = nightShiftDayKey(now, nightShift.currentWindow());
-    // Model-free, so it runs on any machine; writes nothing for a folder
-    // without photos.
-    await writeNightlyPhotoReport({ store, contentIndex }, projectId, now, night).catch((err) =>
-      log.warn(`[index] photo report failed for ${projectId}: ${String(err)}`),
-    );
-    // Albums the night's craftbook wrote link workspace photos; store the
-    // copies now so they play and export in the morning.
-    await storeAllAlbumPhotos(albumMediaDeps(store), projectId).catch((err) =>
-      log.warn(`[index] storing album photos failed for ${projectId}: ${String(err)}`),
-    );
-    await writeNightlyDocumentsReport({ store, contentIndex }, projectId, now, night).catch((err) =>
-      log.warn(`[index] documents report failed for ${projectId}: ${String(err)}`),
-    );
-    await writeNightlyCodebaseReport({ store, contentIndex }, projectId, now, night).catch((err) =>
-      log.warn(`[index] codebase report failed for ${projectId}: ${String(err)}`),
-    );
-    await writeNightlyCodeFolderFiles({ store, contentIndex, diffpacks }, projectId, now);
-  };
   indexEnrichment.setOnProjectCaughtUp(async (projectId) => {
     if (!nightShift.isActive()) return;
-    await runProjectNightWork(projectId);
+    await runProjectNightWork(
+      {
+        store,
+        contentIndex,
+        diffpacks,
+        nightFixes: nightFixDeps,
+        observations: observationDeps,
+        nightShiftWindow: () => nightShift.currentWindow(),
+        ...(opts.nightShiftNow ? { now: opts.nightShiftNow } : {}),
+      },
+      projectId,
+    );
   });
   // The sweep covers only indexing-enabled projects. Observation upkeep for
   // the rest runs once the whole sweep is done.
@@ -2438,6 +2412,7 @@ export async function startProductService(
     scriptRunner,
     catalog,
     gildeUpdates,
+    pageLibraries,
     ...(knowledge ? { knowledge } : {}),
     ...(appServe ? { appServe } : {}),
     handboek,
@@ -2546,7 +2521,7 @@ export async function startProductService(
   localHarnesses.bindApps(context);
   officeIntegrations.bindFetch(app.fetch.bind(app));
 
-  const { server, port } = await bindMainListener(app.fetch, cert, opts);
+  const { server, port } = await bindMainListener(app.fetch, cert, { ...opts, home });
 
   // Plain-HTTP preview sidecar. It always gets a dedicated loopback origin,
   // even when the main transport is already HTTP: local-preview-only browser
@@ -2967,8 +2942,6 @@ export async function startProductService(
       await shutdownStep('pi setup', () => piSetup.stop());
       await shutdownStep('VS Code setup', () => vscodeSetup.stop());
       await shutdownStep('Office host', () => officeIntegrations.stop());
-      await shutdownStep('machine engine', async () => machineEngine?.stop());
-      await shutdownStep('paired remote fetches', () => closePairedRemoteFetches(remotes));
       const container = containerServer;
       if (container) await shutdownStep('container listener', () => closeListener(container));
       await shutdownStep('account sessions', () => accounts.flush().catch(() => {}));
@@ -2980,6 +2953,13 @@ export async function startProductService(
       // Electron's complete 30-second graceful-quit window.
       await shutdownStep('chat manager', () => chat.shutdown().catch(() => {}));
       await shutdownStep('HTTP server', () => closeListener(server));
+      // After the listener: a streamed reply the bridge proxies to the UI
+      // (Settings → About holds some open) ends only when its client hangs
+      // up, and chat's background drain above may still be talking to the
+      // broker or a paired server. Closing these connections first stalled
+      // shutdown on those streams until the supervisor killed the daemon.
+      await shutdownStep('machine engine', async () => machineEngine?.stop());
+      await shutdownStep('paired remote fetches', () => closePairedRemoteFetches(remotes));
       // Kill all persistent terminal shells. Without this, the bash
       // (or PowerShell) children spawned by the per-thread pool stay
       // resident past the daemon's exit until their idle timers

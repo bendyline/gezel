@@ -53,7 +53,7 @@ export function formatExpectedDeliverableAnnotation(
   }
   const singleFileHtmlClause =
     path && /(?:^|\/)index\.html$/i.test(path)
-      ? ' This is a single-file HTML deliverable: put CSS in `<style>` and JavaScript in one inline `<script>` inside that same HTML file. Do NOT create or rely on `script.js`, `styles.css`, external assets, a build step, or a second source file unless the asker explicitly named one.'
+      ? ' This is a single-file HTML deliverable: put CSS in `<style>` and JavaScript in one inline `<script>` inside that same HTML file. Do NOT create or rely on `script.js`, `styles.css`, external assets other than a listed page library, a build step, or a second source file unless the asker explicitly named one.'
       : '';
   return `\n\n[Deliverable expected as a FILE ${pathClause}. Your first assistant action should be the tool call \`write_file({ path, content })\`; draft inside the tool argument, not in chat.${singleFileHtmlClause} Reply in chat with the path + a 2-sentence precis — do NOT paste the full deliverable into chat.]`;
 }

@@ -140,6 +140,7 @@ export function configResponseFields(config: GezelConfig): Record<string, unknow
     securityPolicy: config.securityPolicy,
     openaiEndpoints: config.openaiEndpoints,
     gildeUpdates: config.gildeUpdates,
+    pageLibraries: config.pageLibraries,
     knowledge: config.knowledge,
     faceRecognition: config.faceRecognition,
     taskReferences: config.taskReferences,

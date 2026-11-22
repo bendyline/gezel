@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type FileContent,
   formatValidateResult,
+  pageLibrariesToValidateCheck,
   runtimePageCheckToValidateCheck,
   validateFile,
 } from './validate.js';
@@ -355,5 +356,68 @@ describe('validateFile — unknown extensions', () => {
     const formatted = formatValidateResult(r);
     expect(formatted).toMatch(/FAIL/);
     expect(formatted).toMatch(/file is empty/);
+  });
+});
+
+describe('pageLibrariesToValidateCheck', () => {
+  const base = {
+    needed: [] as Array<{ name: string; version: string; ready: boolean }>,
+    pending: [] as string[],
+    failed: [] as Array<{ line: string; error: string }>,
+    unknown: [] as Array<{ spelling: string; from: string; kind: 'package' | 'url' }>,
+    externalNetwork: false,
+    available: [
+      { name: 'Chart.js', version: '4', scriptOnly: false },
+      { name: 'three.js', version: '0.187', scriptOnly: false },
+      { name: 'D3', version: '7', scriptOnly: true },
+    ],
+  };
+
+  it('says nothing for a page that uses no library', () => {
+    expect(pageLibrariesToValidateCheck(base)).toBeNull();
+  });
+
+  it('fails a library nothing here answers, naming what is available', () => {
+    const check = pageLibrariesToValidateCheck({
+      ...base,
+      unknown: [{ spelling: 'gsap', from: 'index.html', kind: 'package' }],
+    });
+    expect(check).toMatchObject({ ok: false, name: 'page-libraries' });
+    const failed = check as { message: string; fixHint: string };
+    expect(failed.message).toBe(
+      '`gsap` (in index.html) is not available on this computer, and this page cannot reach the internet for it.',
+    );
+    expect(failed.fixHint).toContain(
+      'Available here: Chart.js 4, three.js 0.187, D3 7 (script tag).',
+    );
+  });
+
+  it('passes a library the page may load from the internet at this security level', () => {
+    expect(
+      pageLibrariesToValidateCheck({
+        ...base,
+        externalNetwork: true,
+        unknown: [{ spelling: 'gsap', from: 'index.html', kind: 'package' }],
+      }),
+    ).toMatchObject({ ok: true, detail: 'no shelf libraries; gsap loads from the internet' });
+  });
+
+  it('passes what is ready, and skips while a download runs', () => {
+    expect(
+      pageLibrariesToValidateCheck({
+        ...base,
+        needed: [{ name: 'three.js', version: '0.187.0', ready: true }],
+      }),
+    ).toEqual({ ok: true, name: 'page-libraries', detail: 'three.js 0.187.0' });
+    expect(
+      pageLibrariesToValidateCheck({
+        ...base,
+        needed: [{ name: 'three.js', version: '0.187.0', ready: false }],
+        pending: ['three@0.187.0'],
+      }),
+    ).toMatchObject({
+      ok: null,
+      detail: 'still downloading three@0.187.0; validate again in a moment',
+    });
   });
 });

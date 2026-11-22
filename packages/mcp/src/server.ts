@@ -319,6 +319,7 @@ import {
 import {
   type FileContent,
   formatValidateResult,
+  pageLibrariesToValidateCheck,
   runtimePageCheckToValidateCheck,
   validateFile,
 } from './validate.js';
@@ -1628,6 +1629,17 @@ server.tool(
     if (
       drawer === 'workspace' &&
       validationTarget?.kind === 'current' &&
+      /\.html?$/i.test(filePath)
+    ) {
+      const libraries = await api
+        .getPageLibraryNeeds(projectId, filePath, { waitMs: 10_000 })
+        .then(pageLibrariesToValidateCheck)
+        .catch(() => null);
+      if (libraries) result.checks.push(libraries);
+    }
+    if (
+      drawer === 'workspace' &&
+      validationTarget?.kind === 'current' &&
       /\.html?$/i.test(filePath) &&
       !result.checks.some((c) => c.ok === false)
     ) {
@@ -2223,6 +2235,11 @@ async function htmlRuntimeCheckSuffix(path: string): Promise<string> {
     // execution remains scoped to a session's active project.
     if (target.kind === 'linked') return '';
     const check = await api.checkProjectPage(projectId, target.path);
+    // Said, because a page that loads a library would otherwise read as
+    // checked: the model would move on believing it ran.
+    if (!check.ran && check.reason === 'page-libraries-pending') {
+      return `\n\n[Runtime check] Not run yet: a library ${path} uses is still downloading. Call \`validate\` on it in a moment to check it.`;
+    }
     if (!check.ran || check.ok === undefined) return '';
     if (check.ok) {
       return `\n\n[Runtime check] ${path} loaded headlessly with no runtime errors.`;

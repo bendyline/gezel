@@ -44,6 +44,10 @@ export default defineConfig({
     // `./grounding` — the `[n]` citation check behind factual writing. Apps
     // check AI drafts with it, so it must stay dependency-free and small.
     'src/grounding/index.ts',
+    // `./pages` — page libraries: the line schema, and the resolver, import
+    // map and HTML rewrite the desktop preview, the phones and embedding
+    // apps share. Off the main entry so the UI's startup bundle skips it.
+    'src/pages/index.ts',
     // `./remote` — remote serving's client side for every host: the
     // `/v1/remote/*` wire contract, connect-code pairing (SPAKE2 on
     // WebCrypto), and identities. The daemon and the phone both import it.

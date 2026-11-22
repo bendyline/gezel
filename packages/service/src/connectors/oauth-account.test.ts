@@ -119,11 +119,10 @@ describe('the account that signed in', () => {
   });
 
   it('matches Gmail the way Gmail delivers, and every other address exactly', () => {
-    expect(isExpectedAccount(['bendy.line.test@gmail.com'], 'BendyLineTest@googlemail.com')).toBe(
-      true,
-    );
-    expect(isExpectedAccount(['bendylinetest@gmail.com'], 'bendylinetest+ci@gmail.com')).toBe(true);
-    expect(isExpectedAccount(['ammerlaan@live.com'], 'bendylinetest@outlook.com')).toBe(false);
+    expect(isExpectedAccount(['first.last@gmail.com'], 'FirstLast@googlemail.com')).toBe(true);
+    expect(isExpectedAccount(['firstlast@gmail.com'], 'firstlast+ci@gmail.com')).toBe(true);
+    // Microsoft's domains are separate accounts, never aliases of each other.
+    expect(isExpectedAccount(['someone@live.com'], 'someone@outlook.com')).toBe(false);
     expect(isExpectedAccount(['first.last@example.com'], 'firstlast@example.com')).toBe(false);
     expect(isExpectedAccount(['x@other.test', 'Test@Outlook.com'], 'test@outlook.com')).toBe(true);
   });

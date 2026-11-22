@@ -17,24 +17,9 @@ import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import { createLogger, redactPageUrl } from '@bendyline/gezel';
-import { isPrivateAddress } from '../utils/ssrf.js';
+import { isPrivateAddress, neverReachableKind } from '../utils/ssrf.js';
 
 const log = createLogger('page-capture');
-
-/** Addresses never reachable, even for a private site the person typed. */
-function isMetadataAddress(ip: string): boolean {
-  const v = ip.toLowerCase();
-  return (
-    v.startsWith('169.254.') ||
-    v === '100.100.100.200' ||
-    v.startsWith('fe80') ||
-    v === 'fd00:ec2::254'
-  );
-}
-
-function isLoopback(ip: string): boolean {
-  return ip === '::1' || ip.startsWith('127.') || ip === '0.0.0.0' || ip === '::';
-}
 
 /** Per-page network limits. */
 export interface PageNetworkBudget {
@@ -50,6 +35,17 @@ export const DEFAULT_PAGE_NETWORK_BUDGET: PageNetworkBudget = {
   bytes: 30 * 1024 * 1024,
   connections: 400,
   hosts: 80,
+};
+
+/**
+ * Limits for a sign-in window. The person drives it, may keep it open for
+ * minutes, and a single sign-on flow passes through identity providers,
+ * captcha services and their CDNs, so the per-page limits would cut it off.
+ */
+export const SIGN_IN_NETWORK_BUDGET: PageNetworkBudget = {
+  bytes: 400 * 1024 * 1024,
+  connections: 4_000,
+  hosts: 400,
 };
 
 export interface PageNetworkStats {
@@ -226,8 +222,11 @@ export class FilterProxy {
         this.currentHost.replace(/^www\./, '') === host.replace(/^www\./, ''));
     for (const ip of addresses) {
       const lower = ip.toLowerCase();
-      if (isMetadataAddress(lower)) return { refused: this.refuse('metadata') };
-      if (isLoopback(lower)) {
+      // Never reachable, even for a private site the person typed. Judged on
+      // the parsed address, so an IPv4-mapped AAAA answer counts as its IPv4.
+      const never = neverReachableKind(lower);
+      if (never === 'metadata') return { refused: this.refuse('metadata') };
+      if (never === 'loopback') {
         if (loopbackFixture) continue;
         return { refused: this.refuse('loopback') };
       }

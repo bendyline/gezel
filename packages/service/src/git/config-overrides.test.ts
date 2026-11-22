@@ -118,3 +118,61 @@ describe.runIf(gitAvailable)('runGit against a repository whose config runs prog
     expect(ran('hook')).toBe(true);
   });
 });
+
+/**
+ * A commit or push the person starts from the app runs their hooks, as a
+ * terminal would. Skipping them sent Git LFS pointers without objects
+ * (`pre-push` uploads them) and bypassed pre-commit secret scanners. fsmonitor
+ * stays off either way.
+ */
+describe.runIf(gitAvailable)('runGit for a commit the person started', () => {
+  let root: string;
+  let repo: string;
+  let env: Record<string, string>;
+  const ran = (name: string) => existsSync(join(root, `RAN-${name}`));
+
+  function plainGit(args: string[]) {
+    return spawnSync('git', args, { cwd: repo, encoding: 'utf8', timeout: 30_000, env });
+  }
+
+  beforeAll(async () => {
+    root = await mkdtemp(join(tmpdir(), 'gezel-rungit-person-'));
+    repo = join(root, 'repo');
+    await mkdir(repo, { recursive: true });
+    await writeFile(join(root, 'empty.gitconfig'), '');
+    env = {
+      ...(process.env as Record<string, string>),
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: join(root, 'empty.gitconfig'),
+    };
+    plainGit(['init', '-q']);
+    await writeFile(join(repo, 'a.txt'), 'hi\n');
+    plainGit(['add', 'a.txt']);
+    plainGit(['-c', 'user.name=probe', '-c', 'user.email=p@x.invalid', 'commit', '-qm', 'init']);
+    await appendFile(
+      join(repo, '.git', 'config'),
+      ['[core]', '\tfsmonitor = "touch ../RAN-fsmonitor; false"', ''].join('\n'),
+    );
+    const hook = join(repo, '.git', 'hooks', 'pre-commit');
+    await writeFile(hook, '#!/bin/sh\ntouch ../RAN-hook\n');
+    await chmod(hook, 0o755);
+  });
+
+  afterAll(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it('runs the repository hooks, and still never fsmonitor', async () => {
+    const commit = ['-c', 'user.name=probe', '-c', 'user.email=p@x.invalid', 'commit'];
+    await appendFile(join(repo, 'a.txt'), 'gezel\n');
+    await runGit(['add', '-A'], { cwd: repo, env });
+    await runGit([...commit, '-qm', 'by a gezel'], { cwd: repo, env });
+    expect(ran('hook')).toBe(false);
+
+    await appendFile(join(repo, 'a.txt'), 'person\n');
+    await runGit(['add', '-A'], { cwd: repo, env });
+    await runGit([...commit, '-qm', 'by the person'], { cwd: repo, env, personStarted: true });
+    expect(ran('hook')).toBe(true);
+    expect(ran('fsmonitor')).toBe(false);
+  });
+});

@@ -1,4 +1,5 @@
 import { createLogger } from '@bendyline/gezel';
+import { gezelPaths } from '@bendyline/gezel/paths';
 import type { ServerType, serve } from '@hono/node-server';
 import { DEFAULT_PORT, type StartServiceOptions } from '../service-options.js';
 import type { LoopbackCert } from './cert.js';
@@ -13,7 +14,7 @@ const log = createLogger('service');
 export async function bindMainListener(
   appFetch: Parameters<typeof serve>[0]['fetch'],
   cert: LoopbackCert | null,
-  opts: Pick<StartServiceOptions, 'port' | 'preferCanonicalPort'>,
+  opts: Pick<StartServiceOptions, 'port' | 'preferCanonicalPort'> & { home: string },
 ): Promise<{ server: ServerType; port: number }> {
   // Port selection, by caller intent:
   //   - explicit `opts.port` (from `--port` / `GEZEL_PORT`): bind exactly
@@ -92,31 +93,34 @@ export async function bindMainListener(
   } catch (err) {
     const code = (err as NodeJS.ErrnoException | null)?.code;
     if (allowEphemeralFallback && code === 'EADDRINUSE') {
-      log.warn(
-        `[service] canonical port ${requestedPort} is in use; falling back to an ephemeral port. Third-party clients should read the bound port from ~/.gezel/runtime/port.`,
-      );
-      // Identify the occupant in the background. A machine-engine broker plus
-      // one per-user product daemon is the intended split: the former owns the
-      // canonical port and GPU, the latter uses its runtime-discovered port.
+      ({ server, port } = await bindOnce(0));
+      // One line, at the level the occupant deserves. A machine-engine broker
+      // plus one per-user product daemon is the intended split: the former
+      // owns the canonical port and GPU, the latter serves on its own port.
       // Two FULL product daemons remain the dangerous case (duplicate
-      // schedulers + engine ownership), so keep the old tripwire for legacy
+      // schedulers + engine ownership), so keep the tripwire for legacy
       // occupants. Fire-and-forget so a slow listener cannot delay our boot.
+      const fallbackPort = port;
+      const portFile = gezelPaths(opts.home).runtime.port;
       void identifyCanonicalPortOccupant(requestedPort).then((occupant) => {
         if (occupant === 'machine-engine') {
           log.info(
-            `[service] the machine engine owns canonical port ${requestedPort}; this user daemon is using its runtime-discovered port as expected`,
+            `[service] the machine engine owns canonical port ${requestedPort}; this user daemon serves on port ${fallbackPort} as expected`,
           );
         } else if (occupant === 'gezeld') {
           log.error(
             `[service] another full gezeld daemon is already serving canonical port ${requestedPort}. Two product daemons may duplicate background work and contend for local engines. Upgrade the installed machine service to an engine-only build, or stop the stale service before continuing.`,
           );
-        } else if (occupant === 'other-http') {
+        } else {
+          const holder =
+            occupant === 'other-http'
+              ? `port ${requestedPort} is held by a non-Gezel local HTTP server`
+              : `canonical port ${requestedPort} is in use`;
           log.warn(
-            `[service] port ${requestedPort} is held by a non-Gezel local HTTP server; leaving it alone`,
+            `[service] ${holder}; serving on port ${fallbackPort} instead. Third-party clients should read the bound port from ${portFile}.`,
           );
         }
       });
-      ({ server, port } = await bindOnce(0));
     } else {
       throw err;
     }

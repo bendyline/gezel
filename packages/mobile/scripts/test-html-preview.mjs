@@ -21,6 +21,21 @@ const server = await createServer({
   server: { host: '127.0.0.1', port: 0 },
   plugins: [
     projectPageTypographyPlugin(fileURLToPath(new URL('../../ui', import.meta.url))),
+    // The app's bundled libraries come from vite.config.ts; this test passes
+    // its own to the builder, so the app's are empty here.
+    {
+      name: 'empty-page-libraries',
+      resolveId: (id) =>
+        id === 'virtual:gezel-page-libraries' || id === 'virtual:gezel-page-library-lines'
+          ? `\0${id}`
+          : null,
+      load: (id) =>
+        id === '\0virtual:gezel-page-libraries'
+          ? 'export default { lines: [], files: {}, modules: {} };'
+          : id === '\0virtual:gezel-page-library-lines'
+            ? 'export default [];'
+            : null,
+    },
     {
       name: 'offline-html-preview-test',
       configureServer(server) {
@@ -69,6 +84,10 @@ try {
   page.on('console', (message) => console.log('browser:', message.type(), message.text()));
   const network = [];
   await page.route('https://outside.invalid/**', (route) => {
+    network.push(route.request().url());
+    return route.abort();
+  });
+  await page.route(/^https:\/\/(unpkg\.com|cdn\.jsdelivr\.net)\//, (route) => {
     network.push(route.request().url());
     return route.abort();
   });
@@ -283,6 +302,158 @@ try {
     "tanks/src/main.ts imports ./game/Game, which isn't in the project.",
     'tanks/src/main.ts imports the npm package "phaser". A preview runs only files in the project, so add the library\'s file to the project and import it by path.',
   ]);
+  // Page libraries the app carries (docs/page-libraries.md): CDN tags, bare
+  // and CDN imports, a module made from a plain-script build, and JSX for
+  // Babel's in-browser compiler, all embedded in the snapshot.
+  const libraries = await page.evaluate(async () => {
+    const { buildOfflineHtmlPreview } = await import('/src/html-preview.ts');
+    const encode = (text) => new TextEncoder().encode(text);
+    const tiny = {
+      library: 'tinylib',
+      name: 'Tinylib',
+      version: '1.2.0',
+      answers: { from: '1.0.0', before: '2.0.0' },
+      packages: ['tinylib'],
+      include: ['dist/'],
+      module: { default: true, entries: { '.': 'dist/index.js', './extra/': 'dist/extra/' } },
+      classic: { default: true, entries: { '.': 'dist/tiny.umd.js' }, global: 'Tiny' },
+      style: { default: true, entries: { '.': 'dist/tiny.css' } },
+      license: 'MIT',
+      hosts: ['desktop', 'phone'],
+    };
+    const reactish = {
+      library: 'reactish',
+      name: 'Reactish',
+      version: '1.0.0',
+      answers: { from: '1.0.0', before: '2.0.0' },
+      packages: ['reactish'],
+      include: ['umd/reactish.js'],
+      module: { default: true, entries: {} },
+      classic: { default: true, entries: { '.': 'umd/reactish.js' }, global: 'Reactish' },
+      globals: {
+        '.': {
+          global: 'Reactish',
+          file: 'umd/reactish.js',
+          exports: ['createElement', 'version'],
+        },
+      },
+      license: 'MIT',
+      hosts: ['desktop', 'phone'],
+    };
+    const shelf = {
+      'tinylib/dist/index.js':
+        "import { helper } from './helper.js';\nexport const tiny = () => 'tiny:' + helper();",
+      'tinylib/dist/helper.js': "export const helper = () => 'h';",
+      'tinylib/dist/extra/more.js':
+        "import { tiny } from '../index.js';\nexport const more = () => tiny() + '+more';",
+      'tinylib/dist/tiny.umd.js': "window.Tiny = { version: '1.2.0' };",
+      'tinylib/dist/tiny.css': '#styled{color:rgb(1, 2, 3)}',
+      'reactish/umd/reactish.js':
+        "window.Reactish = { createElement: (t, p, ...c) => ({ t, c }), version: '1' }; window.reactishLoads = (window.reactishLoads || 0) + 1;",
+    };
+    // The build precompiles what it carries; more.js is left to the worker.
+    const compiled = {};
+    for (const done of await window.gezelCompilePreview([
+      { path: 'dist/index.js', source: shelf['tinylib/dist/index.js'] },
+      { path: 'dist/helper.js', source: shelf['tinylib/dist/helper.js'] },
+    ]))
+      compiled[`tinylib/${done.path}`] = {
+        code: done.code,
+        imports: done.imports.map((found) => found.specifier),
+      };
+    const carried = {
+      lines: [tiny, reactish],
+      read: (line, path) => shelf[`${line.library}/${path}`] ?? null,
+      compiled: (line, path) => compiled[`${line.library}/${path}`] ?? null,
+    };
+    const page = `<!doctype html><head>
+<script type="importmap">{"imports":{"tinyalias":"https://unpkg.com/tinylib@1/dist/index.js"}}</script>
+<link rel="stylesheet" href="https://unpkg.com/tinylib@1/dist/tiny.css">
+<script src="https://unpkg.com/tinylib@1.2.0/dist/tiny.umd.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script type="text/babel">const React = Reactish; const el = <b>{Reactish.version}</b>; window.jsxResult = el.t + ':' + el.c[0];</script>
+<script type="module">
+import { tiny } from 'tinylib';
+import { more } from 'tinylib/extra/more.js';
+import { tiny as again } from 'https://cdn.jsdelivr.net/npm/tinylib@1/+esm';
+import R from 'reactish';
+import { tiny as aliased } from 'tinyalias';
+window.libraryResult = { tiny: tiny(), more: more(), same: tiny === again && tiny === aliased, global: window.Tiny.version, reactish: R.version, loads: window.reactishLoads };
+</script></head><body><p id="styled">styled</p></body>`;
+    const read = async (path) => {
+      if (path === 'shelf/index.html') return encode(page);
+      throw Error(`Could not read preview file ${path} (404)`);
+    };
+    const publish = async (html) => {
+      const reply = await fetch('/__publish', { method: 'POST', body: html });
+      const data = await reply.json();
+      return { url: new URL(data.url, location.href).href, dispose: () => {} };
+    };
+    const compileModules = () => ({
+      compile: (modules) => window.gezelCompilePreview(modules),
+      dispose() {},
+    });
+    const lease = await buildOfflineHtmlPreview(
+      'shelf/index.html',
+      read,
+      publish,
+      compileModules,
+      undefined,
+      undefined,
+      carried,
+    );
+    const frame = document.createElement('iframe');
+    frame.setAttribute('sandbox', 'allow-scripts');
+    frame.src = lease.url;
+    document.body.append(frame);
+    await new Promise((resolve, reject) => {
+      frame.onload = resolve;
+      setTimeout(() => reject(Error('Library preview failed to load')), 5000);
+    });
+    const problems = [];
+    for (const source of [
+      "import 'tinylib/extra/missing.js';",
+      "import * as THREE from 'three';\nwindow.three = THREE;",
+    ]) {
+      try {
+        await buildOfflineHtmlPreview(
+          'shelf/index.html',
+          async (path) =>
+            path === 'shelf/index.html'
+              ? encode(`<script type="module">${source}</script>`)
+              : read(path),
+          publish,
+          compileModules,
+          undefined,
+          undefined,
+          carried,
+        );
+      } catch (error) {
+        problems.push(error.message);
+      }
+    }
+    return { url: lease.url, problems };
+  });
+  const shelfFrame = page.frames().find((frame) => frame.url() === libraries.url);
+  assert.ok(shelfFrame, 'library preview loaded');
+  await shelfFrame.waitForFunction(() => window.libraryResult !== undefined);
+  assert.deepEqual(await shelfFrame.evaluate(() => window.libraryResult), {
+    tiny: 'tiny:h',
+    more: 'tiny:h+more',
+    same: true,
+    global: '1.2.0',
+    reactish: '1',
+    loads: 1,
+  });
+  assert.equal(await shelfFrame.evaluate(() => window.jsxResult), 'b:1');
+  assert.equal(
+    await shelfFrame.locator('#styled').evaluate((element) => getComputedStyle(element).color),
+    'rgb(1, 2, 3)',
+  );
+  assert.equal(libraries.problems.length, 2, JSON.stringify(libraries.problems));
+  assert.match(libraries.problems[0], /Tinylib 1\.2\.0 does not come with this app/);
+  assert.match(libraries.problems[1], /npm package "three"/);
+  assert.equal(network.length, 0, 'library pages make no external request');
   await page.evaluate(() => {
     window.previewLease.dispose();
     document.querySelector('iframe').remove();
@@ -298,7 +469,7 @@ try {
   const media = [];
   for (const type of [chromium, webkit]) media.push(await checkTypeMedia(type, port));
   console.log(
-    JSON.stringify({ ok: true, checks: 22, reads: result.reads, typePage, media }, null, 2),
+    JSON.stringify({ ok: true, checks: 29, reads: result.reads, typePage, media }, null, 2),
   );
 } finally {
   await browser?.close();

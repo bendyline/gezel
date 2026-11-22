@@ -14,7 +14,7 @@
  * (see client/node-tls.ts for the gory details).
  */
 
-import { Agent, fetch as undiciFetch } from 'undici';
+import { Agent, Pool, fetch as undiciFetch } from 'undici';
 import {
   IdentityResponseSchema,
   certFingerprintFromPem,
@@ -26,10 +26,26 @@ import type { PairedRemote, RemotesRegistry } from './types.js';
 type UndiciUrl = Parameters<typeof undiciFetch>[0];
 type UndiciInit = Parameters<typeof undiciFetch>[1];
 
-export type ClosableFetch = typeof fetch & { close(): Promise<void> };
+export interface CloseFetchOptions {
+  /**
+   * How long requests still in flight may finish before they are aborted.
+   * Omitted, close waits for every one of them, however long it streams.
+   */
+  graceMs?: number;
+}
+
+export type ClosableFetch = typeof fetch & { close(options?: CloseFetchOptions): Promise<void> };
 
 /** Connect timeout for a paired peer (see {@link createPinnedFetch}). */
 export const PINNED_CONNECT_TIMEOUT_MS = 5_000;
+
+/**
+ * What {@link closePairedRemoteFetches} gives in-flight requests. A streamed
+ * reply (a status feed the UI holds open, a model download) ends only when its
+ * own client hangs up, so an unbounded close waited on it: quitting with
+ * Settings → About open stalled shutdown until the supervisor killed the daemon.
+ */
+export const PAIRED_FETCH_CLOSE_GRACE_MS = 2_000;
 
 /** Failures before any TLS handshake: no certificate was presented, so none can be stale. */
 const NO_HANDSHAKE_CODES = new Set([
@@ -53,9 +69,53 @@ function failedBeforeHandshake(err: unknown): boolean {
   return false;
 }
 
-async function closeFetch(fetchImpl: typeof fetch | null | undefined): Promise<void> {
+async function closeFetch(
+  fetchImpl: typeof fetch | null | undefined,
+  options?: CloseFetchOptions,
+): Promise<void> {
   const close = (fetchImpl as Partial<ClosableFetch> | null | undefined)?.close;
-  if (typeof close === 'function') await close.call(fetchImpl);
+  if (typeof close === 'function') await close.call(fetchImpl, options);
+}
+
+/**
+ * An undici Agent that can close gracefully and then, once a grace runs out,
+ * abort what is still in flight. `Agent.close()` forgets its per-origin pools
+ * the moment it starts, so an `Agent.destroy()` after it finds nothing to tear
+ * down and the streams keep running; this keeps its own hold on each pool.
+ */
+function createClosableAgent(options: Agent.Options): {
+  dispatcher: Agent;
+  close(options?: CloseFetchOptions): Promise<void>;
+} {
+  const pools = new Set<Pool>();
+  const dispatcher = new Agent({
+    ...options,
+    factory: (origin, poolOptions) => {
+      for (const pool of pools) if (pool.closed || pool.destroyed) pools.delete(pool);
+      const pool = new Pool(origin, poolOptions as Pool.Options);
+      pools.add(pool);
+      return pool;
+    },
+  });
+  const close = async (closeOptions?: CloseFetchOptions): Promise<void> => {
+    const closing = dispatcher.close();
+    const graceMs = closeOptions?.graceMs;
+    if (graceMs === undefined) return closing;
+    let timer: NodeJS.Timeout | undefined;
+    const graceExpired = new Promise<true>((resolve) => {
+      timer = setTimeout(() => resolve(true), Math.max(0, graceMs));
+      timer.unref?.();
+    });
+    const expired = await Promise.race([closing.then(() => false as const), graceExpired]).finally(
+      () => clearTimeout(timer),
+    );
+    if (!expired) return;
+    closing.catch(() => undefined);
+    const remaining = Array.from(pools);
+    pools.clear();
+    await Promise.allSettled(remaining.map((pool) => pool.destroy()));
+  };
+  return { dispatcher, close };
 }
 
 /**
@@ -64,7 +124,7 @@ async function closeFetch(fetchImpl: typeof fetch | null | undefined): Promise<v
  * inference + large artifact downloads.
  */
 export function createPinnedFetch(certPem: string): ClosableFetch {
-  const dispatcher = new Agent({
+  const { dispatcher, close } = createClosableAgent({
     connect: {
       ca: certPem,
       rejectUnauthorized: true,
@@ -83,9 +143,7 @@ export function createPinnedFetch(certPem: string): ClosableFetch {
   });
   const pinned = ((url: UndiciUrl, init?: UndiciInit) =>
     undiciFetch(url, { ...init, dispatcher })) as unknown as ClosableFetch;
-  pinned.close = async () => {
-    await dispatcher.close();
-  };
+  pinned.close = close;
   return pinned;
 }
 
@@ -97,7 +155,7 @@ export function createPinnedFetch(certPem: string): ClosableFetch {
  * Never reuse this for inference — pair, pin, then use {@link createPinnedFetch}.
  */
 export function createInsecureBootstrapFetch(): ClosableFetch {
-  const dispatcher = new Agent({
+  const { dispatcher, close } = createClosableAgent({
     connect: { rejectUnauthorized: false },
     allowH2: true,
     headersTimeout: 10_000,
@@ -105,9 +163,7 @@ export function createInsecureBootstrapFetch(): ClosableFetch {
   });
   const bootstrap = ((url: UndiciUrl, init?: UndiciInit) =>
     undiciFetch(url, { ...init, dispatcher })) as unknown as ClosableFetch;
-  bootstrap.close = async () => {
-    await dispatcher.close();
-  };
+  bootstrap.close = close;
   return bootstrap;
 }
 
@@ -172,13 +228,13 @@ export function createPairedRemoteFetch(
       return await active!(url, init);
     }
   }) as ClosableFetch;
-  paired.close = async () => {
+  paired.close = async (options) => {
     if (closed) return;
     closed = true;
     await refresh?.catch(() => undefined);
     const current = active;
     active = null;
-    await closeFetch(current);
+    await closeFetch(current, options);
   };
   return paired;
 }
@@ -207,20 +263,27 @@ export function getPairedRemoteFetch(
   return managed;
 }
 
+/**
+ * Drop the shared connection to one paired server, or to all of them. Every
+ * caller is letting that connection go (unpairing, a moved or restarted
+ * server, shutdown), so requests still in flight get
+ * {@link PAIRED_FETCH_CLOSE_GRACE_MS} and are then aborted.
+ */
 export async function closePairedRemoteFetches(
   registry: RemotesRegistry,
   remoteId?: string,
+  options: CloseFetchOptions = { graceMs: PAIRED_FETCH_CLOSE_GRACE_MS },
 ): Promise<void> {
   const entries = sharedFetches.get(registry);
   if (!entries) return;
   if (remoteId !== undefined) {
     const entry = entries.get(remoteId);
     entries.delete(remoteId);
-    await entry?.fetch.close();
+    await entry?.fetch.close(options);
     return;
   }
   sharedFetches.delete(registry);
-  await Promise.allSettled(Array.from(entries.values(), (entry) => entry.fetch.close()));
+  await Promise.allSettled(Array.from(entries.values(), (entry) => entry.fetch.close(options)));
 }
 
 async function refreshPairedCertificate(

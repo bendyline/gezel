@@ -7,6 +7,18 @@ import {
   previewImportProblem,
   resolvePreviewImport,
 } from '@bendyline/gezel';
+import {
+  type PageLibraryFile,
+  type PageLibraryLine,
+  commonJsModuleSpec,
+  globalModuleCommonJs,
+  globalModuleSpec,
+  isBabelStandaloneUrl,
+  resolveLibraryImport,
+  resolveLibraryRelative,
+  resolvePageLibrarySpecifier,
+  resolvePageLibraryUrl,
+} from '@bendyline/gezel/pages';
 import { previewAssetPath, previewEntryPath } from './html-preview-path.js';
 import type { PreviewModuleCompiler } from './script-compiler.js';
 
@@ -15,6 +27,37 @@ import type { HostHtmlPreview, HostHtmlPreviewRequest } from '../../ui/src/html-
 type OfflineHtmlPreviewRequest = HostHtmlPreviewRequest;
 type OfflineHtmlPreview = HostHtmlPreview;
 export type PublishHtmlPreview = (html: string) => Promise<OfflineHtmlPreview>;
+
+/**
+ * The page libraries this app carries (docs/page-libraries.md): a phone
+ * cannot download one, so the build bundles a few, and a snapshot embeds
+ * the files a page uses like any other asset.
+ */
+export interface PhonePageLibraries {
+  lines: readonly PageLibraryLine[];
+  /** A file's text, or null when this build does not carry it. */
+  read(line: PageLibraryLine, path: string): string | null;
+  /** A module file the build already compiled, so the phone never transpiles a library. */
+  compiled?(line: PageLibraryLine, path: string): { code: string; imports: string[] } | null;
+}
+
+/** The libraries this build ships, loaded once and only when a preview is built. */
+async function bundledPageLibraries(): Promise<PhonePageLibraries | undefined> {
+  const { lines, files, modules } = (await import('virtual:gezel-page-libraries')).default;
+  if (!lines.length) return undefined;
+  const key = (line: PageLibraryLine, path: string) => `${line.library}@${line.version}/${path}`;
+  return {
+    lines,
+    read: (line, path) => files[key(line, path)] ?? null,
+    compiled: (line, path) => modules[key(line, path)] ?? null,
+  };
+}
+
+const JSX_SCRIPT_TYPES = new Set(['text/babel', 'text/jsx', 'text/tsx']);
+
+function isAbsoluteUrl(value: string): boolean {
+  return /^(?:https?:)?\/\//i.test(value.trim());
+}
 const MAX_FILE = 2 * 1024 * 1024;
 const MAX_TOTAL = 16 * 1024 * 1024;
 const MAX_FILES = 64;
@@ -112,6 +155,7 @@ export function createOfflineHtmlPreview(
       compileModules,
       prelude,
       typography,
+      await bundledPageLibraries().catch(() => undefined),
     );
   };
 }
@@ -126,8 +170,36 @@ export async function buildOfflineHtmlPreview(
   prelude?: string,
   /** Host typography defaults, before authored styles; only for project pages. */
   typography?: string,
+  /** Libraries the app carries; without them a page may name none. */
+  libraries?: PhonePageLibraries,
 ): Promise<OfflineHtmlPreview> {
   const entry = previewEntryPath(entryPath);
+  const lines = libraries?.lines ?? [];
+  /** A library file stands in the module graph under one key per file. */
+  const libraryFiles = new Map<string, PageLibraryFile>();
+  const libraryKey = (file: PageLibraryFile) => {
+    const key = `lib:${file.line.library}@${file.line.version}/${file.path}`;
+    libraryFiles.set(key, file);
+    return key;
+  };
+  const libraryText = (file: PageLibraryFile): string => {
+    const text = libraries?.read(file.line, file.path) ?? null;
+    if (text === null)
+      throw new Error(`${file.line.name} ${file.line.version} does not come with this app`);
+    return text;
+  };
+  /** Plain-script builds a written module hands on (React's), run before the linked modules. */
+  const preludes = new Map<string, PageLibraryFile>();
+  const addPrelude = (file: PageLibraryFile): void => {
+    const found = globalModuleSpec(file.line, file.path);
+    if (!found) return;
+    for (const name of found.spec.after ?? []) {
+      const before = resolveLibraryImport(lines, file.line, name);
+      if (before) addPrelude(before);
+    }
+    const build = { line: file.line, path: found.spec.file };
+    preludes.set(`${build.line.library}@${build.line.version}/${build.path}`, build);
+  };
   const bytes = new Map<string, Uint8Array>();
   const assets = new Map<string, string>();
   let total = 0;
@@ -253,6 +325,17 @@ export async function buildOfflineHtmlPreview(
     }
     return `module.exports=${JSON.stringify(account(url))};`;
   };
+  /** A bare import the page's own import map sends to a library's CDN address. */
+  const mappedLibrary = (specifier: string): PageLibraryFile | null => {
+    let url = authoredImports[specifier];
+    if (url === undefined) {
+      const prefix = Object.keys(authoredImports)
+        .filter((key) => key.endsWith('/') && specifier.startsWith(key))
+        .sort((a, b) => b.length - a.length)[0];
+      if (prefix !== undefined) url = authoredImports[prefix] + specifier.slice(prefix.length);
+    }
+    return url && isAbsoluteUrl(url) ? resolvePageLibraryUrl(lines, url, 'module') : null;
+  };
   /**
    * Compiles the module scripts' import graph a round at a time and links it
    * into one classic script. A snapshot's scripts are data URLs, which have
@@ -267,21 +350,93 @@ export async function buildOfflineHtmlPreview(
       let round = [...seen];
       while (round.length) {
         const sources: { path: string; source: string }[] = [];
+        /** Files a linked-as-published module needs, for the next round. */
+        const following: string[] = [];
+        const ready: {
+          path: string;
+          code: string;
+          imports: { specifier: string }[];
+          errors: string[];
+        }[] = [];
         for (const path of round) {
+          const library = libraryFiles.get(path);
+          if (library) {
+            const adapter = globalModuleCommonJs(library.line, library.path);
+            const commonjs = commonJsModuleSpec(library.line, library.path);
+            const built = libraries?.compiled?.(library.line, library.path);
+            if (adapter !== null) {
+              addPrelude(library);
+              modules.set(path, { path, code: adapter, requires: {} });
+            } else if (commonjs) {
+              // Already what the linker runs: linked as published.
+              const requires: Record<string, string> = {};
+              for (const name of commonjs.spec.imports) {
+                const next = resolveLibraryImport(lines, library.line, name);
+                if (!next)
+                  throw new Error(
+                    `${library.line.name} needs ${name}, which this app does not carry`,
+                  );
+                const target = libraryKey(next);
+                requires[name] = target;
+                if (!seen.has(target)) {
+                  seen.add(target);
+                  following.push(target);
+                }
+              }
+              modules.set(path, {
+                path,
+                code: libraryText({ line: library.line, path: commonjs.spec.file }),
+                requires,
+              });
+            } else if (built)
+              ready.push({
+                path,
+                code: built.code,
+                imports: built.imports.map((specifier) => ({ specifier })),
+                errors: [],
+              });
+            else sources.push({ path, source: libraryText(library) });
+            continue;
+          }
           const inline = inlineModules.get(path);
           if (inline !== undefined) sources.push({ path, source: inline });
           else if (isPreviewModulePath(path)) sources.push({ path, source: await text(path) });
           else modules.set(path, { path, code: await dataModule(path), requires: {} });
         }
-        round = [];
-        for (const compiled of sources.length ? await compiler.compile(sources) : []) {
+        round = following;
+        for (const compiled of [
+          ...ready,
+          ...(sources.length ? await compiler.compile(sources) : []),
+        ]) {
           if (compiled.errors.length) throw new Error(compiled.errors.slice(0, 3).join('\n'));
           const requires: Record<string, string> = {};
+          const library = libraryFiles.get(compiled.path);
           for (const { specifier } of compiled.imports) {
-            const found = resolvePreviewImport(specifier, compiled.path);
-            const target =
-              found.kind === 'file' ? await firstExisting(found.candidates) : undefined;
-            if (!target) throw new Error(previewImportProblem(compiled.path, specifier, found));
+            let target: string | undefined;
+            if (library) {
+              const next = /^\.\.?\//.test(specifier)
+                ? resolveLibraryRelative(library, specifier)
+                : resolveLibraryImport(lines, library.line, specifier);
+              if (!next)
+                throw new Error(
+                  `${library.line.name} imports ${specifier}, which this app does not carry`,
+                );
+              target = libraryKey(next);
+            } else {
+              const found = resolvePreviewImport(specifier, compiled.path);
+              const file =
+                found.kind === 'package'
+                  ? (mappedLibrary(specifier) ?? resolvePageLibrarySpecifier(lines, specifier))
+                  : found.kind === 'url'
+                    ? resolvePageLibraryUrl(lines, specifier, 'module')
+                    : null;
+              target = file
+                ? libraryKey(file)
+                : found.kind === 'file'
+                  ? await firstExisting(found.candidates)
+                  : undefined;
+              if (!target) throw new Error(previewImportProblem(compiled.path, specifier, found));
+            }
             requires[specifier] = target;
             if (!seen.has(target)) {
               seen.add(target);
@@ -307,6 +462,8 @@ export async function buildOfflineHtmlPreview(
   const handlers: string[] = [];
   const moduleScripts: { element: Element; path: string }[] = [];
   const inlineModules = new Map<string, string>();
+  /** The page's own import map: it may name the versions it wants by CDN address. */
+  const authoredImports: Record<string, string> = {};
   for (const element of template.content.querySelectorAll('*')) {
     for (const attribute of [...element.attributes]) {
       const name = attribute.name.toLowerCase();
@@ -329,30 +486,72 @@ export async function buildOfflineHtmlPreview(
     const tag = element.tagName.toLowerCase();
     if (tag === 'script') {
       const type = element.getAttribute('type')?.toLowerCase() ?? '';
+      // Modules are linked here, so the map is read, not run (the snapshot's
+      // policy refuses an inline map anyway).
+      if (type === 'importmap') {
+        try {
+          const map = JSON.parse(element.textContent ?? '{}') as { imports?: unknown };
+          if (map.imports && typeof map.imports === 'object')
+            for (const [key, value] of Object.entries(map.imports))
+              if (typeof value === 'string') authoredImports[key] = value;
+        } catch {}
+        element.remove();
+        continue;
+      }
       const src = element.getAttribute('src');
+      // Babel's in-browser compiler: the page's JSX is compiled here instead.
+      if (src && isAbsoluteUrl(src) && isBabelStandaloneUrl(src)) {
+        element.remove();
+        continue;
+      }
+      // JSX for an in-browser compiler runs as a module, deferred as Babel ran it.
+      if (!src && JSX_SCRIPT_TYPES.has(type)) {
+        if (!compileModules)
+          throw new Error('This preview needs a built standalone page using classic JavaScript');
+        const extension = type === 'text/tsx' ? 'tsx' : 'jsx';
+        const path = `${entry} (module ${moduleScripts.length + 1}).${extension}`;
+        inlineModules.set(path, element.textContent ?? '');
+        moduleScripts.push({ element, path });
+        continue;
+      }
       // A `.ts` file can only be a module, whatever its tag says.
       if (type === 'module' || (src && isPreviewCompiledPath(src.split(/[?#]/, 1)[0]!))) {
         if (!compileModules)
           throw new Error('This preview needs a built standalone page using classic JavaScript');
-        const path = src
-          ? previewAssetPath(src, entry, entry)
-          : `${entry} (module ${moduleScripts.length + 1})`;
+        const library =
+          src && isAbsoluteUrl(src) ? resolvePageLibraryUrl(lines, src, 'module') : null;
+        const path = library
+          ? libraryKey(library)
+          : src
+            ? previewAssetPath(src, entry, entry)
+            : `${entry} (module ${moduleScripts.length + 1})`;
         if (!src) inlineModules.set(path, element.textContent ?? '');
         moduleScripts.push({ element, path });
         continue;
       }
       if (type && !['text/javascript', 'application/javascript'].includes(type)) continue;
-      const code = src
-        ? await text(previewAssetPath(src, entry, entry))
-        : (element.textContent ?? '');
+      const library =
+        src && isAbsoluteUrl(src) ? resolvePageLibraryUrl(lines, src, 'classic') : null;
+      const code = library
+        ? libraryText(library)
+        : src
+          ? await text(previewAssetPath(src, entry, entry))
+          : (element.textContent ?? '');
       element.textContent = '';
       element.setAttribute('src', account(dataUrl(code, 'text/javascript')));
       continue;
     }
     if (tag === 'link') {
       if (element.getAttribute('rel')?.toLowerCase() === 'stylesheet') {
-        const path = previewAssetPath(element.getAttribute('href') ?? '', entry, entry);
+        const href = element.getAttribute('href') ?? '';
+        const library = isAbsoluteUrl(href) ? resolvePageLibraryUrl(lines, href, 'style') : null;
         const style = document.createElement('style');
+        if (library) {
+          style.textContent = account(libraryText(library));
+          element.replaceWith(style);
+          continue;
+        }
+        const path = previewAssetPath(href, entry, entry);
         style.textContent = await css(await text(path), path, [path]);
         const media = element.getAttribute('media');
         if (media) style.setAttribute('media', media);
@@ -383,6 +582,12 @@ export async function buildOfflineHtmlPreview(
     // script runs then too, so a game that looks up its canvas still finds it.
     first!.element.setAttribute('src', account(dataUrl(linked, 'text/javascript')));
     first!.element.setAttribute('defer', '');
+    // React's build sets its global before the deferred modules read it.
+    for (const build of preludes.values()) {
+      const script = document.createElement('script');
+      script.setAttribute('src', account(dataUrl(libraryText(build), 'text/javascript')));
+      first!.element.before(script);
+    }
     for (const { element } of rest) element.remove();
   }
   const log = dataUrl(

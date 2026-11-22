@@ -20,6 +20,7 @@ import {
   ImageLoraVersionManifestSchema,
   ImageModelVersionManifestSchema,
   KnowledgeCatalogVersionManifestSchema,
+  PageLibraryVersionManifestSchema,
   ProjectTypeVersionManifestSchema,
   ToolsetVersionManifestSchema,
   VideoModelVersionManifestSchema,
@@ -260,6 +261,7 @@ const KINDS: CatalogKind[] = [
   'image-lora',
   'video-model',
   'knowledge-catalog',
+  'page-library',
 ];
 
 /**
@@ -278,6 +280,7 @@ const KIND_DIR: Record<CatalogKind, string> = {
   'image-lora': 'image-loras',
   'video-model': 'video-models',
   'knowledge-catalog': 'knowledge-catalogs',
+  'page-library': 'page-libraries',
 };
 
 function shardPrefix(id: string): string {
@@ -1116,7 +1119,8 @@ type AnyVersionPayload =
   | (ReturnType<typeof VideoModelVersionManifestSchema.parse> & { __kind: 'video-model' })
   | (ReturnType<typeof KnowledgeCatalogVersionManifestSchema.parse> & {
       __kind: 'knowledge-catalog';
-    });
+    })
+  | (ReturnType<typeof PageLibraryVersionManifestSchema.parse> & { __kind: 'page-library' });
 
 function parseVersionPayload(
   kind: CatalogKind,
@@ -1159,6 +1163,10 @@ function parseVersionPayload(
     if (kind === 'image-lora') {
       const p = readContent(ImageLoraVersionManifestSchema, raw, where);
       return { ...p, __kind: 'image-lora' } as AnyVersionPayload;
+    }
+    if (kind === 'page-library') {
+      const p = readContent(PageLibraryVersionManifestSchema, raw, where);
+      return { ...p, __kind: 'page-library' } as AnyVersionPayload;
     }
     const p = readContent(ImageModelVersionManifestSchema, raw, where);
     return { ...p, __kind: 'image-model' } as AnyVersionPayload;
@@ -1613,6 +1621,37 @@ function mergeIdentityAndVersion(
       ...(identity.hardwareTier !== undefined ? { hardwareTier: identity.hardwareTier } : {}),
       ...(identity.minVramGB !== undefined ? { minVramGB: identity.minVramGB } : {}),
       commercialUse: identity.commercialUse,
+      ...(version.notes !== undefined ? { notes: version.notes } : {}),
+      availableVersions,
+    };
+  }
+  if (
+    kind === 'page-library' &&
+    identity.kind === 'page-library' &&
+    version.__kind === 'page-library'
+  ) {
+    return {
+      schemaVersion: 1,
+      kind: 'page-library',
+      id: identity.id,
+      name: identity.name,
+      description: identity.description,
+      tags: identity.tags,
+      maintainer: identity.maintainer,
+      ...(identity.logo !== undefined ? { logo: identity.logo } : {}),
+      ...(identity.license !== undefined ? { license: identity.license } : {}),
+      ...(identity.licenseClass !== undefined ? { licenseClass: identity.licenseClass } : {}),
+      ...(identity.licenseShortName !== undefined
+        ? { licenseShortName: identity.licenseShortName }
+        : {}),
+      ...(identity.licenseUrl !== undefined ? { licenseUrl: identity.licenseUrl } : {}),
+      ...(identity.recoScore !== undefined ? { recoScore: identity.recoScore } : {}),
+      ...(minGezelVersion !== undefined ? { minGezelVersion } : {}),
+      ...(identity.homepage !== undefined ? { homepage: identity.homepage } : {}),
+      version: version.version,
+      releasedAt: version.releasedAt,
+      // A line is the item's library; the item names it for every line.
+      lines: version.lines.map((line) => ({ ...line, library: identity.id, name: identity.name })),
       ...(version.notes !== undefined ? { notes: version.notes } : {}),
       availableVersions,
     };

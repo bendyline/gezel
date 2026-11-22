@@ -217,13 +217,38 @@ export function parseRobots(text: string): RobotsRules | null {
   return (ours ?? star)?.rules ?? null;
 }
 
-function robotsPatternMatches(pattern: string, path: string): boolean {
+/**
+ * Whether a robots.txt rule matches a path: `*` matches any run of
+ * characters, a trailing `$` anchors the end, and otherwise the rule is a
+ * prefix. The site writes the rule, so this never builds a RegExp: one with
+ * a few `*` in a row backtracked exponentially on the daemon's main thread
+ * (seven stars took half a second on a 40-character path, ten would hang it).
+ * Greedy matching with one backtrack point is linear in practice and at worst
+ * pattern length times path length.
+ */
+export function robotsPatternMatches(pattern: string, path: string): boolean {
   const anchored = pattern.endsWith('$');
-  const body = (anchored ? pattern.slice(0, -1) : pattern)
-    .split('*')
-    .map((p) => p.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
-    .join('.*');
-  return new RegExp(`^${body}${anchored ? '$' : ''}`).test(path);
+  const body = anchored ? pattern.slice(0, -1) : `${pattern}*`;
+  let p = 0;
+  let s = 0;
+  let star = -1;
+  let resume = 0;
+  while (s < path.length) {
+    if (p < body.length && body[p] === '*') {
+      star = p++;
+      resume = s;
+    } else if (p < body.length && body[p] === path[s]) {
+      p++;
+      s++;
+    } else if (star >= 0) {
+      p = star + 1;
+      s = ++resume;
+    } else {
+      return false;
+    }
+  }
+  while (p < body.length && body[p] === '*') p++;
+  return p === body.length;
 }
 
 /** Whether robots rules allow a path (longest match wins; Allow wins a tie). */

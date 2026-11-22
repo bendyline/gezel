@@ -321,7 +321,7 @@ export function ProjectLookoutsSection({ projectId }: { projectId: string }) {
     <section className="settings-section lookouts-section" aria-labelledby="project-lookouts-title">
       <div className="gz-mail-header">
         <h3 id="project-lookouts-title">Lookouts</h3>
-        {editing !== 'new' && choices.cameras.length > 0 ? (
+        {editing !== 'new' && (choices.cameras.length > 0 || choices.websites.length > 0) ? (
           <button type="button" onClick={() => setEditing('new')}>
             Add a lookout
           </button>
@@ -329,7 +329,7 @@ export function ProjectLookoutsSection({ projectId }: { projectId: string }) {
       </div>
       {data.paused ? (
         <p className="small camera-setup-notice">
-          Every lookout is paused. Cameras keep watching, but nothing acts on what they see.{' '}
+          Every lookout is paused. Gezel keeps watching, but nothing acts on what it sees.{' '}
           <button
             type="button"
             disabled={busy === 'resume-all'}
@@ -347,8 +347,9 @@ export function ProjectLookoutsSection({ projectId }: { projectId: string }) {
       ) : null}
       {data.lookouts.length === 0 && editing !== 'new' ? (
         <p className="muted">
-          Tell a camera what to keep a lookout for and what to do when it sees it — play a sound,
-          tell you, or have Gezel follow up.
+          {choices.cameras.length > 0
+            ? 'Tell a camera what to keep a lookout for and what to do when it sees it: play a sound, tell you, or have Gezel follow up.'
+            : 'Tell Gezel what to watch for on a site, such as a page that changed, a new page or words that appear, and what to do then: play a sound, tell you, or have Gezel follow up.'}
         </p>
       ) : (
         <ul className="settings-list">{data.lookouts.map(row)}</ul>

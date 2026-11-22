@@ -1177,6 +1177,11 @@ jobs:
         run: pnpm build:packaged
         env:
           GEZEL_MACOS_SIGN_BUNDLE: '1'
+          # Gezel's own Google sign-in app; see the Windows job. Every desktop
+          # build needs it, or Google connections on this platform fall back to
+          # the person's own app while What's New says otherwise.
+          GEZEL_BUILD_GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GEZEL_GOOGLE_OAUTH_CLIENT_ID }}
+          GEZEL_BUILD_GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GEZEL_GOOGLE_OAUTH_CLIENT_SECRET }}
 
       - name: Verify release version propagation
         run: |
@@ -1599,6 +1604,10 @@ jobs:
 
       - name: Build + produce service bundle
         run: pnpm build:packaged
+        env:
+          # Gezel's own Google sign-in app; see the Windows job.
+          GEZEL_BUILD_GOOGLE_OAUTH_CLIENT_ID: ${{ secrets.GEZEL_GOOGLE_OAUTH_CLIENT_ID }}
+          GEZEL_BUILD_GOOGLE_OAUTH_CLIENT_SECRET: ${{ secrets.GEZEL_GOOGLE_OAUTH_CLIENT_SECRET }}
 
       - name: Verify release version propagation
         run: |

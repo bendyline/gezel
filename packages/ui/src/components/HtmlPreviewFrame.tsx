@@ -159,6 +159,9 @@ type PreviewLoadState =
  * page would keep its scripts running with its bridge to the app shut, so
  * it opens fresh when shown, as it did before views were kept.
  */
+/** How long the preview waits on a library download before giving up on reloading for it. */
+const PAGE_LIBRARY_WAIT_MS = 60_000;
+
 export function HtmlPreviewFrame(props: HtmlPreviewFrameProps) {
   const shown = useLiveContentShown();
   if (!shown) return <div className={props.className} aria-hidden="true" />;
@@ -189,6 +192,7 @@ function ShownHtmlPreviewFrame({
   const fullscreenRef = useRef(fullscreen);
   fullscreenRef.current = fullscreen;
   const [securityPolicyRevision, setSecurityPolicyRevision] = useState(0);
+  const [libraryRevision, setLibraryRevision] = useState(0);
   const bridgeRequestKey = useRef('');
   const requestKey = JSON.stringify([
     projectId,
@@ -196,6 +200,7 @@ function ShownHtmlPreviewFrame({
     source,
     refreshKey ?? null,
     securityPolicyRevision,
+    libraryRevision,
   ]);
   bridgeRequestKey.current = requestKey;
   const [loadState, setLoadState] = useState<PreviewLoadState | null>(null);
@@ -219,6 +224,25 @@ function ShownHtmlPreviewFrame({
     window.addEventListener('gezel:config-updated', onConfigUpdated);
     return () => window.removeEventListener('gezel:config-updated', onConfigUpdated);
   }, []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey asks again after a refresh, when the page may name a new library, though the effect body does not read it.
+  useEffect(() => {
+    // A page that uses a library this computer does not have yet gets it
+    // downloaded here (docs/page-libraries.md), then reloads once it lands.
+    // The phone's snapshot preview has no shelf.
+    if (source !== 'workspace' || window.__GEZEL__?.createHtmlPreview) return;
+    if (!/\.html?$/i.test(path)) return;
+    let cancelled = false;
+    void api
+      .getPageLibraryNeeds(projectId, path, { waitMs: PAGE_LIBRARY_WAIT_MS })
+      .then((needs) => {
+        if (!cancelled && needs?.installed?.length) setLibraryRevision((revision) => revision + 1);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, path, source, refreshKey]);
 
   useEffect(() => {
     let cancelled = false;

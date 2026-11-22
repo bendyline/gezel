@@ -315,6 +315,33 @@ describe('authoring notes', () => {
   });
 });
 
+describe('page libraries a step declares', () => {
+  const declared = { ...step, libraries: ['three', 'chart.js'] } as typeof step;
+  it('names them in the step, and only when declared', () => {
+    const block = renderTaskContextBlock(
+      { task, step: declared },
+      { pageLibraries: new Set(['three', 'chart.js', 'd3']) },
+    );
+    expect(block).toContain(
+      "This step's page may use these page libraries, by package name or their usual CDN address: `three`, `chart.js`.",
+    );
+    expect(
+      renderTaskContextBlock({ task, step }, { pageLibraries: new Set(['three']) }),
+    ).not.toContain('page libraries');
+  });
+
+  it('names only the ones this host can load', () => {
+    expect(
+      renderTaskContextBlock({ task, step: declared }, { pageLibraries: new Set(['chart.js']) }),
+    ).toContain('page libraries, by package name or their usual CDN address: `chart.js`.');
+    // A host that reports none (a phone with no staged shelf) names none.
+    expect(renderTaskContextBlock({ task, step: declared })).not.toContain('page libraries');
+    expect(
+      renderTaskContextBlock({ task, step: declared }, { pageLibraries: new Set() }),
+    ).not.toContain('page libraries');
+  });
+});
+
 describe('the task contract block', () => {
   const contract = {
     goal: 'A deck whose figures are cited to the brief.',

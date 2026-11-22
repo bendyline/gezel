@@ -31,6 +31,30 @@ describe('pnpm exec against managed toolset trees', () => {
     }
   });
 
+  it('installs managed trees with PNPM_MANAGED_TREE_INSTALL_CONFIG, never the bare linker flag', () => {
+    // The bare flag let a managed-tree install adopt a parent folder's
+    // pnpm-workspace.yaml and relink that workspace's node_modules.
+    for (const file of sourceFiles()) {
+      const text = readFileSync(file, 'utf8');
+      let at = text.indexOf('PNPM_HOISTED_NODE_LINKER');
+      while (at !== -1) {
+        const lineStart = text.lastIndexOf('\n', at) + 1;
+        const lastImport = text.lastIndexOf('import ', at);
+        const inImport = lastImport !== -1 && !text.slice(lastImport, at).includes(';');
+        const inComment = /^\s*(\/\/|\*|\/\*)/.test(text.slice(lineStart, at));
+        if (!inImport && !inComment) {
+          const array = text.slice(text.lastIndexOf('[', at), text.indexOf(']', at) + 1);
+          expect(array, `${relative(SRC, file)} installs with the bare linker flag`).not.toMatch(
+            /'install'/,
+          );
+        }
+        at = text.indexOf('PNPM_HOISTED_NODE_LINKER', at + 1);
+      }
+    }
+    const bootstrap = readFileSync(join(SRC, 'system-toolsets', 'bootstrap.ts'), 'utf8');
+    expect(bootstrap).toContain('...PNPM_MANAGED_TREE_INSTALL_CONFIG');
+  });
+
   it('never pairs the bare hoisted-linker flag with exec', () => {
     for (const file of sourceFiles()) {
       const text = readFileSync(file, 'utf8');

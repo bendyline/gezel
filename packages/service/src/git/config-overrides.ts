@@ -24,6 +24,18 @@ export const REPOSITORY_CONFIG_OVERRIDES: readonly string[] = [
   `core.hooksPath=${devNull}`,
 ];
 
+/**
+ * The overrides for a commit, merge or push the person started from the app.
+ * Their hooks run, as they would from a terminal: Git LFS uploads objects in
+ * `pre-push`, and pre-commit secret scanners and commit-msg hooks guard what
+ * leaves the machine. Skipping them sent LFS pointers without objects and
+ * bypassed the person's own checks without a word. fsmonitor stays off, since
+ * it runs on every status and no commit needs it. Never use this for git a
+ * gezel asked for or Gezel runs on its own: a gezel can write a hooks folder
+ * that lives in the working tree (husky's `.husky/`).
+ */
+export const PERSON_STARTED_CONFIG_OVERRIDES: readonly string[] = ['-c', 'core.fsmonitor=false'];
+
 const DIFF_FAMILY = new Set(['diff', 'log', 'show']);
 
 /** Flags a subcommand must carry so it runs no diff or textconv program. */

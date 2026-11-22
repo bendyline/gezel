@@ -832,6 +832,12 @@ Don't restyle a settings page per surface; extend the recipe and this section.
 - **A described tray in a section is one unit.** Wrap the tray and its
   readout in a plain element so no flex gap or paragraph margin comes
   between them. Inside a section the readout is muted and margin-free.
+- **A list of things you download is rows, not cards.** Settings → Page
+  libraries lists each library by name and description, then one row per
+  version: the version, what it is and where it stands ("On this computer ·
+  12 MB", "Came with Gezel"), and one key (Download or Remove). Parted by
+  space like the rest of a section (`.gz-page-libraries`); a box around each
+  library would read as nine separate settings.
 - **Smaller pieces of the recipe.** `.gz-setting-inline` for a control
   inside a sentence ("Keep sent drafts for [90] days"). `.gz-setting-stack`
   for a wrapper holding several settings; it keeps the body's 1.5rem rhythm.

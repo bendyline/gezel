@@ -89,6 +89,7 @@ const loadFaceRecognitionModule = () => import('../components/FaceRecognitionCar
 const loadMediaSearchModule = () => import('../components/MediaSearchCard.js');
 const loadGildeUpdatesModule = () => import('../components/GildeUpdatesCard.js');
 const loadKnowledgeCatalogsModule = () => import('../components/KnowledgeCatalogsCard.js');
+const loadPageLibrariesModule = () => import('../components/PageLibrariesCard.js');
 const loadRemoteServersModule = () => import('../components/RemoteServersPanel.js');
 const loadStorageUsageModule = () => import('../components/StorageUsageCard.js');
 const loadToolsetsEditorModule = () => import('../components/ToolsetsEditor.js');
@@ -127,6 +128,9 @@ const FaceRecognitionCard = lazy(() =>
 );
 const GildeUpdatesCard = lazy(() =>
   loadGildeUpdatesModule().then(({ GildeUpdatesCard }) => ({ default: GildeUpdatesCard })),
+);
+const PageLibrariesCard = lazy(() =>
+  loadPageLibrariesModule().then(({ PageLibrariesCard }) => ({ default: PageLibrariesCard })),
 );
 const KnowledgeCatalogsCard = lazy(() =>
   loadKnowledgeCatalogsModule().then(({ KnowledgeCatalogsCard }) => ({
@@ -241,6 +245,7 @@ type SectionId =
   | 'connectedApps'
   | 'remoteServers'
   | 'toolsets'
+  | 'pageLibraries'
   | 'knowledge'
   | 'securityCompliance'
   | 'accounts'
@@ -273,6 +278,7 @@ const SECTION_IDS: ReadonlySet<string> = new Set<SectionId>([
   'connectedApps',
   'remoteServers',
   'toolsets',
+  'pageLibraries',
   'knowledge',
   'securityCompliance',
   'accounts',
@@ -336,6 +342,9 @@ function preloadSettingsSection(section: SectionId): void {
       break;
     case 'toolsets':
       loading = loadToolsetsEditorModule();
+      break;
+    case 'pageLibraries':
+      loading = loadPageLibrariesModule();
       break;
     case 'securityCompliance':
       loading = loadSecurityComplianceSettingsModule();
@@ -435,6 +444,7 @@ function buildSections(platform: string | undefined): SettingsNavEntry[] {
     { id: 'channels', label: 'Channels', group: 'more' },
     { id: 'remoteServers', label: 'Remote servers', group: 'more' },
     { id: 'toolsets', label: 'Shared toolsets', group: 'more' },
+    { id: 'pageLibraries', label: 'Page libraries', group: 'more' },
   ];
 }
 
@@ -3885,6 +3895,7 @@ function DaemonSettingsView() {
           {section === 'remoteServers' && <RemoteServersPanel />}
 
           {section === 'knowledge' && <KnowledgeCatalogsCard />}
+          {section === 'pageLibraries' && <PageLibrariesCard />}
 
           {section === 'toolsets' && (
             <SettingsSection

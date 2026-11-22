@@ -18,15 +18,25 @@ behaves the same on either:
   `.mts`, `.jsx` to `.tsx`.
 - A root-absolute source (`/src/main.ts`, as Vite writes it) means the page's
   own folder.
-- An npm package, a URL, or a path above the previewed folder is refused, with
-  a message naming the file that made the import (`previewImportProblem`).
+- A page library is answered locally, by npm name or CDN address
+  ([page-libraries.md](page-libraries.md)). On the desktop a name is left for
+  the page's import map and an address is rewritten; a phone embeds the
+  library files its build carries in the snapshot, already compiled.
+- Any other npm package, or a path above the previewed folder, is refused,
+  with a message naming the file that made the import
+  (`previewImportProblem`). Any other URL is left to the page's network
+  policy on the desktop and refused on phones.
 
 Files are compiled by `compilePreviewModule` in
 [script-runtime/preview-module.ts](../packages/script-runtime/src/preview-module.ts):
 types are stripped, never checked, so a type error never keeps a game from
 running. A syntax error is reported with its file, line and column. Imports
 are read from the compiled output, so a type-only import of a file that does
-not exist is not a dependency.
+not exist is not a dependency. JSX in a module (a file with imports or
+exports) uses React's automatic runtime, as Vite compiles it, so a component
+file need not import React; one that imports Preact gets Preact's. A script
+with neither, such as Babel's in-page JSX, or a module that names a global
+`React`, keeps `React.createElement` against the page's own React.
 
 ## Desktop: compiled as served
 

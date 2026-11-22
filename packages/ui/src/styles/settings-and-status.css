@@ -670,6 +670,43 @@ label.gz-setting-inline {
   gap: 0.5rem;
 }
 
+/* Settings → Page libraries: one entry per library, its lines beneath, each
+   line one row of version, what it is and where it stands, and one key.
+   Parted by space, never boxed (see docs/ux.md "Settings pages"). */
+.gz-page-libraries {
+  display: grid;
+  gap: 1.25rem;
+  max-width: 48rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gz-page-library-name {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.gz-page-library-lines {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.gz-page-library-line {
+  display: grid;
+  grid-template-columns: 5.5rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.gz-page-library-version {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--text-sm);
+}
+
 @container (max-width: 520px) {
   .gz-settings-section-body {
     --gz-settings-indent: 0;

@@ -1,7 +1,11 @@
 import { spawn } from 'node:child_process';
 import { realpath } from 'node:fs/promises';
 import { windowsHeadlessSpawnOptions } from '@bendyline/gezel/native';
-import { REPOSITORY_CONFIG_OVERRIDES, forcedDiffFlags } from './config-overrides.js';
+import {
+  PERSON_STARTED_CONFIG_OVERRIDES,
+  REPOSITORY_CONFIG_OVERRIDES,
+  forcedDiffFlags,
+} from './config-overrides.js';
 
 /**
  * Thin wrapper around the `git` CLI. Lives here (not in a library) so we
@@ -48,6 +52,11 @@ export interface RunGitOptions {
    * and `GitError` doesn't carry stdout.
    */
   acceptExitCodes?: number[];
+  /**
+   * Run the repository's hooks. Only for a commit, merge or push the person
+   * started from the app (see `PERSON_STARTED_CONFIG_OVERRIDES`).
+   */
+  personStarted?: boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -142,7 +151,7 @@ export async function runGit(args: string[], opts: RunGitOptions = {}): Promise<
     'safe.bareRepository=all',
     '-c',
     'credential.interactive=false',
-    ...REPOSITORY_CONFIG_OVERRIDES,
+    ...(opts.personStarted ? PERSON_STARTED_CONFIG_OVERRIDES : REPOSITORY_CONFIG_OVERRIDES),
     ...withForcedFlags,
   ];
   return new Promise<RunGitResult>((resolve, reject) => {

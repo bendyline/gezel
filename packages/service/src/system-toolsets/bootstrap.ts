@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { SystemToolsetInstallEvent } from '@bendyline/gezel';
 import {
   HttpStatusError,
-  PNPM_HOISTED_NODE_LINKER,
+  PNPM_MANAGED_TREE_INSTALL_CONFIG,
   createLogger,
   retryTransient,
 } from '@bendyline/gezel';
@@ -615,9 +615,10 @@ export async function* installSystemToolsetStreaming(
     // produces a tree that does not survive that rename on Windows (see
     // PNPM_HOISTED_NODE_LINKER's doc comment; surfaced as "Cannot find
     // module 'playwright…'" from the Chromium post-install on clean
-    // Windows machines).
+    // Windows machines). The staging dir sits under the Gezel home, which
+    // may itself sit inside someone's pnpm workspace (PNPM_IGNORE_WORKSPACE).
     const pnpmResult = yield* pump<SystemToolsetInstallEvent, PnpmResult>((emit) =>
-      runPnpm(['install', '--prod', '--frozen-lockfile', PNPM_HOISTED_NODE_LINKER], {
+      runPnpm(['install', '--prod', '--frozen-lockfile', ...PNPM_MANAGED_TREE_INSTALL_CONFIG], {
         cwd: pkgDir,
         ...(signal ? { signal } : {}),
         onLine: (chunk) => emit({ type: 'log', line: chunk }),

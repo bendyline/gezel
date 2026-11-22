@@ -1,5 +1,15 @@
 import type { Dirent } from 'node:fs';
-import { lstat, mkdir, readFile, readdir, readlink, rm, unlink, writeFile } from 'node:fs/promises';
+import {
+  lstat,
+  mkdir,
+  readFile,
+  readdir,
+  readlink,
+  rename,
+  rm,
+  unlink,
+  writeFile,
+} from 'node:fs/promises';
 import { dirname, join, relative, sep } from 'node:path';
 
 /**
@@ -15,10 +25,11 @@ import { dirname, join, relative, sep } from 'node:path';
  *
  * Bounded on purpose: `.git` entries at the workspace root and two levels
  * below it, where Gezel's own git and the person's editor look, skipping
- * `node_modules`. Every git Gezel runs also turns fsmonitor and hooks off, so
- * a repository planted deeper, or a change the person's editor reads before
- * the run ends, is not the only thing standing between a script and a
- * command (see `git/config-overrides.ts`).
+ * `node_modules`. Every git Gezel runs also turns fsmonitor off, and hooks
+ * for anything but the person's own commit or push, so a repository planted
+ * deeper, or a change the person's editor reads before the run ends, is not
+ * the only thing standing between a script and a command (see
+ * `git/config-overrides.ts`).
  */
 
 /** Files in a git directory whose content can name a program or redirect git to another one. */
@@ -53,27 +64,70 @@ type GitEntrySnapshot =
 export interface GitControlSnapshot {
   root: string;
   entries: ReadonlyMap<string, GitEntrySnapshot>;
+  /** The scan stopped at its folder cap, so a `.git` it did not see may predate the run. */
+  truncated: boolean;
+  takenAt: number;
 }
 
+/** What a repository folder the run created is renamed to, beside where it was. */
+export const SET_ASIDE_GIT_DIR = '.git.gezel-set-aside';
+
 export async function snapshotGitControl(workspaceDir: string): Promise<GitControlSnapshot> {
+  const takenAt = Date.now();
   const entries = new Map<string, GitEntrySnapshot>();
-  for (const [path, kind] of await findGitEntries(workspaceDir)) {
+  const scan = await findGitEntries(workspaceDir);
+  for (const [path, kind] of scan.found) {
     const snapshot = await snapshotEntry(path, kind);
     if (snapshot) entries.set(path, snapshot);
   }
-  return { root: workspaceDir, entries };
+  return { root: workspaceDir, entries, truncated: scan.truncated, takenAt };
 }
 
-/** Put back every `.git` change the run made; a note for the run's output, or null. */
+/**
+ * Put back every `.git` change the run made; a note for the run's output, or
+ * null.
+ *
+ * A repository folder is never deleted: it holds history (unpushed commits,
+ * branches, stashes) that nothing else has. One that reappears elsewhere with
+ * the config of a repository that vanished is that repository, moved, and gets
+ * its control files back. Any other new one is renamed to
+ * {@link SET_ASIDE_GIT_DIR} beside where it was, so git stops reading it as
+ * instructions and the person can rename it back. A new `.git` file or link
+ * holds no history, only a pointer, and is removed.
+ */
 export async function restoreGitControl(snapshot: GitControlSnapshot): Promise<string | null> {
   const restored: string[] = [];
-  const note = (path: string) => restored.push(relative(snapshot.root, path).split(sep).join('/'));
+  const setAside: string[] = [];
+  const rel = (path: string) => relative(snapshot.root, path).split(sep).join('/');
+  const note = (path: string) => restored.push(rel(path));
 
-  const now = await findGitEntries(snapshot.root);
-  for (const path of now.keys()) {
+  const now = (await findGitEntries(snapshot.root)).found;
+  const vanished = [...snapshot.entries].filter(
+    (entry): entry is [string, Extract<GitEntrySnapshot, { kind: 'dir' }>] =>
+      entry[1].kind === 'dir' && !now.has(entry[0]),
+  );
+  for (const [path, kind] of now) {
     if (snapshot.entries.has(path)) continue;
-    await removeEntry(path);
-    note(path);
+    if (kind !== 'dir') {
+      await removeEntry(path);
+      note(path);
+      continue;
+    }
+    const config = await readRegularFile(join(path, 'config'));
+    const moved = vanished.findIndex(([, before]) => {
+      const was = before.files.get('config') ?? null;
+      return was !== null && config !== null && was.equals(config);
+    });
+    const match = vanished[moved];
+    if (match) {
+      vanished.splice(moved, 1);
+      for (const changed of await restoreGitDir(path, match[1])) note(join(path, changed));
+      continue;
+    }
+    if (snapshot.truncated && (await predates(path, snapshot.takenAt))) continue;
+    const target = await setAsideGitDir(path);
+    if (target) setAside.push(`${rel(path)} as ${rel(target)}`);
+    else note(path);
   }
 
   for (const [path, before] of snapshot.entries) {
@@ -102,8 +156,45 @@ export async function restoreGitControl(snapshot: GitControlSnapshot): Promise<s
     note(path);
   }
 
-  if (restored.length === 0) return null;
-  return `[gezel] Put back ${restored.join(', ')}: the script changed git's own files, which git reads as instructions and can run commands from. Leave .git folders alone.`;
+  const notes: string[] = [];
+  if (restored.length > 0) {
+    notes.push(
+      `[gezel] Put back ${restored.join(', ')}: the script changed git's own files, which git reads as instructions and can run commands from. Leave .git folders alone.`,
+    );
+  }
+  if (setAside.length > 0) {
+    notes.push(
+      `[gezel] Set aside ${setAside.join(', ')}: the script made a git repository, and git could run commands from its files. Nothing in it was deleted; rename it back to .git if you trust it.`,
+    );
+  }
+  return notes.length > 0 ? notes.join('\n') : null;
+}
+
+/** Whether `path` was created before `when` (false when the file system cannot say). */
+async function predates(path: string, when: number): Promise<boolean> {
+  const stat = await lstat(path).catch(() => null);
+  return stat !== null && stat.birthtimeMs > 0 && stat.birthtimeMs < when;
+}
+
+/**
+ * Rename a repository folder the run made so git no longer reads it, keeping
+ * every byte. Returns where it went, or null when it could not be moved (it is
+ * then removed, as before, since leaving it would let git run its files).
+ */
+async function setAsideGitDir(path: string): Promise<string | null> {
+  const dir = dirname(path);
+  for (let n = 0; n < 50; n++) {
+    const target = join(dir, n === 0 ? SET_ASIDE_GIT_DIR : `${SET_ASIDE_GIT_DIR}-${n + 1}`);
+    if (await lstat(target).catch(() => null)) continue;
+    try {
+      await rename(path, target);
+      return target;
+    } catch {
+      break;
+    }
+  }
+  await removeEntry(path);
+  return null;
 }
 
 async function snapshotEntry(path: string, kind: EntryKind): Promise<GitEntrySnapshot | null> {
@@ -193,14 +284,16 @@ async function restoreGitDir(
  * follows a link: a linked directory is not descended, and a `.git` that is a
  * link is reported as one.
  */
-async function findGitEntries(root: string): Promise<Map<string, EntryKind>> {
+async function findGitEntries(
+  root: string,
+): Promise<{ found: Map<string, EntryKind>; truncated: boolean }> {
   const found = new Map<string, EntryKind>();
   let frontier = [root];
   let scanned = 0;
   for (let depth = 0; depth <= SCAN_DEPTH && frontier.length > 0; depth++) {
     const next: string[] = [];
     for (const dir of frontier) {
-      if (++scanned > MAX_DIRS_SCANNED) return found;
+      if (++scanned > MAX_DIRS_SCANNED) return { found, truncated: true };
       for (const entry of await readDirEntries(dir)) {
         const full = join(dir, entry.name);
         if (entry.name.toLowerCase() === '.git') {
@@ -214,7 +307,7 @@ async function findGitEntries(root: string): Promise<Map<string, EntryKind>> {
     }
     frontier = next;
   }
-  return found;
+  return { found, truncated: false };
 }
 
 /** Where a link points, or null when `path` is not a link. */

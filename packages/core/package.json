@@ -85,6 +85,10 @@
       "types": "./dist/grounding/index.d.ts",
       "import": "./dist/grounding/index.js"
     },
+    "./pages": {
+      "types": "./dist/pages/index.d.ts",
+      "import": "./dist/pages/index.js"
+    },
     "./remote": {
       "types": "./dist/remote/index.d.ts",
       "import": "./dist/remote/index.js"

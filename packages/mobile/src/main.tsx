@@ -18,6 +18,11 @@ import './product-host.css';
 // host and store setup instead of inside the entry, it no longer holds up the
 // first script from parsing.
 const contentLoad = import('virtual:gezel-portable-content').then((module) => module.default);
+// The libraries this build carries for previews, by name only; their files
+// load with the first preview that uses one.
+const pageLibraryLinesLoad = import('virtual:gezel-page-library-lines').then(
+  (module) => module.default,
+);
 
 async function boot() {
   const host = isNativeHost() ? createNativeHost() : createBrowserHost();
@@ -30,6 +35,7 @@ async function boot() {
   );
   const service = new PortableProductService(store, host.inference, token, {
     htmlPreview,
+    pageLibraries: await pageLibraryLinesLoad.catch(() => []),
     speech: host.speech,
     vision: host.vision,
     projectTypes: async () => (await import('virtual:gezel-portable-project-types')).default,

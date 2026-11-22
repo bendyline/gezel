@@ -35,6 +35,7 @@ export {
 } from './builtin-toolsets.js';
 export {
   extractNpmPackageTarball,
+  extractNpmPackageFiles,
   fetchPinnedNpmTarball,
   validateNpmArchiveEntry,
   installNpmPackageToolset,

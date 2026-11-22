@@ -213,6 +213,13 @@ describe('buildInstructions never advertises a tool the role lacks', () => {
     ).not.toContain('validate(');
   });
 
+  it('names page libraries only to a turn that can write a page', () => {
+    const note = '**Page libraries.** Pages you write can use these: three.js 0.187.';
+    expect(prompt(['read_file', 'write_file'], { pageLibrariesNote: note })).toContain(note);
+    expect(prompt(['read_file'], { pageLibrariesNote: note })).not.toContain('Page libraries');
+    expect(prompt(['read_file', 'write_file'])).not.toContain('Page libraries');
+  });
+
   it('tells a host without browser automation so, not to finish desktop setup', () => {
     const unavailable = prompt(['read_file'], { browserAutomationUnavailable: true });
     expect(unavailable).toContain('**No browser tools here.**');

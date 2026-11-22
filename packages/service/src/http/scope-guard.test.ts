@@ -583,6 +583,21 @@ describe('sessionRouteGuard', () => {
     expect((await app.request('/api/projects/proj-b/workspace')).status).toBe(403);
   });
 
+  it("asks what its project's page needs, but never installs or removes a page library", async () => {
+    const app = sessionPolicyApp(session('proj-a'));
+    expect(
+      (await app.request('/api/projects/proj-a/page-libraries/needs', { method: 'POST' })).status,
+    ).toBe(200);
+    expect(
+      (await app.request('/api/projects/proj-b/page-libraries/needs', { method: 'POST' })).status,
+    ).toBe(403);
+    expect((await app.request('/api/page-libraries')).status).toBe(403);
+    expect((await app.request('/api/page-libraries/install', { method: 'POST' })).status).toBe(403);
+    expect(
+      (await app.request('/api/page-libraries/three/0.187.0', { method: 'DELETE' })).status,
+    ).toBe(403);
+  });
+
   it('lets a session open a knowledge-catalog article but not administer catalogs', async () => {
     // read_document on a knowledge:// URI 403'd for every worker, so a
     // powerpoint-deck researcher could cite search snippets only (2026-09-23).

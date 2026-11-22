@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -6,7 +7,12 @@ import { join } from 'node:path';
 import type { ToolsetManifest } from '@bendyline/gezel';
 import * as tar from 'tar';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { installNpmPackageToolset, validateNpmArchiveEntry } from './npm-package.js';
+import {
+  extractNpmPackageFiles,
+  fetchPinnedNpmTarball,
+  installNpmPackageToolset,
+  validateNpmArchiveEntry,
+} from './npm-package.js';
 
 let home: string;
 const previousPnpmPath = process.env.GEZEL_PNPM_PATH;
@@ -25,7 +31,10 @@ afterEach(async () => {
   await rm(home, { recursive: true, force: true });
 });
 
-async function fixtureTarball(version = '1.0.0'): Promise<Buffer> {
+async function fixtureTarball(
+  version = '1.0.0',
+  installScript = 'process.exit(0);\n',
+): Promise<Buffer> {
   const fixture = join(home, `fixture-${version}`);
   await mkdir(join(fixture, 'package', 'dist'), { recursive: true });
   await writeFile(
@@ -33,7 +42,7 @@ async function fixtureTarball(version = '1.0.0'): Promise<Buffer> {
     JSON.stringify({ name: 'test-tool', version }),
   );
   await writeFile(join(fixture, 'package', 'dist', 'server.js'), 'export {};\n');
-  await writeFile(join(fixture, 'package', 'install'), 'process.exit(0);\n');
+  await writeFile(join(fixture, 'package', 'install'), installScript);
   const archive = join(home, `test-tool-${version}.tgz`);
   await tar.create({ cwd: fixture, file: archive, gzip: true }, ['package']);
   return readFile(archive);
@@ -139,6 +148,105 @@ describe('npm package toolset installer', () => {
       );
     } finally {
       await registry.close();
+    }
+  });
+
+  it('installs with the hoisted linker and ignores a parent pnpm workspace', async () => {
+    // A Gezel home inside a pnpm workspace made the staging install act on
+    // that workspace and relink its node_modules. The stand-in pnpm records
+    // the flags it was given.
+    const tarball = await fixtureTarball(
+      '1.0.0',
+      "require('node:fs').writeFileSync('pnpm-args.json', JSON.stringify(process.argv.slice(2)));\n",
+    );
+    const sha = createHash('sha256').update(tarball).digest('hex');
+    const registry = await serveRegistry(tarball);
+    try {
+      const result = await installNpmPackageToolset({
+        manifest: manifest(sha),
+        installRoot: join(home, 'installed'),
+        registry: registry.registry,
+      });
+      const args = JSON.parse(await readFile(join(result.installPath, 'pnpm-args.json'), 'utf8'));
+      expect(args).toEqual(
+        expect.arrayContaining(['--prod', '--config.node-linker=hoisted', '--ignore-workspace']),
+      );
+    } finally {
+      await registry.close();
+    }
+  });
+});
+
+describe('extractNpmPackageFiles', () => {
+  it('writes only the listed files, without the package folder, and checks identity', async () => {
+    const tarballPath = join(home, 'subset.tgz');
+    await writeFile(tarballPath, await fixtureTarball());
+    const destination = join(home, 'subset');
+    await mkdir(destination);
+
+    const written = await extractNpmPackageFiles({
+      tarballPath,
+      destination,
+      include: ['dist/'],
+      expectedName: 'test-tool',
+      expectedVersion: '1.0.0',
+    });
+
+    expect(written).toEqual(['dist/server.js']);
+    expect(existsSync(join(destination, 'dist', 'server.js'))).toBe(true);
+    expect(existsSync(join(destination, 'install'))).toBe(false);
+    // Read to check the package is the one pinned, then removed: it was not listed.
+    expect(existsSync(join(destination, 'package.json'))).toBe(false);
+  });
+
+  it('refuses a package that is not the one pinned', async () => {
+    const tarballPath = join(home, 'wrong.tgz');
+    await writeFile(tarballPath, await fixtureTarball('9.9.9'));
+    const destination = join(home, 'wrong');
+    await mkdir(destination);
+    await expect(
+      extractNpmPackageFiles({
+        tarballPath,
+        destination,
+        include: ['dist/server.js'],
+        expectedName: 'test-tool',
+        expectedVersion: '1.0.0',
+      }),
+    ).rejects.toThrow(/identity does not match/);
+  });
+});
+
+describe('fetchPinnedNpmTarball', () => {
+  // react-dom's full registry document is 9.7 MB, past the metadata limit;
+  // the registry also answers for one version on its own.
+  it('asks for one version when the full package document is too large', async () => {
+    const tarball = await fixtureTarball();
+    const asked: string[] = [];
+    const server = createServer((request, response) => {
+      asked.push(request.url ?? '');
+      const origin = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+      if (request.url === '/test-tool') {
+        response.setHeader('Content-Type', 'application/json');
+        response.end(JSON.stringify({ padding: 'x'.repeat(6 * 1024 * 1024) }));
+      } else if (request.url === '/test-tool/1.0.0') {
+        response.setHeader('Content-Type', 'application/json');
+        response.end(JSON.stringify({ dist: { tarball: `${origin}/test-tool-1.0.0.tgz` } }));
+      } else {
+        response.end(tarball);
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const sha = await fetchPinnedNpmTarball({
+        packageName: 'test-tool',
+        version: '1.0.0',
+        dest: join(home, 'fetched.tgz'),
+        registry: `http://127.0.0.1:${(server.address() as { port: number }).port}`,
+      });
+      expect(sha).toBe(createHash('sha256').update(tarball).digest('hex'));
+      expect(asked).toEqual(['/test-tool', '/test-tool/1.0.0', '/test-tool-1.0.0.tgz']);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 });

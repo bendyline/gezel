@@ -248,7 +248,15 @@ export function renderTaskReferencesBlock(
 
 export function renderTaskContextBlock(
   task: PromptTaskContext,
-  options: { availableToolNames?: ReadonlySet<string> } = {},
+  options: {
+    availableToolNames?: ReadonlySet<string>;
+    /**
+     * Page library ids that load on this host (docs/page-libraries.md). A
+     * step names only these; undefined names none, since a library a host
+     * cannot load is worse than none.
+     */
+    pageLibraries?: ReadonlySet<string>;
+  } = {},
 ): string {
   const availableToolNames = options.availableToolNames;
   const wired = (name: string) => availableToolNames === undefined || availableToolNames.has(name);
@@ -390,6 +398,12 @@ export function renderTaskContextBlock(
     }
     // The format notes live in one place in core, not in each book.
     if (step.authoring) lines.push(squisqAuthoringNote(step.authoring));
+    const stepLibraries = (step.libraries ?? []).filter((id) => options.pageLibraries?.has(id));
+    if (stepLibraries.length) {
+      lines.push(
+        `This step's page may use these page libraries, by package name or their usual CDN address: ${stepLibraries.map((id) => `\`${id}\``).join(', ')}.`,
+      );
+    }
     const handoffBlock = renderGateHandoffBlock(t, step.id);
     if (handoffBlock) lines.push(handoffBlock);
     // An outcome task's deliverables may span both drawers; the Task

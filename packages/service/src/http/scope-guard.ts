@@ -479,6 +479,10 @@ async function isSessionRouteAllowed(
     if (rest === '/timeline' || rest === '/timeline/') {
       return sessionDeny('project timelines contain other sessions');
     }
+    // A copy of a page to take out of Gezel is the person's to make.
+    if (/^\/pages\/export\/?$/.test(rest)) {
+      return sessionDeny('exporting a page is done by the person in Gezel');
+    }
     const projectSession = /^\/sessions\/([^/]+)(?:\/|$)/.exec(rest);
     if (projectSession && projectSession[1] !== sessionId(auth)) {
       return sessionDeny('session attachment route targets another session');

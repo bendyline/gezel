@@ -72,6 +72,31 @@ export function isTrustedAppDocumentUrl(
   return !NON_APP_DAEMON_PATH.test(parsed.pathname) && !NON_APP_DAEMON_PATH.test(decoded);
 }
 
+/** The one channel the connection-error page needs: its Reconnect button. */
+const CONNECTION_ERROR_PAGE_CHANNELS = new Set(['gezel:restart-service']);
+
+/**
+ * Whether a message comes from the connection-error page main painted itself.
+ *
+ * That page is a `data:` URL, because it must render with the service down, so
+ * its origin is `null` and {@link isTrustedAppDocumentUrl} refuses it. Without
+ * this its Reconnect button could never work. It is matched by the exact URL
+ * main loaded, and answered on its one channel only: never the connection
+ * snapshot, which carries the bearer token.
+ */
+export function isConnectionErrorPageMessage(
+  frameUrl: string,
+  errorPageUrl: string | null,
+  channel: string,
+): boolean {
+  return (
+    errorPageUrl !== null &&
+    frameUrl === errorPageUrl &&
+    errorPageUrl.startsWith('data:text/html') &&
+    CONNECTION_ERROR_PAGE_CHANNELS.has(channel)
+  );
+}
+
 /** True only for a capability-bearing preview document on this daemon. */
 export function isPreviewDocumentUrl(candidate: string, allowedOrigin: string | null): boolean {
   if (!allowedOrigin) return false;
