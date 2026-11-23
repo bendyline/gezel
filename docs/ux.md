@@ -1307,7 +1307,7 @@ Context and Sandbox chips do not take the hit area yet.
 Narrow forms wrap fields and actions before squeezing text inputs; step forms
 and catalog grids can fall to one column within their own pane. Task detail
 puts its view keys above a full-width step tracker below 480px. A non-chat
-editor below 32rem gives its view tabs a separate row so formatting and host
+editor below 32rem gives its view button a separate row so formatting and host
 actions such as Export stay reachable. Compact dialogs use the available phone
 width, and touch dropdown rows, dialog tabs, and dialog actions keep a 44px
 minimum height. Long paths and identifiers wrap within settings panels.

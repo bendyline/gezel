@@ -2243,7 +2243,7 @@ export function ChatComposer({
           key={`${editorRevision}:${gezelId}:${pickedTask?.craftbookId ?? ''}`}
           initialMarkdown={draftRef.current}
           // Chat is a single-surface compose flow. Squisq's host mode keeps
-          // it in Write and removes the document-oriented view tabs while
+          // it in Write and removes the document-oriented view button while
           // leaving one semantic hook for future chat-toolbar trimming.
           hostMode="chat"
           mediaProvider={attachmentsEnabled ? mediaProvider : null}

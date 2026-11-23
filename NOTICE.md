@@ -122,12 +122,16 @@ repository and linked into the workspace. Their license matches Squisq's
 (MIT). Consuming packages pin every Squisq dependency exactly.
 
 - `@bendyline/squisq` — MIT
+- `@bendyline/squisq-calc` — MIT. Spreadsheet calculation; its IronCalc
+  backend is the optional `@ironcalc/wasm` peer listed below.
 - `@bendyline/squisq-cli` — MIT
 - `@bendyline/squisq-react` — MIT
 - `@bendyline/squisq-editor-react` — MIT
 - `@bendyline/squisq-formats` — MIT
 - `@bendyline/squisq-graph` — MIT. A dependency of `@bendyline/squisq`; it has
   no dependencies of its own.
+- `@bendyline/squisq-grid-react` — MIT. The editor's data grid, a dependency
+  of `@bendyline/squisq-editor-react`.
 - `@bendyline/squisq-video` — MIT
 - `@bendyline/squisq-video-react` — MIT. Gezel's editors use its
   cover-image, dashboard-image, and media-edit entries. The media-edit worker
