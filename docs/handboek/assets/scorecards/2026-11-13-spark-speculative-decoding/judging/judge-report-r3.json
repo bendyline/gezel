@@ -1,0 +1,2105 @@
+{
+  "runId": "spec-ab-2026-11-13-r3",
+  "judgedAt": "2026-11-22T21:12:28.812Z",
+  "judgeModels": [
+    "claude-sonnet-5-5"
+  ],
+  "trials": 132,
+  "skipped": 169,
+  "cells": [
+    {
+      "modelId": "gemma4-12b-q4.mtp",
+      "suiteId": "complex-work",
+      "rubric": "scenario",
+      "trials": 1,
+      "meanScore": 4.2
+    },
+    {
+      "modelId": "gemma4-12b-q4.mtp",
+      "suiteId": "core",
+      "rubric": "default-html",
+      "trials": 3,
+      "meanScore": 4.77
+    },
+    {
+      "modelId": "gemma4-12b-q4.mtp",
+      "suiteId": "developer",
+      "rubric": "scenario",
+      "trials": 6,
+      "meanScore": 3.9
+    },
+    {
+      "modelId": "gemma4-12b-q4.mtp",
+      "suiteId": "productivity",
+      "rubric": "scenario",
+      "trials": 9,
+      "meanScore": 5.68
+    },
+    {
+      "modelId": "gemma4-12b-q4.none",
+      "suiteId": "complex-work",
+      "rubric": "scenario",
+      "trials": 1,
+      "meanScore": 2.8
+    },
+    {
+      "modelId": "gemma4-12b-q4.none",
+      "suiteId": "core",
+      "rubric": "default-html",
+      "trials": 3,
+      "meanScore": 5.03
+    },
+    {
+      "modelId": "gemma4-12b-q4.none",
+      "suiteId": "developer",
+      "rubric": "scenario",
+      "trials": 6,
+      "meanScore": 3.22
+    },
+    {
+      "modelId": "gemma4-12b-q4.none",
+      "suiteId": "productivity",
+      "rubric": "scenario",
+      "trials": 9,
+      "meanScore": 5.73
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.dflash",
+      "suiteId": "complex-work",
+      "rubric": "scenario",
+      "trials": 1,
+      "meanScore": 4.2
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.dflash",
+      "suiteId": "core",
+      "rubric": "default-html",
+      "trials": 3,
+      "meanScore": 5.1
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.dflash",
+      "suiteId": "developer",
+      "rubric": "scenario",
+      "trials": 6,
+      "meanScore": 4.92
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.dflash",
+      "suiteId": "productivity",
+      "rubric": "scenario",
+      "trials": 9,
+      "meanScore": 6.32
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.none",
+      "suiteId": "complex-work",
+      "rubric": "scenario",
+      "trials": 1,
+      "meanScore": 4.2
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.none",
+      "suiteId": "core",
+      "rubric": "default-html",
+      "trials": 3,
+      "meanScore": 5.03
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.none",
+      "suiteId": "developer",
+      "rubric": "scenario",
+      "trials": 6,
+      "meanScore": 5
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.none",
+      "suiteId": "productivity",
+      "rubric": "scenario",
+      "trials": 8,
+      "meanScore": 6.37
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.dflash",
+      "suiteId": "complex-work",
+      "rubric": "scenario",
+      "trials": 1,
+      "meanScore": 6.2
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.dflash",
+      "suiteId": "core",
+      "rubric": "default-html",
+      "trials": 3,
+      "meanScore": 6.6
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.dflash",
+      "suiteId": "developer",
+      "rubric": "scenario",
+      "trials": 6,
+      "meanScore": 6.6
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.dflash",
+      "suiteId": "productivity",
+      "rubric": "scenario",
+      "trials": 9,
+      "meanScore": 6.6
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.mtp",
+      "suiteId": "complex-work",
+      "rubric": "scenario",
+      "trials": 1,
+      "meanScore": 4.8
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.mtp",
+      "suiteId": "core",
+      "rubric": "default-html",
+      "trials": 3,
+      "meanScore": 6.27
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.mtp",
+      "suiteId": "developer",
+      "rubric": "scenario",
+      "trials": 6,
+      "meanScore": 6.37
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.mtp",
+      "suiteId": "productivity",
+      "rubric": "scenario",
+      "trials": 9,
+      "meanScore": 6.89
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.none",
+      "suiteId": "complex-work",
+      "rubric": "scenario",
+      "trials": 1,
+      "meanScore": 5
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.none",
+      "suiteId": "core",
+      "rubric": "default-html",
+      "trials": 3,
+      "meanScore": 6.27
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.none",
+      "suiteId": "developer",
+      "rubric": "scenario",
+      "trials": 6,
+      "meanScore": 6.32
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.none",
+      "suiteId": "productivity",
+      "rubric": "scenario",
+      "trials": 9,
+      "meanScore": 7.01
+    }
+  ],
+  "perTrial": [
+    {
+      "modelId": "gemma4-12b-q4.mtp",
+      "suiteId": "complex-work",
+      "scenarioId": "craftbook-invoice-run",
+      "trialId": "craftbook-invoice-run-gemma4-12b-q4-2026-11-22T19-33-04-246Z-yu8m",
+      "rubric": "scenario",
+      "meanScore": 4.2,
+      "scoreAxes": {
+        "numeric integrity": 5,
+        "numbering continuity": 8,
+        "professionalism": 3,
+        "completeness": 4,
+        "print-polish": 1
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.mtp",
+      "suiteId": "core",
+      "scenarioId": "petshop",
+      "trialId": "petshop-gemma4-12b-q4-2026-11-20T01-03-16-207Z-jf14",
+      "rubric": "default-html",
+      "meanScore": 4.8,
+      "scoreAxes": {
+        "visualQuality": 5,
+        "functionalCompleteness": 6,
+        "codeQuality": 5,
+        "polish": 3
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.mtp",
+      "suiteId": "core",
+      "scenarioId": "tankcombat",
+      "trialId": "tankcombat-gemma4-12b-q4-2026-11-20T01-05-26-081Z-zwbm",
+      "rubric": "default-html",
+      "meanScore": 4,
+      "scoreAxes": {
+        "visualQuality": 3,
+        "functionalCompleteness": 6,
+        "codeQuality": 5,
+        "polish": 2
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.mtp",
+      "suiteId": "core",
+      "scenarioId": "tictactoe",
+      "trialId": "tictactoe-gemma4-12b-q4-2026-11-20T01-02-24-776Z-duom",
+      "rubric": "default-html",
+      "meanScore": 5.5,
+      "scoreAxes": {
+        "visualQuality": 5,
+        "functionalCompleteness": 8,
+        "codeQuality": 7,
+        "polish": 2
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.mtp",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-api-contract-review",
+      "trialId": "craftbook-api-contract-review-gemma4-12b-q4-2026-11-20T17-18-09-824Z-agjd",
+      "rubric": "scenario",
+      "meanScore": 4,
+      "scoreAxes": {
+        "workflow fidelity": 5,
+        "usefulness": 3
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.mtp",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-bug-fix-tdd",
+      "trialId": "craftbook-bug-fix-tdd-gemma4-12b-q4-2026-11-20T18-24-21-957Z-bkq7",
+      "rubric": "scenario",
+      "meanScore": 3.7,
+      "scoreAxes": {
+        "Repro-first discipline": 2,
+        "Fix minimality": 7,
+        "Honest verification": 2
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.mtp",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-code-review",
+      "trialId": "craftbook-code-review-gemma4-12b-q4-2026-11-20T17-16-18-075Z-lga3",
+      "rubric": "scenario",
+      "meanScore": 6,
+      "scoreAxes": {
+        "workflow fidelity": 6,
+        "usefulness": 6
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.mtp",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-codemod-sweep",
+      "trialId": "craftbook-codemod-sweep-gemma4-12b-q4-2026-11-20T17-59-41-444Z-s0lc",
+      "rubric": "scenario",
+      "meanScore": 1.7,
+      "scoreAxes": {
+        "Enumeration completeness": 1,
+        "Invariant discipline": 3,
+        "Reconciled verification": 1
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.mtp",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-deep-security-review",
+      "trialId": "craftbook-deep-security-review-gemma4-12b-q4-2026-11-20T17-31-04-518Z-vdyp",
+      "rubric": "scenario",
+      "meanScore": 4.3,
+      "scoreAxes": {
+        "verification": 5,
+        "systemic analysis": 5,
+        "remediation": 3
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.mtp",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-refactor-module",
+      "trialId": "craftbook-refactor-module-gemma4-12b-q4-2026-11-20T18-12-04-781Z-m6xd",
+      "rubric": "scenario",
+      "meanScore": 3.7,
+      "scoreAxes": {
+        "Guardrail-first discipline": 2,
+        "Reversible-stage execution": 4,
+        "Genuine deduplication": 5
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.mtp",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-ab-test-readout",
+      "trialId": "craftbook-ab-test-readout-gemma4-12b-q4-2026-11-20T07-06-37-687Z-los8",
+      "rubric": "scenario",
+      "meanScore": 6.3,
+      "scoreAxes": {
+        "decision rule": 9,
+        "statistical reporting": 5,
+        "honest caveats": 5
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.mtp",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-annotated-bibliography",
+      "trialId": "craftbook-annotated-bibliography-gemma4-12b-q4-2026-11-20T07-09-23-978Z-jlp9",
+      "rubric": "scenario",
+      "meanScore": 6,
+      "scoreAxes": {
+        "accuracy": 7,
+        "grounding": 7,
+        "structure": 6,
+        "actionability": 4
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.mtp",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-powerpoint-deck",
+      "trialId": "craftbook-powerpoint-deck-gemma4-12b-q4-2026-11-20T06-43-42-082Z-9vwk",
+      "rubric": "scenario",
+      "meanScore": 3,
+      "scoreAxes": {
+        "source-acquisition": 3,
+        "outline-parity": 3,
+        "grounding": 3,
+        "convertibility": 3
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.mtp",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-research-to-document",
+      "trialId": "craftbook-research-to-document-gemma4-12b-q4-2026-11-20T07-19-45-284Z-qqsy",
+      "rubric": "scenario",
+      "meanScore": 7.3,
+      "scoreAxes": {
+        "grounding": 6,
+        "structure": 8,
+        "convertibility": 8
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.mtp",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-spreadsheet-model",
+      "trialId": "craftbook-spreadsheet-model-gemma4-12b-q4-2026-11-20T06-38-34-724Z-gqer",
+      "rubric": "scenario",
+      "meanScore": 6,
+      "scoreAxes": {
+        "workflow fidelity": 6,
+        "usefulness": 6
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.mtp",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-week-plan",
+      "trialId": "craftbook-week-plan-gemma4-12b-q4-2026-11-20T07-00-04-207Z-vbc1",
+      "rubric": "scenario",
+      "meanScore": 5.5,
+      "scoreAxes": {
+        "coverage": 6,
+        "prioritization": 5,
+        "conflict-handling": 7,
+        "realism": 4
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.mtp",
+      "suiteId": "productivity",
+      "scenarioId": "docblocks-theme-roundtrip",
+      "trialId": "docblocks-theme-roundtrip-gemma4-12b-q4-2026-11-20T06-42-34-426Z-fbjb",
+      "rubric": "scenario",
+      "meanScore": 6,
+      "scoreAxes": {
+        "grounding": 8,
+        "candor": 6,
+        "usefulness": 4
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.mtp",
+      "suiteId": "productivity",
+      "scenarioId": "meeting-followup",
+      "trialId": "meeting-followup-gemma4-12b-q4-2026-11-20T06-35-32-297Z-88al",
+      "rubric": "scenario",
+      "meanScore": 6,
+      "scoreAxes": {
+        "decisionClarity": 7,
+        "grounding": 6,
+        "actionability": 4,
+        "brevity": 7
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.mtp",
+      "suiteId": "productivity",
+      "scenarioId": "wikipedia-research-brief",
+      "trialId": "wikipedia-research-brief-gemma4-12b-q4-2026-11-20T06-58-06-469Z-b8c1",
+      "rubric": "scenario",
+      "meanScore": 5,
+      "scoreAxes": {
+        "synthesis": 5,
+        "grounding": 4,
+        "citationQuality": 5,
+        "calibration": 6
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.none",
+      "suiteId": "complex-work",
+      "scenarioId": "craftbook-invoice-run",
+      "trialId": "craftbook-invoice-run-gemma4-12b-q4-2026-11-22T04-09-35-471Z-cf5z",
+      "rubric": "scenario",
+      "meanScore": 2.8,
+      "scoreAxes": {
+        "numeric integrity": 4,
+        "numbering continuity": 6,
+        "professionalism": 2,
+        "completeness": 2,
+        "print-polish": 0
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.none",
+      "suiteId": "core",
+      "scenarioId": "petshop",
+      "trialId": "petshop-gemma4-12b-q4-2026-11-20T04-14-07-103Z-visy",
+      "rubric": "default-html",
+      "meanScore": 5.5,
+      "scoreAxes": {
+        "visualQuality": 5,
+        "functionalCompleteness": 7,
+        "codeQuality": 6,
+        "polish": 4
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.none",
+      "suiteId": "core",
+      "scenarioId": "tankcombat",
+      "trialId": "tankcombat-gemma4-12b-q4-2026-11-20T04-22-54-400Z-iefe",
+      "rubric": "default-html",
+      "meanScore": 3.8,
+      "scoreAxes": {
+        "visualQuality": 3,
+        "functionalCompleteness": 6,
+        "codeQuality": 4,
+        "polish": 2
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.none",
+      "suiteId": "core",
+      "scenarioId": "tictactoe",
+      "trialId": "tictactoe-gemma4-12b-q4-2026-11-20T04-12-25-488Z-yoi2",
+      "rubric": "default-html",
+      "meanScore": 5.8,
+      "scoreAxes": {
+        "visualQuality": 5,
+        "functionalCompleteness": 8,
+        "codeQuality": 7,
+        "polish": 3
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.none",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-api-contract-review",
+      "trialId": "craftbook-api-contract-review-gemma4-12b-q4-2026-11-21T01-35-27-179Z-e224",
+      "rubric": "scenario",
+      "meanScore": 4.5,
+      "scoreAxes": {
+        "workflow fidelity": 5,
+        "usefulness": 4
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.none",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-bug-fix-tdd",
+      "trialId": "craftbook-bug-fix-tdd-gemma4-12b-q4-2026-11-21T02-49-49-873Z-p0bu",
+      "rubric": "scenario",
+      "meanScore": 1.7,
+      "scoreAxes": {
+        "Repro-first discipline": 2,
+        "Fix minimality": 2,
+        "Honest verification": 1
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.none",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-code-review",
+      "trialId": "craftbook-code-review-gemma4-12b-q4-2026-11-21T01-32-12-948Z-qf40",
+      "rubric": "scenario",
+      "meanScore": 6.5,
+      "scoreAxes": {
+        "workflow fidelity": 6,
+        "usefulness": 7
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.none",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-codemod-sweep",
+      "trialId": "craftbook-codemod-sweep-gemma4-12b-q4-2026-11-21T02-13-11-262Z-y60h",
+      "rubric": "scenario",
+      "meanScore": 0.3,
+      "scoreAxes": {
+        "Enumeration completeness": 0,
+        "Invariant discipline": 1,
+        "Reconciled verification": 0
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.none",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-deep-security-review",
+      "trialId": "craftbook-deep-security-review-gemma4-12b-q4-2026-11-21T01-40-37-630Z-rbul",
+      "rubric": "scenario",
+      "meanScore": 3.3,
+      "scoreAxes": {
+        "verification": 3,
+        "systemic analysis": 4,
+        "remediation": 3
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.none",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-refactor-module",
+      "trialId": "craftbook-refactor-module-gemma4-12b-q4-2026-11-21T02-27-36-736Z-q49y",
+      "rubric": "scenario",
+      "meanScore": 3,
+      "scoreAxes": {
+        "Guardrail-first discipline": 2,
+        "Reversible-stage execution": 3,
+        "Genuine deduplication": 4
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.none",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-ab-test-readout",
+      "trialId": "craftbook-ab-test-readout-gemma4-12b-q4-2026-11-20T13-50-38-314Z-ir9w",
+      "rubric": "scenario",
+      "meanScore": 6.3,
+      "scoreAxes": {
+        "decision rule": 9,
+        "statistical reporting": 7,
+        "honest caveats": 3
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.none",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-annotated-bibliography",
+      "trialId": "craftbook-annotated-bibliography-gemma4-12b-q4-2026-11-20T13-57-26-786Z-1haj",
+      "rubric": "scenario",
+      "meanScore": 6.3,
+      "scoreAxes": {
+        "accuracy": 8,
+        "grounding": 7,
+        "structure": 6,
+        "actionability": 4
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.none",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-powerpoint-deck",
+      "trialId": "craftbook-powerpoint-deck-gemma4-12b-q4-2026-11-20T13-32-35-744Z-0dk8",
+      "rubric": "scenario",
+      "meanScore": 4.5,
+      "scoreAxes": {
+        "source-acquisition": 5,
+        "outline-parity": 4,
+        "grounding": 4,
+        "convertibility": 5
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.none",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-research-to-document",
+      "trialId": "craftbook-research-to-document-gemma4-12b-q4-2026-11-20T14-01-32-027Z-qp50",
+      "rubric": "scenario",
+      "meanScore": 7,
+      "scoreAxes": {
+        "grounding": 6,
+        "structure": 8,
+        "convertibility": 7
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.none",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-spreadsheet-model",
+      "trialId": "craftbook-spreadsheet-model-gemma4-12b-q4-2026-11-20T13-25-00-149Z-asys",
+      "rubric": "scenario",
+      "meanScore": 6,
+      "scoreAxes": {
+        "workflow fidelity": 6,
+        "usefulness": 6
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.none",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-week-plan",
+      "trialId": "craftbook-week-plan-gemma4-12b-q4-2026-11-20T13-44-22-954Z-ap4r",
+      "rubric": "scenario",
+      "meanScore": 5,
+      "scoreAxes": {
+        "coverage": 5,
+        "prioritization": 5,
+        "conflict-handling": 6,
+        "realism": 4
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.none",
+      "suiteId": "productivity",
+      "scenarioId": "docblocks-theme-roundtrip",
+      "trialId": "docblocks-theme-roundtrip-gemma4-12b-q4-2026-11-20T13-31-03-104Z-158k",
+      "rubric": "scenario",
+      "meanScore": 5,
+      "scoreAxes": {
+        "grounding": 6,
+        "candor": 6,
+        "usefulness": 3
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.none",
+      "suiteId": "productivity",
+      "scenarioId": "meeting-followup",
+      "trialId": "meeting-followup-gemma4-12b-q4-2026-11-20T13-21-22-496Z-fx6t",
+      "rubric": "scenario",
+      "meanScore": 6.5,
+      "scoreAxes": {
+        "decisionClarity": 7,
+        "grounding": 6,
+        "actionability": 5,
+        "brevity": 8
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "gemma4-12b-q4.none",
+      "suiteId": "productivity",
+      "scenarioId": "wikipedia-research-brief",
+      "trialId": "wikipedia-research-brief-gemma4-12b-q4-2026-11-20T13-39-51-482Z-s1ud",
+      "rubric": "scenario",
+      "meanScore": 5,
+      "scoreAxes": {
+        "synthesis": 5,
+        "grounding": 5,
+        "citationQuality": 6,
+        "calibration": 4
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.dflash",
+      "suiteId": "complex-work",
+      "scenarioId": "craftbook-invoice-run",
+      "trialId": "craftbook-invoice-run-muse-glimmer-30b-q4-2026-11-21T11-41-02-348Z-n3cb",
+      "rubric": "scenario",
+      "meanScore": 4.2,
+      "scoreAxes": {
+        "numeric integrity": 5,
+        "numbering continuity": 8,
+        "professionalism": 3,
+        "completeness": 4,
+        "print-polish": 1
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.dflash",
+      "suiteId": "core",
+      "scenarioId": "petshop",
+      "trialId": "petshop-muse-glimmer-30b-q4-2026-11-20T02-08-32-307Z-6iuv",
+      "rubric": "default-html",
+      "meanScore": 6,
+      "scoreAxes": {
+        "visualQuality": 6,
+        "functionalCompleteness": 7,
+        "codeQuality": 7,
+        "polish": 4
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.dflash",
+      "suiteId": "core",
+      "scenarioId": "tankcombat",
+      "trialId": "tankcombat-muse-glimmer-30b-q4-2026-11-20T02-32-57-525Z-sna6",
+      "rubric": "default-html",
+      "meanScore": 4,
+      "scoreAxes": {
+        "visualQuality": 3,
+        "functionalCompleteness": 6,
+        "codeQuality": 5,
+        "polish": 2
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.dflash",
+      "suiteId": "core",
+      "scenarioId": "tictactoe",
+      "trialId": "tictactoe-muse-glimmer-30b-q4-2026-11-20T02-06-25-687Z-maer",
+      "rubric": "default-html",
+      "meanScore": 5.3,
+      "scoreAxes": {
+        "visualQuality": 3,
+        "functionalCompleteness": 9,
+        "codeQuality": 7,
+        "polish": 2
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.dflash",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-api-contract-review",
+      "trialId": "craftbook-api-contract-review-muse-glimmer-30b-q4-2026-11-20T20-31-43-876Z-wnzq",
+      "rubric": "scenario",
+      "meanScore": 6,
+      "scoreAxes": {
+        "workflow fidelity": 6,
+        "usefulness": 6
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.dflash",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-bug-fix-tdd",
+      "trialId": "craftbook-bug-fix-tdd-muse-glimmer-30b-q4-2026-11-20T22-01-09-623Z-7z87",
+      "rubric": "scenario",
+      "meanScore": 4,
+      "scoreAxes": {
+        "Repro-first discipline": 3,
+        "Fix minimality": 7,
+        "Honest verification": 2
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.dflash",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-code-review",
+      "trialId": "craftbook-code-review-muse-glimmer-30b-q4-2026-11-20T20-25-29-742Z-01zw",
+      "rubric": "scenario",
+      "meanScore": 6.5,
+      "scoreAxes": {
+        "workflow fidelity": 6,
+        "usefulness": 7
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.dflash",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-codemod-sweep",
+      "trialId": "craftbook-codemod-sweep-muse-glimmer-30b-q4-2026-11-20T21-38-15-805Z-z4rv",
+      "rubric": "scenario",
+      "meanScore": 4,
+      "scoreAxes": {
+        "Enumeration completeness": 5,
+        "Invariant discipline": 4,
+        "Reconciled verification": 3
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.dflash",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-deep-security-review",
+      "trialId": "craftbook-deep-security-review-muse-glimmer-30b-q4-2026-11-20T21-11-56-515Z-u33y",
+      "rubric": "scenario",
+      "meanScore": 4.7,
+      "scoreAxes": {
+        "verification": 5,
+        "systemic analysis": 4,
+        "remediation": 5
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.dflash",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-refactor-module",
+      "trialId": "craftbook-refactor-module-muse-glimmer-30b-q4-2026-11-20T21-49-41-772Z-i4a7",
+      "rubric": "scenario",
+      "meanScore": 4.3,
+      "scoreAxes": {
+        "Guardrail-first discipline": 3,
+        "Reversible-stage execution": 4,
+        "Genuine deduplication": 6
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.dflash",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-ab-test-readout",
+      "trialId": "craftbook-ab-test-readout-muse-glimmer-30b-q4-2026-11-20T09-53-28-230Z-4ij7",
+      "rubric": "scenario",
+      "meanScore": 7.7,
+      "scoreAxes": {
+        "decision rule": 10,
+        "statistical reporting": 9,
+        "honest caveats": 4
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.dflash",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-annotated-bibliography",
+      "trialId": "craftbook-annotated-bibliography-muse-glimmer-30b-q4-2026-11-20T09-58-26-441Z-i5bu",
+      "rubric": "scenario",
+      "meanScore": 6.3,
+      "scoreAxes": {
+        "accuracy": 7,
+        "grounding": 6,
+        "structure": 7,
+        "actionability": 5
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.dflash",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-powerpoint-deck",
+      "trialId": "craftbook-powerpoint-deck-muse-glimmer-30b-q4-2026-11-20T09-19-11-329Z-ds1u",
+      "rubric": "scenario",
+      "meanScore": 5.3,
+      "scoreAxes": {
+        "source-acquisition": 3,
+        "outline-parity": 5,
+        "grounding": 6,
+        "convertibility": 7
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.dflash",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-research-to-document",
+      "trialId": "craftbook-research-to-document-muse-glimmer-30b-q4-2026-11-20T10-09-20-222Z-pe3s",
+      "rubric": "scenario",
+      "meanScore": 8.3,
+      "scoreAxes": {
+        "grounding": 8,
+        "structure": 9,
+        "convertibility": 8
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.dflash",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-spreadsheet-model",
+      "trialId": "craftbook-spreadsheet-model-muse-glimmer-30b-q4-2026-11-20T08-55-09-823Z-vztc",
+      "rubric": "scenario",
+      "meanScore": 6.5,
+      "scoreAxes": {
+        "workflow fidelity": 6,
+        "usefulness": 7
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.dflash",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-week-plan",
+      "trialId": "craftbook-week-plan-muse-glimmer-30b-q4-2026-11-20T09-38-51-588Z-hggm",
+      "rubric": "scenario",
+      "meanScore": 5.8,
+      "scoreAxes": {
+        "coverage": 5,
+        "prioritization": 5,
+        "conflict-handling": 8,
+        "realism": 5
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.dflash",
+      "suiteId": "productivity",
+      "scenarioId": "docblocks-theme-roundtrip",
+      "trialId": "docblocks-theme-roundtrip-muse-glimmer-30b-q4-2026-11-20T09-14-01-811Z-g8gq",
+      "rubric": "scenario",
+      "meanScore": 5,
+      "scoreAxes": {
+        "grounding": 6,
+        "candor": 5,
+        "usefulness": 4
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.dflash",
+      "suiteId": "productivity",
+      "scenarioId": "meeting-followup",
+      "trialId": "meeting-followup-muse-glimmer-30b-q4-2026-11-20T08-47-14-719Z-j3yc",
+      "rubric": "scenario",
+      "meanScore": 6.5,
+      "scoreAxes": {
+        "decisionClarity": 7,
+        "grounding": 6,
+        "actionability": 5,
+        "brevity": 8
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.dflash",
+      "suiteId": "productivity",
+      "scenarioId": "wikipedia-research-brief",
+      "trialId": "wikipedia-research-brief-muse-glimmer-30b-q4-2026-11-20T09-35-05-403Z-7e3v",
+      "rubric": "scenario",
+      "meanScore": 5.5,
+      "scoreAxes": {
+        "synthesis": 4,
+        "grounding": 5,
+        "citationQuality": 6,
+        "calibration": 7
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.none",
+      "suiteId": "complex-work",
+      "scenarioId": "craftbook-invoice-run",
+      "trialId": "craftbook-invoice-run-muse-glimmer-30b-q4-2026-11-22T08-08-21-230Z-81u8",
+      "rubric": "scenario",
+      "meanScore": 4.2,
+      "scoreAxes": {
+        "numeric integrity": 5,
+        "numbering continuity": 8,
+        "professionalism": 3,
+        "completeness": 4,
+        "print-polish": 1
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.none",
+      "suiteId": "core",
+      "scenarioId": "petshop",
+      "trialId": "petshop-muse-glimmer-30b-q4-2026-11-19T21-25-20-921Z-akwf",
+      "rubric": "default-html",
+      "meanScore": 6,
+      "scoreAxes": {
+        "visualQuality": 6,
+        "functionalCompleteness": 7,
+        "codeQuality": 6,
+        "polish": 5
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.none",
+      "suiteId": "core",
+      "scenarioId": "tankcombat",
+      "trialId": "tankcombat-muse-glimmer-30b-q4-2026-11-19T23-09-27-314Z-vvxn",
+      "rubric": "default-html",
+      "meanScore": 3.8,
+      "scoreAxes": {
+        "visualQuality": 3,
+        "functionalCompleteness": 6,
+        "codeQuality": 4,
+        "polish": 2
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.none",
+      "suiteId": "core",
+      "scenarioId": "tictactoe",
+      "trialId": "tictactoe-muse-glimmer-30b-q4-2026-11-19T21-20-54-742Z-8wr5",
+      "rubric": "default-html",
+      "meanScore": 5.3,
+      "scoreAxes": {
+        "visualQuality": 3,
+        "functionalCompleteness": 9,
+        "codeQuality": 7,
+        "polish": 2
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.none",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-api-contract-review",
+      "trialId": "craftbook-api-contract-review-muse-glimmer-30b-q4-2026-11-21T03-25-50-876Z-8uk4",
+      "rubric": "scenario",
+      "meanScore": 5.5,
+      "scoreAxes": {
+        "workflow fidelity": 5,
+        "usefulness": 6
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.none",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-bug-fix-tdd",
+      "trialId": "craftbook-bug-fix-tdd-muse-glimmer-30b-q4-2026-11-21T05-35-15-364Z-oq7c",
+      "rubric": "scenario",
+      "meanScore": 3.7,
+      "scoreAxes": {
+        "Repro-first discipline": 2,
+        "Fix minimality": 7,
+        "Honest verification": 2
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.none",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-code-review",
+      "trialId": "craftbook-code-review-muse-glimmer-30b-q4-2026-11-21T03-14-41-242Z-rn61",
+      "rubric": "scenario",
+      "meanScore": 6.5,
+      "scoreAxes": {
+        "workflow fidelity": 6,
+        "usefulness": 7
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.none",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-codemod-sweep",
+      "trialId": "craftbook-codemod-sweep-muse-glimmer-30b-q4-2026-11-21T04-49-48-770Z-47aj",
+      "rubric": "scenario",
+      "meanScore": 5.3,
+      "scoreAxes": {
+        "Enumeration completeness": 5,
+        "Invariant discipline": 5,
+        "Reconciled verification": 6
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.none",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-deep-security-review",
+      "trialId": "craftbook-deep-security-review-muse-glimmer-30b-q4-2026-11-21T04-04-06-205Z-yzfr",
+      "rubric": "scenario",
+      "meanScore": 5,
+      "scoreAxes": {
+        "verification": 6,
+        "systemic analysis": 4,
+        "remediation": 5
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.none",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-refactor-module",
+      "trialId": "craftbook-refactor-module-muse-glimmer-30b-q4-2026-11-21T05-13-49-213Z-c2id",
+      "rubric": "scenario",
+      "meanScore": 4,
+      "scoreAxes": {
+        "Guardrail-first discipline": 3,
+        "Reversible-stage execution": 4,
+        "Genuine deduplication": 5
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.none",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-ab-test-readout",
+      "trialId": "craftbook-ab-test-readout-muse-glimmer-30b-q4-2026-11-20T16-28-32-573Z-bt61",
+      "rubric": "scenario",
+      "meanScore": 7.3,
+      "scoreAxes": {
+        "decision rule": 9,
+        "statistical reporting": 8,
+        "honest caveats": 5
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.none",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-annotated-bibliography",
+      "trialId": "craftbook-annotated-bibliography-muse-glimmer-30b-q4-2026-11-20T16-38-00-733Z-sw7t",
+      "rubric": "scenario",
+      "meanScore": 6.3,
+      "scoreAxes": {
+        "accuracy": 8,
+        "grounding": 6,
+        "structure": 7,
+        "actionability": 4
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.none",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-powerpoint-deck",
+      "trialId": "craftbook-powerpoint-deck-muse-glimmer-30b-q4-2026-11-20T15-19-47-887Z-48y7",
+      "rubric": "scenario",
+      "meanScore": 4.8,
+      "scoreAxes": {
+        "source-acquisition": 4,
+        "outline-parity": 3,
+        "grounding": 6,
+        "convertibility": 6
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.none",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-research-to-document",
+      "trialId": "craftbook-research-to-document-muse-glimmer-30b-q4-2026-11-20T16-55-22-283Z-lkt8",
+      "rubric": "scenario",
+      "meanScore": 8,
+      "scoreAxes": {
+        "grounding": 8,
+        "structure": 8,
+        "convertibility": 8
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.none",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-spreadsheet-model",
+      "trialId": "craftbook-spreadsheet-model-muse-glimmer-30b-q4-2026-11-20T14-37-41-485Z-osar",
+      "rubric": "scenario",
+      "meanScore": 6,
+      "scoreAxes": {
+        "workflow fidelity": 6,
+        "usefulness": 6
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.none",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-week-plan",
+      "trialId": "craftbook-week-plan-muse-glimmer-30b-q4-2026-11-20T15-54-53-323Z-xm07",
+      "rubric": "scenario",
+      "meanScore": 6.5,
+      "scoreAxes": {
+        "coverage": 7,
+        "prioritization": 6,
+        "conflict-handling": 8,
+        "realism": 5
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.none",
+      "suiteId": "productivity",
+      "scenarioId": "docblocks-theme-roundtrip",
+      "trialId": "docblocks-theme-roundtrip-muse-glimmer-30b-q4-2026-11-20T15-13-02-119Z-aps9",
+      "rubric": "scenario",
+      "meanScore": 5.3,
+      "scoreAxes": {
+        "grounding": 8,
+        "candor": 5,
+        "usefulness": 3
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "muse-glimmer-30b-q4.none",
+      "suiteId": "productivity",
+      "scenarioId": "meeting-followup",
+      "trialId": "meeting-followup-muse-glimmer-30b-q4-2026-11-20T14-26-57-289Z-lo3t",
+      "rubric": "scenario",
+      "meanScore": 6.8,
+      "scoreAxes": {
+        "decisionClarity": 8,
+        "grounding": 6,
+        "actionability": 5,
+        "brevity": 8
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.dflash",
+      "suiteId": "complex-work",
+      "scenarioId": "craftbook-invoice-run",
+      "trialId": "craftbook-invoice-run-qwen3-8-27b-q4-2026-11-21T07-54-31-818Z-f282",
+      "rubric": "scenario",
+      "meanScore": 6.2,
+      "scoreAxes": {
+        "numeric integrity": 6,
+        "numbering continuity": 9,
+        "professionalism": 5,
+        "completeness": 7,
+        "print-polish": 4
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.dflash",
+      "suiteId": "core",
+      "scenarioId": "petshop",
+      "trialId": "petshop-qwen3-8-27b-q4-2026-11-20T01-33-01-429Z-e5ak",
+      "rubric": "default-html",
+      "meanScore": 7,
+      "scoreAxes": {
+        "visualQuality": 7,
+        "functionalCompleteness": 7,
+        "codeQuality": 8,
+        "polish": 6
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.dflash",
+      "suiteId": "core",
+      "scenarioId": "tankcombat",
+      "trialId": "tankcombat-qwen3-8-27b-q4-2026-11-20T01-39-33-183Z-cjv3",
+      "rubric": "default-html",
+      "meanScore": 5.8,
+      "scoreAxes": {
+        "visualQuality": 4,
+        "functionalCompleteness": 8,
+        "codeQuality": 7,
+        "polish": 4
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.dflash",
+      "suiteId": "core",
+      "scenarioId": "tictactoe",
+      "trialId": "tictactoe-qwen3-8-27b-q4-2026-11-20T01-31-33-340Z-5uv0",
+      "rubric": "default-html",
+      "meanScore": 7,
+      "scoreAxes": {
+        "visualQuality": 6,
+        "functionalCompleteness": 9,
+        "codeQuality": 8,
+        "polish": 5
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.dflash",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-api-contract-review",
+      "trialId": "craftbook-api-contract-review-qwen3-8-27b-q4-2026-11-20T18-42-34-428Z-pvs0",
+      "rubric": "scenario",
+      "meanScore": 7.5,
+      "scoreAxes": {
+        "workflow fidelity": 7,
+        "usefulness": 8
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.dflash",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-bug-fix-tdd",
+      "trialId": "craftbook-bug-fix-tdd-qwen3-8-27b-q4-2026-11-20T20-09-59-437Z-2siw",
+      "rubric": "scenario",
+      "meanScore": 5.7,
+      "scoreAxes": {
+        "Repro-first discipline": 5,
+        "Fix minimality": 8,
+        "Honest verification": 4
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.dflash",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-code-review",
+      "trialId": "craftbook-code-review-qwen3-8-27b-q4-2026-11-20T18-38-56-980Z-3met",
+      "rubric": "scenario",
+      "meanScore": 7,
+      "scoreAxes": {
+        "workflow fidelity": 6,
+        "usefulness": 8
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.dflash",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-codemod-sweep",
+      "trialId": "craftbook-codemod-sweep-qwen3-8-27b-q4-2026-11-20T19-34-34-037Z-3xv0",
+      "rubric": "scenario",
+      "meanScore": 6.7,
+      "scoreAxes": {
+        "Enumeration completeness": 7,
+        "Invariant discipline": 7,
+        "Reconciled verification": 6
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.dflash",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-deep-security-review",
+      "trialId": "craftbook-deep-security-review-qwen3-8-27b-q4-2026-11-20T19-05-41-345Z-a8rh",
+      "rubric": "scenario",
+      "meanScore": 6.7,
+      "scoreAxes": {
+        "verification": 7,
+        "systemic analysis": 7,
+        "remediation": 6
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.dflash",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-refactor-module",
+      "trialId": "craftbook-refactor-module-qwen3-8-27b-q4-2026-11-20T19-49-59-098Z-klvg",
+      "rubric": "scenario",
+      "meanScore": 6,
+      "scoreAxes": {
+        "Guardrail-first discipline": 5,
+        "Reversible-stage execution": 6,
+        "Genuine deduplication": 7
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.dflash",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-ab-test-readout",
+      "trialId": "craftbook-ab-test-readout-qwen3-8-27b-q4-2026-11-20T08-11-32-468Z-7qun",
+      "rubric": "scenario",
+      "meanScore": 8,
+      "scoreAxes": {
+        "decision rule": 9,
+        "statistical reporting": 9,
+        "honest caveats": 6
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.dflash",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-annotated-bibliography",
+      "trialId": "craftbook-annotated-bibliography-qwen3-8-27b-q4-2026-11-20T08-19-53-332Z-a5c8",
+      "rubric": "scenario",
+      "meanScore": 7.3,
+      "scoreAxes": {
+        "accuracy": 8,
+        "grounding": 8,
+        "structure": 7,
+        "actionability": 6
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.dflash",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-powerpoint-deck",
+      "trialId": "craftbook-powerpoint-deck-qwen3-8-27b-q4-2026-11-20T07-47-58-014Z-hlhk",
+      "rubric": "scenario",
+      "meanScore": 5.5,
+      "scoreAxes": {
+        "source-acquisition": 4,
+        "outline-parity": 5,
+        "grounding": 6,
+        "convertibility": 7
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.dflash",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-research-to-document",
+      "trialId": "craftbook-research-to-document-qwen3-8-27b-q4-2026-11-20T08-27-11-813Z-568e",
+      "rubric": "scenario",
+      "meanScore": 8.3,
+      "scoreAxes": {
+        "grounding": 8,
+        "structure": 9,
+        "convertibility": 8
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.dflash",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-spreadsheet-model",
+      "trialId": "craftbook-spreadsheet-model-qwen3-8-27b-q4-2026-11-20T07-30-20-002Z-fv9w",
+      "rubric": "scenario",
+      "meanScore": 7.5,
+      "scoreAxes": {
+        "workflow fidelity": 7,
+        "usefulness": 8
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.dflash",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-week-plan",
+      "trialId": "craftbook-week-plan-qwen3-8-27b-q4-2026-11-20T07-59-55-726Z-oayo",
+      "rubric": "scenario",
+      "meanScore": 6.8,
+      "scoreAxes": {
+        "coverage": 7,
+        "prioritization": 7,
+        "conflict-handling": 8,
+        "realism": 5
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.dflash",
+      "suiteId": "productivity",
+      "scenarioId": "docblocks-theme-roundtrip",
+      "trialId": "docblocks-theme-roundtrip-qwen3-8-27b-q4-2026-11-20T07-45-06-966Z-mdvm",
+      "rubric": "scenario",
+      "meanScore": 4,
+      "scoreAxes": {
+        "grounding": 5,
+        "candor": 3,
+        "usefulness": 4
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.dflash",
+      "suiteId": "productivity",
+      "scenarioId": "meeting-followup",
+      "trialId": "meeting-followup-qwen3-8-27b-q4-2026-11-20T07-27-48-870Z-1s3p",
+      "rubric": "scenario",
+      "meanScore": 6.5,
+      "scoreAxes": {
+        "decisionClarity": 7,
+        "grounding": 6,
+        "actionability": 5,
+        "brevity": 8
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.dflash",
+      "suiteId": "productivity",
+      "scenarioId": "wikipedia-research-brief",
+      "trialId": "wikipedia-research-brief-qwen3-8-27b-q4-2026-11-20T07-55-58-369Z-80vz",
+      "rubric": "scenario",
+      "meanScore": 5.5,
+      "scoreAxes": {
+        "synthesis": 5,
+        "grounding": 5,
+        "citationQuality": 6,
+        "calibration": 6
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.mtp",
+      "suiteId": "complex-work",
+      "scenarioId": "craftbook-invoice-run",
+      "trialId": "craftbook-invoice-run-qwen3-8-27b-q4-2026-11-22T14-30-08-524Z-2sgc",
+      "rubric": "scenario",
+      "meanScore": 4.8,
+      "scoreAxes": {
+        "numeric integrity": 6,
+        "numbering continuity": 9,
+        "professionalism": 4,
+        "completeness": 4,
+        "print-polish": 1
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.mtp",
+      "suiteId": "core",
+      "scenarioId": "petshop",
+      "trialId": "petshop-qwen3-8-27b-q4-2026-11-20T00-28-27-298Z-eult",
+      "rubric": "default-html",
+      "meanScore": 6.5,
+      "scoreAxes": {
+        "visualQuality": 7,
+        "functionalCompleteness": 7,
+        "codeQuality": 6,
+        "polish": 6
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.mtp",
+      "suiteId": "core",
+      "scenarioId": "tankcombat",
+      "trialId": "tankcombat-qwen3-8-27b-q4-2026-11-20T00-36-07-171Z-ia7h",
+      "rubric": "default-html",
+      "meanScore": 5.3,
+      "scoreAxes": {
+        "visualQuality": 5,
+        "functionalCompleteness": 7,
+        "codeQuality": 6,
+        "polish": 3
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.mtp",
+      "suiteId": "core",
+      "scenarioId": "tictactoe",
+      "trialId": "tictactoe-qwen3-8-27b-q4-2026-11-20T00-26-54-141Z-tjz0",
+      "rubric": "default-html",
+      "meanScore": 7,
+      "scoreAxes": {
+        "visualQuality": 6,
+        "functionalCompleteness": 9,
+        "codeQuality": 8,
+        "polish": 5
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.mtp",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-api-contract-review",
+      "trialId": "craftbook-api-contract-review-qwen3-8-27b-q4-2026-11-21T06-07-24-420Z-t0ur",
+      "rubric": "scenario",
+      "meanScore": 7.5,
+      "scoreAxes": {
+        "workflow fidelity": 7,
+        "usefulness": 8
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.mtp",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-bug-fix-tdd",
+      "trialId": "craftbook-bug-fix-tdd-qwen3-8-27b-q4-2026-11-21T07-29-54-459Z-q4s9",
+      "rubric": "scenario",
+      "meanScore": 5.7,
+      "scoreAxes": {
+        "Repro-first discipline": 5,
+        "Fix minimality": 8,
+        "Honest verification": 4
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.mtp",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-code-review",
+      "trialId": "craftbook-code-review-qwen3-8-27b-q4-2026-11-21T06-02-15-864Z-fk2f",
+      "rubric": "scenario",
+      "meanScore": 7,
+      "scoreAxes": {
+        "workflow fidelity": 6,
+        "usefulness": 8
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.mtp",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-codemod-sweep",
+      "trialId": "craftbook-codemod-sweep-qwen3-8-27b-q4-2026-11-21T06-55-55-089Z-72e1",
+      "rubric": "scenario",
+      "meanScore": 5.3,
+      "scoreAxes": {
+        "Enumeration completeness": 6,
+        "Invariant discipline": 6,
+        "Reconciled verification": 4
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.mtp",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-deep-security-review",
+      "trialId": "craftbook-deep-security-review-qwen3-8-27b-q4-2026-11-21T06-25-20-618Z-57tg",
+      "rubric": "scenario",
+      "meanScore": 6,
+      "scoreAxes": {
+        "verification": 6,
+        "systemic analysis": 6,
+        "remediation": 6
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.mtp",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-refactor-module",
+      "trialId": "craftbook-refactor-module-qwen3-8-27b-q4-2026-11-21T07-05-08-627Z-jwri",
+      "rubric": "scenario",
+      "meanScore": 6.7,
+      "scoreAxes": {
+        "Guardrail-first discipline": 6,
+        "Reversible-stage execution": 7,
+        "Genuine deduplication": 7
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.mtp",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-ab-test-readout",
+      "trialId": "craftbook-ab-test-readout-qwen3-8-27b-q4-2026-11-20T06-07-39-236Z-e5qb",
+      "rubric": "scenario",
+      "meanScore": 8.3,
+      "scoreAxes": {
+        "decision rule": 9,
+        "statistical reporting": 9,
+        "honest caveats": 7
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.mtp",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-annotated-bibliography",
+      "trialId": "craftbook-annotated-bibliography-qwen3-8-27b-q4-2026-11-20T06-15-17-351Z-nxeq",
+      "rubric": "scenario",
+      "meanScore": 6.3,
+      "scoreAxes": {
+        "accuracy": 7,
+        "grounding": 6,
+        "structure": 7,
+        "actionability": 5
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.mtp",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-powerpoint-deck",
+      "trialId": "craftbook-powerpoint-deck-qwen3-8-27b-q4-2026-11-20T05-26-15-340Z-umn4",
+      "rubric": "scenario",
+      "meanScore": 6.3,
+      "scoreAxes": {
+        "source-acquisition": 6,
+        "outline-parity": 6,
+        "grounding": 6,
+        "convertibility": 7
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.mtp",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-research-to-document",
+      "trialId": "craftbook-research-to-document-qwen3-8-27b-q4-2026-11-20T06-22-12-382Z-uuhw",
+      "rubric": "scenario",
+      "meanScore": 8.3,
+      "scoreAxes": {
+        "grounding": 8,
+        "structure": 9,
+        "convertibility": 8
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.mtp",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-spreadsheet-model",
+      "trialId": "craftbook-spreadsheet-model-qwen3-8-27b-q4-2026-11-20T05-04-18-771Z-bv39",
+      "rubric": "scenario",
+      "meanScore": 6,
+      "scoreAxes": {
+        "workflow fidelity": 6,
+        "usefulness": 6
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.mtp",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-week-plan",
+      "trialId": "craftbook-week-plan-qwen3-8-27b-q4-2026-11-20T05-47-50-278Z-qhzy",
+      "rubric": "scenario",
+      "meanScore": 6.3,
+      "scoreAxes": {
+        "coverage": 6,
+        "prioritization": 6,
+        "conflict-handling": 8,
+        "realism": 5
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.mtp",
+      "suiteId": "productivity",
+      "scenarioId": "docblocks-theme-roundtrip",
+      "trialId": "docblocks-theme-roundtrip-qwen3-8-27b-q4-2026-11-20T05-22-35-180Z-cyls",
+      "rubric": "scenario",
+      "meanScore": 6.7,
+      "scoreAxes": {
+        "grounding": 6,
+        "candor": 7,
+        "usefulness": 7
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.mtp",
+      "suiteId": "productivity",
+      "scenarioId": "meeting-followup",
+      "trialId": "meeting-followup-qwen3-8-27b-q4-2026-11-20T05-01-43-227Z-cej7",
+      "rubric": "scenario",
+      "meanScore": 6.8,
+      "scoreAxes": {
+        "decisionClarity": 8,
+        "grounding": 6,
+        "actionability": 5,
+        "brevity": 8
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.mtp",
+      "suiteId": "productivity",
+      "scenarioId": "wikipedia-research-brief",
+      "trialId": "wikipedia-research-brief-qwen3-8-27b-q4-2026-11-20T05-41-25-174Z-1rgz",
+      "rubric": "scenario",
+      "meanScore": 7,
+      "scoreAxes": {
+        "synthesis": 6,
+        "grounding": 7,
+        "citationQuality": 8,
+        "calibration": 7
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.none",
+      "suiteId": "complex-work",
+      "scenarioId": "craftbook-invoice-run",
+      "trialId": "craftbook-invoice-run-qwen3-8-27b-q4-2026-11-21T17-32-34-783Z-ph4d",
+      "rubric": "scenario",
+      "meanScore": 5,
+      "scoreAxes": {
+        "numeric integrity": 6,
+        "numbering continuity": 9,
+        "professionalism": 4,
+        "completeness": 5,
+        "print-polish": 1
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.none",
+      "suiteId": "core",
+      "scenarioId": "petshop",
+      "trialId": "petshop-qwen3-8-27b-q4-2026-11-20T03-09-34-919Z-vgn5",
+      "rubric": "default-html",
+      "meanScore": 6.5,
+      "scoreAxes": {
+        "visualQuality": 6,
+        "functionalCompleteness": 7,
+        "codeQuality": 8,
+        "polish": 5
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.none",
+      "suiteId": "core",
+      "scenarioId": "tankcombat",
+      "trialId": "tankcombat-qwen3-8-27b-q4-2026-11-20T03-19-30-830Z-bcye",
+      "rubric": "default-html",
+      "meanScore": 5.5,
+      "scoreAxes": {
+        "visualQuality": 5,
+        "functionalCompleteness": 8,
+        "codeQuality": 6,
+        "polish": 3
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.none",
+      "suiteId": "core",
+      "scenarioId": "tictactoe",
+      "trialId": "tictactoe-qwen3-8-27b-q4-2026-11-20T03-06-29-620Z-9ri1",
+      "rubric": "default-html",
+      "meanScore": 6.8,
+      "scoreAxes": {
+        "visualQuality": 6,
+        "functionalCompleteness": 9,
+        "codeQuality": 8,
+        "polish": 4
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.none",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-api-contract-review",
+      "trialId": "craftbook-api-contract-review-qwen3-8-27b-q4-2026-11-20T22-27-48-238Z-rjet",
+      "rubric": "scenario",
+      "meanScore": 7.5,
+      "scoreAxes": {
+        "workflow fidelity": 7,
+        "usefulness": 8
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.none",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-bug-fix-tdd",
+      "trialId": "craftbook-bug-fix-tdd-qwen3-8-27b-q4-2026-11-21T01-00-44-100Z-e9tm",
+      "rubric": "scenario",
+      "meanScore": 6.7,
+      "scoreAxes": {
+        "Repro-first discipline": 5,
+        "Fix minimality": 9,
+        "Honest verification": 6
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.none",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-code-review",
+      "trialId": "craftbook-code-review-qwen3-8-27b-q4-2026-11-20T22-19-40-803Z-dsdh",
+      "rubric": "scenario",
+      "meanScore": 7,
+      "scoreAxes": {
+        "workflow fidelity": 6,
+        "usefulness": 8
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.none",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-codemod-sweep",
+      "trialId": "craftbook-codemod-sweep-qwen3-8-27b-q4-2026-11-21T00-03-02-750Z-9z9k",
+      "rubric": "scenario",
+      "meanScore": 5.7,
+      "scoreAxes": {
+        "Enumeration completeness": 7,
+        "Invariant discipline": 5,
+        "Reconciled verification": 5
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.none",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-deep-security-review",
+      "trialId": "craftbook-deep-security-review-qwen3-8-27b-q4-2026-11-20T23-05-24-577Z-p3zv",
+      "rubric": "scenario",
+      "meanScore": 5.7,
+      "scoreAxes": {
+        "verification": 6,
+        "systemic analysis": 5,
+        "remediation": 6
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.none",
+      "suiteId": "developer",
+      "scenarioId": "craftbook-refactor-module",
+      "trialId": "craftbook-refactor-module-qwen3-8-27b-q4-2026-11-21T00-28-09-473Z-plda",
+      "rubric": "scenario",
+      "meanScore": 5.3,
+      "scoreAxes": {
+        "Guardrail-first discipline": 4,
+        "Reversible-stage execution": 5,
+        "Genuine deduplication": 7
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.none",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-ab-test-readout",
+      "trialId": "craftbook-ab-test-readout-qwen3-8-27b-q4-2026-11-20T12-31-00-133Z-vkes",
+      "rubric": "scenario",
+      "meanScore": 8.3,
+      "scoreAxes": {
+        "decision rule": 10,
+        "statistical reporting": 9,
+        "honest caveats": 6
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.none",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-annotated-bibliography",
+      "trialId": "craftbook-annotated-bibliography-qwen3-8-27b-q4-2026-11-20T12-52-45-382Z-8vtz",
+      "rubric": "scenario",
+      "meanScore": 6.3,
+      "scoreAxes": {
+        "accuracy": 7,
+        "grounding": 6,
+        "structure": 7,
+        "actionability": 5
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.none",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-powerpoint-deck",
+      "trialId": "craftbook-powerpoint-deck-qwen3-8-27b-q4-2026-11-20T11-47-20-020Z-g2dh",
+      "rubric": "scenario",
+      "meanScore": 6.8,
+      "scoreAxes": {
+        "source-acquisition": 6,
+        "outline-parity": 5,
+        "grounding": 8,
+        "convertibility": 8
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.none",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-research-to-document",
+      "trialId": "craftbook-research-to-document-qwen3-8-27b-q4-2026-11-20T13-04-10-686Z-fe88",
+      "rubric": "scenario",
+      "meanScore": 8.3,
+      "scoreAxes": {
+        "grounding": 8,
+        "structure": 9,
+        "convertibility": 8
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.none",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-spreadsheet-model",
+      "trialId": "craftbook-spreadsheet-model-qwen3-8-27b-q4-2026-11-20T10-34-15-541Z-zd7a",
+      "rubric": "scenario",
+      "meanScore": 6.5,
+      "scoreAxes": {
+        "workflow fidelity": 6,
+        "usefulness": 7
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.none",
+      "suiteId": "productivity",
+      "scenarioId": "craftbook-week-plan",
+      "trialId": "craftbook-week-plan-qwen3-8-27b-q4-2026-11-20T12-12-25-188Z-pqxp",
+      "rubric": "scenario",
+      "meanScore": 6.3,
+      "scoreAxes": {
+        "coverage": 6,
+        "prioritization": 7,
+        "conflict-handling": 8,
+        "realism": 4
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.none",
+      "suiteId": "productivity",
+      "scenarioId": "docblocks-theme-roundtrip",
+      "trialId": "docblocks-theme-roundtrip-qwen3-8-27b-q4-2026-11-20T11-39-57-719Z-mjcw",
+      "rubric": "scenario",
+      "meanScore": 7.3,
+      "scoreAxes": {
+        "grounding": 7,
+        "candor": 8,
+        "usefulness": 7
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.none",
+      "suiteId": "productivity",
+      "scenarioId": "meeting-followup",
+      "trialId": "meeting-followup-qwen3-8-27b-q4-2026-11-20T10-28-59-946Z-b09e",
+      "rubric": "scenario",
+      "meanScore": 6,
+      "scoreAxes": {
+        "decisionClarity": 7,
+        "grounding": 5,
+        "actionability": 4,
+        "brevity": 8
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    },
+    {
+      "modelId": "qwen3.8-27b-q4.none",
+      "suiteId": "productivity",
+      "scenarioId": "wikipedia-research-brief",
+      "trialId": "wikipedia-research-brief-qwen3-8-27b-q4-2026-11-20T12-01-56-365Z-zfea",
+      "rubric": "scenario",
+      "meanScore": 7.3,
+      "scoreAxes": {
+        "synthesis": 6,
+        "grounding": 7,
+        "citationQuality": 8,
+        "calibration": 8
+      },
+      "judgeModel": "claude-sonnet-5-5"
+    }
+  ]
+}

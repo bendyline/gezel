@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "publicationId": "2026-11-13-spark-speculative-decoding",
+  "regenerate": "node scripts/run-with-dependency-lease.mjs --direct-node scripts/import-spark-speculative-decoding-scorecard.mjs",
+  "check": "node scripts/run-with-dependency-lease.mjs --direct-node scripts/import-spark-speculative-decoding-scorecard.mjs --check",
+  "files": [
+    {
+      "path": "packages/core/src/scorecard/data/runs/2026-11-13-spark-speculative-decoding.json",
+      "bytes": 122001,
+      "sha256": "aa5771c488c43729a2caa5703f3ec8981d4b41a03fe04ffebce09f0197e09e77"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-13-spark-speculative-decoding/runs/2026-11-13-spark-speculative-decoding.json",
+      "bytes": 122001,
+      "sha256": "aa5771c488c43729a2caa5703f3ec8981d4b41a03fe04ffebce09f0197e09e77"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-13-spark-speculative-decoding/scorecard.json",
+      "bytes": 122001,
+      "sha256": "aa5771c488c43729a2caa5703f3ec8981d4b41a03fe04ffebce09f0197e09e77"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-13-spark-speculative-decoding/scorecard-details.json",
+      "bytes": 16192206,
+      "sha256": "bb7032af8108269e95e3559494c7ff178dab1e08bd510f80a7be84a397e68cf4"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-13-spark-speculative-decoding/paired-analysis.json",
+      "bytes": 184699,
+      "sha256": "bbeb6432782881276baaec4451cb59d2f79ba2f371883ee6d4668de339d338b9"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-13-spark-speculative-decoding/judging/judge-report-r1.json",
+      "bytes": 62455,
+      "sha256": "2c0ac3dd67364db3c3bf4294babb883fa43d36e6e42125753af91cf0a117dfcc"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-13-spark-speculative-decoding/judging/judge-report-r2.json",
+      "bytes": 62890,
+      "sha256": "ab5c64c594a37c792158d29130fdac920be9411e6d4b7b632dd36ef3a046b782"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-13-spark-speculative-decoding/judging/judge-report-r3.json",
+      "bytes": 62420,
+      "sha256": "41fa5ee55ce4b7ae92f2cca15cf89c2280646f63884bfd7ac6b05d806f15dcb4"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-13-spark-speculative-decoding/trials.csv",
+      "bytes": 232391,
+      "sha256": "96459b130ff8ce8daaa43fb86e4044904b26f4df51c2ad3015895a49a8e50de0"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-13-spark-speculative-decoding/report.md",
+      "bytes": 6097,
+      "sha256": "f27ee3809b636d9a8ba7f8f27f110708967b9f1ffd07a23d07e094c2b7a85fe9"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-13-spark-speculative-decoding/PLAN.md",
+      "bytes": 6229,
+      "sha256": "de1c3475095b06f7b6ac146a86e7b7df9b9caefc31f67fd29d666f93f4d8b5d0"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-13-spark-speculative-decoding/ROUND1.md",
+      "bytes": 2306,
+      "sha256": "89b17b9b6597da325f041e8c0f2e6d4e81e751b9634584ad5b0251d15a20c1b7"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-13-spark-speculative-decoding/ROUND2.md",
+      "bytes": 3611,
+      "sha256": "10a502ada122adfd80274d855bbb9480c1829a9c6f18473043085c846cdb0e29"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-13-spark-speculative-decoding/results.md",
+      "bytes": 4749,
+      "sha256": "4f3e3fdff28ecfedfd5617fa7ee9eae64ea7c0312f4d1a2addf6847deb53715e"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-13-spark-speculative-decoding/verification.json",
+      "bytes": 766,
+      "sha256": "5a51c6ffb21dd8800f4d81b08622c4acb5bf2c45a41224085e17467c895a7908"
+    }
+  ]
+}

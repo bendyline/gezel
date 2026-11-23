@@ -1,0 +1,7756 @@
+{
+  "method": "Paired by scenario: each arm’s mean over its three trials of a scenario, the difference averaged over scenarios, with a 95% bootstrap interval over scenarios (10,000 resamples, seed 20261113) and an exact two-sided sign-flip test over the scenarios whose arms differ. Pass rate covers all 43 scenarios; the review mean covers the 19 scenarios with a rubric. passExSpeed leaves speed-sensitive failures out, which favors the arm that had them, so it bounds rather than estimates.",
+  "practicalMargin": {
+    "reviewMean": 0.5
+  },
+  "multipleTests": "Ten tests (five comparisons, two endpoints). With Holm’s correction the smallest p-value would need to be below 0.005.",
+  "speedSensitiveRule": "A failure is speed-sensitive when it hit the hard ceiling, or when a stop triggered by elapsed time (the craftbook stale no-write repair loop, or the retry loop’s stall or long path) cut off a model turn that was still running: the daemon logged that turn as stopped within 20 seconds of the harness’s stop. Attempt-counted stops never count, whatever was running.",
+  "arms": [
+    {
+      "arm": "qwen3.8-27b-q4.none",
+      "modelId": "qwen3.8-27b-q4.none",
+      "label": "Qwen 3.8 (27B, Q4) · no speculation",
+      "trials": 129,
+      "passes": 120,
+      "speedSensitiveFailures": 4,
+      "judged": 56,
+      "judgeMean": 6.51,
+      "medianOutputTokensPerSec": 12.12,
+      "draftAcceptance": null,
+      "medianTrialMinutes": 8.5,
+      "totalHours": 48.8
+    },
+    {
+      "arm": "qwen3.8-27b-q4.mtp",
+      "modelId": "qwen3.8-27b-q4.mtp",
+      "label": "Qwen 3.8 (27B, Q4) · MTP",
+      "trials": 129,
+      "passes": 123,
+      "speedSensitiveFailures": 0,
+      "judged": 57,
+      "judgeMean": 6.5,
+      "medianOutputTokensPerSec": 29.05,
+      "draftAcceptance": 0.6,
+      "medianTrialMinutes": 5.1,
+      "totalHours": 31.1
+    },
+    {
+      "arm": "qwen3.8-27b-q4.dflash",
+      "modelId": "qwen3.8-27b-q4",
+      "label": "Qwen 3.8 (27B, Q4) · DFlash2 (default)",
+      "trials": 129,
+      "passes": 123,
+      "speedSensitiveFailures": 0,
+      "judged": 57,
+      "judgeMean": 6.59,
+      "medianOutputTokensPerSec": 32.99,
+      "draftAcceptance": 0.59,
+      "medianTrialMinutes": 4.3,
+      "totalHours": 24.2
+    },
+    {
+      "arm": "gemma4-12b-q4.none",
+      "modelId": "gemma4-12b-q4.none",
+      "label": "Gemma 4 (12B, Q4) · no speculation",
+      "trials": 129,
+      "passes": 103,
+      "speedSensitiveFailures": 0,
+      "judged": 57,
+      "judgeMean": 4.72,
+      "medianOutputTokensPerSec": 28.71,
+      "draftAcceptance": null,
+      "medianTrialMinutes": 4.6,
+      "totalHours": 20.4
+    },
+    {
+      "arm": "gemma4-12b-q4.mtp",
+      "modelId": "gemma4-12b-q4",
+      "label": "Gemma 4 (12B, Q4) · MTP (default)",
+      "trials": 129,
+      "passes": 106,
+      "speedSensitiveFailures": 0,
+      "judged": 57,
+      "judgeMean": 4.75,
+      "medianOutputTokensPerSec": 76.51,
+      "draftAcceptance": 0.66,
+      "medianTrialMinutes": 2.7,
+      "totalHours": 13.5
+    },
+    {
+      "arm": "muse-glimmer-30b-q4.none",
+      "modelId": "muse-glimmer-30b-q4.none",
+      "label": "Muse Glimmer (30B, Q4) · no speculation",
+      "trials": 129,
+      "passes": 113,
+      "speedSensitiveFailures": 3,
+      "judged": 56,
+      "judgeMean": 5.63,
+      "medianOutputTokensPerSec": 11.85,
+      "draftAcceptance": null,
+      "medianTrialMinutes": 15.6,
+      "totalHours": 47.9
+    },
+    {
+      "arm": "muse-glimmer-30b-q4.dflash",
+      "modelId": "muse-glimmer-30b-q4",
+      "label": "Muse Glimmer (30B, Q4) · DFlash2 (default)",
+      "trials": 129,
+      "passes": 121,
+      "speedSensitiveFailures": 1,
+      "judged": 57,
+      "judgeMean": 5.64,
+      "medianOutputTokensPerSec": 34.08,
+      "draftAcceptance": 0.59,
+      "medianTrialMinutes": 6.8,
+      "totalHours": 33.9
+    }
+  ],
+  "comparisons": [
+    {
+      "a": "qwen3.8-27b-q4.mtp",
+      "b": "qwen3.8-27b-q4.none",
+      "pass": {
+        "units": 43,
+        "diff": 0.023255813953488372,
+        "ci": [
+          -0.0310077519379845,
+          0.07751937984496127
+        ],
+        "exact": {
+          "differingScenarios": 10,
+          "p": 0.58984375
+        },
+        "perUnit": [
+          {
+            "unit": "complex-work/craftbook-author-fanout",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-author-gate-script",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0.3333333333333333,
+              "n": 3,
+              "sum": 1
+            },
+            "diff": 0.3333333333333333
+          },
+          {
+            "unit": "complex-work/craftbook-author-linear",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-author-params",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-edit-midtask",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-export-generalize",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": -0.33333333333333337
+          },
+          {
+            "unit": "complex-work/craftbook-find-vs-create",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-invoice-run",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-route-multi",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/conflict-synthesis",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/data-wrangle",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/failing-tests-spec",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/incident-postmortem",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/ops-runbook-anomaly",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/petshop",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": -0.33333333333333337
+          },
+          {
+            "unit": "core/plan-and-estimate",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/schema-migration",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/symptom-debug",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/tankcombat",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/tictactoe",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-api-contract-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          },
+          {
+            "unit": "developer/craftbook-bug-fix-tdd",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-code-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-codemod-sweep",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.3333333333333333,
+              "n": 3,
+              "sum": 1
+            },
+            "diff": 0.6666666666666667
+          },
+          {
+            "unit": "developer/craftbook-deep-security-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          },
+          {
+            "unit": "developer/craftbook-refactor-module",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/dev-craftbook-routing",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/fix-squisq-bugs",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/interface-contract",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/large-pr-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          },
+          {
+            "unit": "productivity/conflict-synthesis",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/constrained-comms",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": -0.33333333333333337
+          },
+          {
+            "unit": "productivity/craftbook-ab-test-readout",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-annotated-bibliography",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-powerpoint-deck",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": -0.33333333333333337
+          },
+          {
+            "unit": "productivity/craftbook-research-to-document",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-spreadsheet-model",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          },
+          {
+            "unit": "productivity/craftbook-week-plan",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/docblocks-theme-roundtrip",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/meeting-followup",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/plan-and-estimate",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/records-intake",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/wikipedia-research-brief",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          }
+        ]
+      },
+      "passExSpeed": {
+        "units": 43,
+        "diff": -0.0077519379844961265,
+        "ci": [
+          -0.04651162790697676,
+          0.0310077519379845
+        ],
+        "exact": {
+          "differingScenarios": 7,
+          "p": 1
+        },
+        "perUnit": [
+          {
+            "unit": "complex-work/craftbook-author-fanout",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-author-gate-script",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0.3333333333333333,
+              "n": 3,
+              "sum": 1
+            },
+            "diff": 0.3333333333333333
+          },
+          {
+            "unit": "complex-work/craftbook-author-linear",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-author-params",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-edit-midtask",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-export-generalize",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": -0.33333333333333337
+          },
+          {
+            "unit": "complex-work/craftbook-find-vs-create",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-invoice-run",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-route-multi",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/conflict-synthesis",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/data-wrangle",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/failing-tests-spec",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/incident-postmortem",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/ops-runbook-anomaly",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/petshop",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": -0.33333333333333337
+          },
+          {
+            "unit": "core/plan-and-estimate",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/schema-migration",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/symptom-debug",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/tankcombat",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/tictactoe",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-api-contract-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          },
+          {
+            "unit": "developer/craftbook-bug-fix-tdd",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-code-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-codemod-sweep",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 1,
+              "sum": 1
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-deep-security-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 2,
+              "sum": 2
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-refactor-module",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/dev-craftbook-routing",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/fix-squisq-bugs",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/interface-contract",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/large-pr-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          },
+          {
+            "unit": "productivity/conflict-synthesis",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/constrained-comms",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": -0.33333333333333337
+          },
+          {
+            "unit": "productivity/craftbook-ab-test-readout",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-annotated-bibliography",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-powerpoint-deck",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": -0.33333333333333337
+          },
+          {
+            "unit": "productivity/craftbook-research-to-document",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-spreadsheet-model",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 2,
+              "sum": 2
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-week-plan",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/docblocks-theme-roundtrip",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/meeting-followup",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/plan-and-estimate",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/records-intake",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/wikipedia-research-brief",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          }
+        ]
+      },
+      "judge": {
+        "units": 19,
+        "diff": -0.02807017543859644,
+        "ci": [
+          -0.2491228070175439,
+          0.19122807017543894
+        ],
+        "exact": {
+          "differingScenarios": 16,
+          "p": 0.823822021484375
+        },
+        "perUnit": [
+          {
+            "unit": "complex-work/craftbook-invoice-run",
+            "a": {
+              "mean": 5.066666666666666,
+              "n": 3,
+              "sum": 15.2
+            },
+            "b": {
+              "mean": 5.533333333333334,
+              "n": 3,
+              "sum": 16.6
+            },
+            "diff": -0.4666666666666677
+          },
+          {
+            "unit": "core/petshop",
+            "a": {
+              "mean": 6.866666666666667,
+              "n": 3,
+              "sum": 20.6
+            },
+            "b": {
+              "mean": 6.266666666666667,
+              "n": 3,
+              "sum": 18.8
+            },
+            "diff": 0.6000000000000005
+          },
+          {
+            "unit": "core/tankcombat",
+            "a": {
+              "mean": 5.366666666666667,
+              "n": 3,
+              "sum": 16.1
+            },
+            "b": {
+              "mean": 5.533333333333334,
+              "n": 3,
+              "sum": 16.6
+            },
+            "diff": -0.16666666666666696
+          },
+          {
+            "unit": "core/tictactoe",
+            "a": {
+              "mean": 6.833333333333333,
+              "n": 3,
+              "sum": 20.5
+            },
+            "b": {
+              "mean": 6.866666666666667,
+              "n": 3,
+              "sum": 20.6
+            },
+            "diff": -0.0333333333333341
+          },
+          {
+            "unit": "developer/craftbook-api-contract-review",
+            "a": {
+              "mean": 7.333333333333333,
+              "n": 3,
+              "sum": 22
+            },
+            "b": {
+              "mean": 7.5,
+              "n": 2,
+              "sum": 15
+            },
+            "diff": -0.16666666666666696
+          },
+          {
+            "unit": "developer/craftbook-bug-fix-tdd",
+            "a": {
+              "mean": 5.666666666666667,
+              "n": 3,
+              "sum": 17
+            },
+            "b": {
+              "mean": 6.333333333333333,
+              "n": 3,
+              "sum": 19
+            },
+            "diff": -0.6666666666666661
+          },
+          {
+            "unit": "developer/craftbook-code-review",
+            "a": {
+              "mean": 7,
+              "n": 3,
+              "sum": 21
+            },
+            "b": {
+              "mean": 7,
+              "n": 3,
+              "sum": 21
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-codemod-sweep",
+            "a": {
+              "mean": 5.433333333333334,
+              "n": 3,
+              "sum": 16.3
+            },
+            "b": {
+              "mean": 6.333333333333333,
+              "n": 3,
+              "sum": 19
+            },
+            "diff": -0.8999999999999995
+          },
+          {
+            "unit": "developer/craftbook-deep-security-review",
+            "a": {
+              "mean": 6.666666666666667,
+              "n": 3,
+              "sum": 20
+            },
+            "b": {
+              "mean": 5.8999999999999995,
+              "n": 3,
+              "sum": 17.7
+            },
+            "diff": 0.7666666666666675
+          },
+          {
+            "unit": "developer/craftbook-refactor-module",
+            "a": {
+              "mean": 6.033333333333334,
+              "n": 3,
+              "sum": 18.1
+            },
+            "b": {
+              "mean": 5.1000000000000005,
+              "n": 3,
+              "sum": 15.3
+            },
+            "diff": 0.9333333333333336
+          },
+          {
+            "unit": "productivity/craftbook-ab-test-readout",
+            "a": {
+              "mean": 8.233333333333333,
+              "n": 3,
+              "sum": 24.7
+            },
+            "b": {
+              "mean": 8,
+              "n": 3,
+              "sum": 24
+            },
+            "diff": 0.2333333333333325
+          },
+          {
+            "unit": "productivity/craftbook-annotated-bibliography",
+            "a": {
+              "mean": 6.533333333333334,
+              "n": 3,
+              "sum": 19.6
+            },
+            "b": {
+              "mean": 6.533333333333334,
+              "n": 3,
+              "sum": 19.6
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-powerpoint-deck",
+            "a": {
+              "mean": 6.433333333333334,
+              "n": 3,
+              "sum": 19.3
+            },
+            "b": {
+              "mean": 6.2,
+              "n": 3,
+              "sum": 18.6
+            },
+            "diff": 0.2333333333333334
+          },
+          {
+            "unit": "productivity/craftbook-research-to-document",
+            "a": {
+              "mean": 8.200000000000001,
+              "n": 3,
+              "sum": 24.6
+            },
+            "b": {
+              "mean": 8.3,
+              "n": 3,
+              "sum": 24.900000000000002
+            },
+            "diff": -0.09999999999999964
+          },
+          {
+            "unit": "productivity/craftbook-spreadsheet-model",
+            "a": {
+              "mean": 6.333333333333333,
+              "n": 3,
+              "sum": 19
+            },
+            "b": {
+              "mean": 6.333333333333333,
+              "n": 3,
+              "sum": 19
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-week-plan",
+            "a": {
+              "mean": 5.866666666666667,
+              "n": 3,
+              "sum": 17.6
+            },
+            "b": {
+              "mean": 6.866666666666667,
+              "n": 3,
+              "sum": 20.6
+            },
+            "diff": -1
+          },
+          {
+            "unit": "productivity/docblocks-theme-roundtrip",
+            "a": {
+              "mean": 6.033333333333334,
+              "n": 3,
+              "sum": 18.1
+            },
+            "b": {
+              "mean": 6.333333333333333,
+              "n": 3,
+              "sum": 19
+            },
+            "diff": -0.29999999999999893
+          },
+          {
+            "unit": "productivity/meeting-followup",
+            "a": {
+              "mean": 6.7,
+              "n": 3,
+              "sum": 20.1
+            },
+            "b": {
+              "mean": 6.433333333333334,
+              "n": 3,
+              "sum": 19.3
+            },
+            "diff": 0.2666666666666666
+          },
+          {
+            "unit": "productivity/wikipedia-research-brief",
+            "a": {
+              "mean": 6.933333333333334,
+              "n": 3,
+              "sum": 20.8
+            },
+            "b": {
+              "mean": 6.7,
+              "n": 3,
+              "sum": 20.1
+            },
+            "diff": 0.2333333333333334
+          }
+        ]
+      }
+    },
+    {
+      "a": "qwen3.8-27b-q4.dflash",
+      "b": "qwen3.8-27b-q4.none",
+      "pass": {
+        "units": 43,
+        "diff": 0.023255813953488372,
+        "ci": [
+          -0.0310077519379845,
+          0.08527131782945738
+        ],
+        "exact": {
+          "differingScenarios": 9,
+          "p": 0.6171875
+        },
+        "perUnit": [
+          {
+            "unit": "complex-work/craftbook-author-fanout",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-author-gate-script",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.3333333333333333,
+              "n": 3,
+              "sum": 1
+            },
+            "diff": 0.6666666666666667
+          },
+          {
+            "unit": "complex-work/craftbook-author-linear",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-author-params",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-edit-midtask",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-export-generalize",
+            "a": {
+              "mean": 0.3333333333333333,
+              "n": 3,
+              "sum": 1
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": -0.6666666666666667
+          },
+          {
+            "unit": "complex-work/craftbook-find-vs-create",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-invoice-run",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-route-multi",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/conflict-synthesis",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/data-wrangle",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/failing-tests-spec",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/incident-postmortem",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/ops-runbook-anomaly",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/petshop",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/plan-and-estimate",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/schema-migration",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/symptom-debug",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/tankcombat",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/tictactoe",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-api-contract-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          },
+          {
+            "unit": "developer/craftbook-bug-fix-tdd",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-code-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-codemod-sweep",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0.3333333333333333,
+              "n": 3,
+              "sum": 1
+            },
+            "diff": 0.3333333333333333
+          },
+          {
+            "unit": "developer/craftbook-deep-security-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          },
+          {
+            "unit": "developer/craftbook-refactor-module",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/dev-craftbook-routing",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/fix-squisq-bugs",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/interface-contract",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/large-pr-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          },
+          {
+            "unit": "productivity/conflict-synthesis",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/constrained-comms",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": -0.33333333333333337
+          },
+          {
+            "unit": "productivity/craftbook-ab-test-readout",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-annotated-bibliography",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-powerpoint-deck",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": -0.33333333333333337
+          },
+          {
+            "unit": "productivity/craftbook-research-to-document",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-spreadsheet-model",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          },
+          {
+            "unit": "productivity/craftbook-week-plan",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/docblocks-theme-roundtrip",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/meeting-followup",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/plan-and-estimate",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/records-intake",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/wikipedia-research-brief",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          }
+        ]
+      },
+      "passExSpeed": {
+        "units": 43,
+        "diff": -0.007751937984496125,
+        "ci": [
+          -0.062015503875969,
+          0.046511627906976744
+        ],
+        "exact": {
+          "differingScenarios": 7,
+          "p": 1
+        },
+        "perUnit": [
+          {
+            "unit": "complex-work/craftbook-author-fanout",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-author-gate-script",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.3333333333333333,
+              "n": 3,
+              "sum": 1
+            },
+            "diff": 0.6666666666666667
+          },
+          {
+            "unit": "complex-work/craftbook-author-linear",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-author-params",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-edit-midtask",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-export-generalize",
+            "a": {
+              "mean": 0.3333333333333333,
+              "n": 3,
+              "sum": 1
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": -0.6666666666666667
+          },
+          {
+            "unit": "complex-work/craftbook-find-vs-create",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-invoice-run",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-route-multi",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/conflict-synthesis",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/data-wrangle",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/failing-tests-spec",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/incident-postmortem",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/ops-runbook-anomaly",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/petshop",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/plan-and-estimate",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/schema-migration",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/symptom-debug",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/tankcombat",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/tictactoe",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-api-contract-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          },
+          {
+            "unit": "developer/craftbook-bug-fix-tdd",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-code-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-codemod-sweep",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 1,
+              "n": 1,
+              "sum": 1
+            },
+            "diff": -0.33333333333333337
+          },
+          {
+            "unit": "developer/craftbook-deep-security-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 2,
+              "sum": 2
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-refactor-module",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/dev-craftbook-routing",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/fix-squisq-bugs",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/interface-contract",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/large-pr-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          },
+          {
+            "unit": "productivity/conflict-synthesis",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/constrained-comms",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": -0.33333333333333337
+          },
+          {
+            "unit": "productivity/craftbook-ab-test-readout",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-annotated-bibliography",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-powerpoint-deck",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": -0.33333333333333337
+          },
+          {
+            "unit": "productivity/craftbook-research-to-document",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-spreadsheet-model",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 2,
+              "sum": 2
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-week-plan",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/docblocks-theme-roundtrip",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/meeting-followup",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/plan-and-estimate",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/records-intake",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/wikipedia-research-brief",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          }
+        ]
+      },
+      "judge": {
+        "units": 19,
+        "diff": 0.05964912280701752,
+        "ci": [
+          -0.18771929824561404,
+          0.31578947368421056
+        ],
+        "exact": {
+          "differingScenarios": 15,
+          "p": 0.6722412109375
+        },
+        "perUnit": [
+          {
+            "unit": "complex-work/craftbook-invoice-run",
+            "a": {
+              "mean": 5.466666666666666,
+              "n": 3,
+              "sum": 16.4
+            },
+            "b": {
+              "mean": 5.533333333333334,
+              "n": 3,
+              "sum": 16.6
+            },
+            "diff": -0.0666666666666682
+          },
+          {
+            "unit": "core/petshop",
+            "a": {
+              "mean": 6.6000000000000005,
+              "n": 3,
+              "sum": 19.8
+            },
+            "b": {
+              "mean": 6.266666666666667,
+              "n": 3,
+              "sum": 18.8
+            },
+            "diff": 0.3333333333333339
+          },
+          {
+            "unit": "core/tankcombat",
+            "a": {
+              "mean": 5.533333333333334,
+              "n": 3,
+              "sum": 16.6
+            },
+            "b": {
+              "mean": 5.533333333333334,
+              "n": 3,
+              "sum": 16.6
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/tictactoe",
+            "a": {
+              "mean": 6.766666666666667,
+              "n": 3,
+              "sum": 20.3
+            },
+            "b": {
+              "mean": 6.866666666666667,
+              "n": 3,
+              "sum": 20.6
+            },
+            "diff": -0.10000000000000053
+          },
+          {
+            "unit": "developer/craftbook-api-contract-review",
+            "a": {
+              "mean": 7.5,
+              "n": 3,
+              "sum": 22.5
+            },
+            "b": {
+              "mean": 7.5,
+              "n": 2,
+              "sum": 15
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-bug-fix-tdd",
+            "a": {
+              "mean": 5.666666666666667,
+              "n": 3,
+              "sum": 17
+            },
+            "b": {
+              "mean": 6.333333333333333,
+              "n": 3,
+              "sum": 19
+            },
+            "diff": -0.6666666666666661
+          },
+          {
+            "unit": "developer/craftbook-code-review",
+            "a": {
+              "mean": 7,
+              "n": 3,
+              "sum": 21
+            },
+            "b": {
+              "mean": 7,
+              "n": 3,
+              "sum": 21
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-codemod-sweep",
+            "a": {
+              "mean": 6.233333333333333,
+              "n": 3,
+              "sum": 18.7
+            },
+            "b": {
+              "mean": 6.333333333333333,
+              "n": 3,
+              "sum": 19
+            },
+            "diff": -0.09999999999999964
+          },
+          {
+            "unit": "developer/craftbook-deep-security-review",
+            "a": {
+              "mean": 7.033333333333334,
+              "n": 3,
+              "sum": 21.1
+            },
+            "b": {
+              "mean": 5.8999999999999995,
+              "n": 3,
+              "sum": 17.7
+            },
+            "diff": 1.1333333333333346
+          },
+          {
+            "unit": "developer/craftbook-refactor-module",
+            "a": {
+              "mean": 6.433333333333334,
+              "n": 3,
+              "sum": 19.3
+            },
+            "b": {
+              "mean": 5.1000000000000005,
+              "n": 3,
+              "sum": 15.3
+            },
+            "diff": 1.333333333333333
+          },
+          {
+            "unit": "productivity/craftbook-ab-test-readout",
+            "a": {
+              "mean": 8.333333333333334,
+              "n": 3,
+              "sum": 25
+            },
+            "b": {
+              "mean": 8,
+              "n": 3,
+              "sum": 24
+            },
+            "diff": 0.3333333333333339
+          },
+          {
+            "unit": "productivity/craftbook-annotated-bibliography",
+            "a": {
+              "mean": 6.866666666666667,
+              "n": 3,
+              "sum": 20.6
+            },
+            "b": {
+              "mean": 6.533333333333334,
+              "n": 3,
+              "sum": 19.6
+            },
+            "diff": 0.33333333333333304
+          },
+          {
+            "unit": "productivity/craftbook-powerpoint-deck",
+            "a": {
+              "mean": 5.933333333333334,
+              "n": 3,
+              "sum": 17.8
+            },
+            "b": {
+              "mean": 6.2,
+              "n": 3,
+              "sum": 18.6
+            },
+            "diff": -0.2666666666666666
+          },
+          {
+            "unit": "productivity/craftbook-research-to-document",
+            "a": {
+              "mean": 8.3,
+              "n": 3,
+              "sum": 24.900000000000002
+            },
+            "b": {
+              "mean": 8.3,
+              "n": 3,
+              "sum": 24.900000000000002
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-spreadsheet-model",
+            "a": {
+              "mean": 6.833333333333333,
+              "n": 3,
+              "sum": 20.5
+            },
+            "b": {
+              "mean": 6.333333333333333,
+              "n": 3,
+              "sum": 19
+            },
+            "diff": 0.5
+          },
+          {
+            "unit": "productivity/craftbook-week-plan",
+            "a": {
+              "mean": 6.466666666666666,
+              "n": 3,
+              "sum": 19.4
+            },
+            "b": {
+              "mean": 6.866666666666667,
+              "n": 3,
+              "sum": 20.6
+            },
+            "diff": -0.40000000000000124
+          },
+          {
+            "unit": "productivity/docblocks-theme-roundtrip",
+            "a": {
+              "mean": 5.133333333333334,
+              "n": 3,
+              "sum": 15.4
+            },
+            "b": {
+              "mean": 6.333333333333333,
+              "n": 3,
+              "sum": 19
+            },
+            "diff": -1.1999999999999993
+          },
+          {
+            "unit": "productivity/meeting-followup",
+            "a": {
+              "mean": 6.766666666666667,
+              "n": 3,
+              "sum": 20.3
+            },
+            "b": {
+              "mean": 6.433333333333334,
+              "n": 3,
+              "sum": 19.3
+            },
+            "diff": 0.33333333333333304
+          },
+          {
+            "unit": "productivity/wikipedia-research-brief",
+            "a": {
+              "mean": 6.333333333333333,
+              "n": 3,
+              "sum": 19
+            },
+            "b": {
+              "mean": 6.7,
+              "n": 3,
+              "sum": 20.1
+            },
+            "diff": -0.36666666666666714
+          }
+        ]
+      }
+    },
+    {
+      "a": "qwen3.8-27b-q4.dflash",
+      "b": "qwen3.8-27b-q4.mtp",
+      "pass": {
+        "units": 43,
+        "diff": 1.290957005378089e-18,
+        "ci": [
+          -0.031007751937984496,
+          0.0310077519379845
+        ],
+        "exact": {
+          "differingScenarios": 4,
+          "p": 1
+        },
+        "perUnit": [
+          {
+            "unit": "complex-work/craftbook-author-fanout",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-author-gate-script",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          },
+          {
+            "unit": "complex-work/craftbook-author-linear",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-author-params",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-edit-midtask",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-export-generalize",
+            "a": {
+              "mean": 0.3333333333333333,
+              "n": 3,
+              "sum": 1
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": -0.3333333333333333
+          },
+          {
+            "unit": "complex-work/craftbook-find-vs-create",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-invoice-run",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-route-multi",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/conflict-synthesis",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/data-wrangle",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/failing-tests-spec",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/incident-postmortem",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/ops-runbook-anomaly",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/petshop",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          },
+          {
+            "unit": "core/plan-and-estimate",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/schema-migration",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/symptom-debug",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/tankcombat",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/tictactoe",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-api-contract-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-bug-fix-tdd",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-code-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-codemod-sweep",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": -0.33333333333333337
+          },
+          {
+            "unit": "developer/craftbook-deep-security-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-refactor-module",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/dev-craftbook-routing",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/fix-squisq-bugs",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/interface-contract",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/large-pr-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/conflict-synthesis",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/constrained-comms",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-ab-test-readout",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-annotated-bibliography",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-powerpoint-deck",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-research-to-document",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-spreadsheet-model",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-week-plan",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/docblocks-theme-roundtrip",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/meeting-followup",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/plan-and-estimate",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/records-intake",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/wikipedia-research-brief",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          }
+        ]
+      },
+      "passExSpeed": {
+        "units": 43,
+        "diff": 1.290957005378089e-18,
+        "ci": [
+          -0.031007751937984496,
+          0.0310077519379845
+        ],
+        "exact": {
+          "differingScenarios": 4,
+          "p": 1
+        },
+        "perUnit": [
+          {
+            "unit": "complex-work/craftbook-author-fanout",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-author-gate-script",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          },
+          {
+            "unit": "complex-work/craftbook-author-linear",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-author-params",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-edit-midtask",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-export-generalize",
+            "a": {
+              "mean": 0.3333333333333333,
+              "n": 3,
+              "sum": 1
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": -0.3333333333333333
+          },
+          {
+            "unit": "complex-work/craftbook-find-vs-create",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-invoice-run",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-route-multi",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/conflict-synthesis",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/data-wrangle",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/failing-tests-spec",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/incident-postmortem",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/ops-runbook-anomaly",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/petshop",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          },
+          {
+            "unit": "core/plan-and-estimate",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/schema-migration",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/symptom-debug",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/tankcombat",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/tictactoe",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-api-contract-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-bug-fix-tdd",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-code-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-codemod-sweep",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": -0.33333333333333337
+          },
+          {
+            "unit": "developer/craftbook-deep-security-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-refactor-module",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/dev-craftbook-routing",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/fix-squisq-bugs",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/interface-contract",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/large-pr-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/conflict-synthesis",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/constrained-comms",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-ab-test-readout",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-annotated-bibliography",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-powerpoint-deck",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-research-to-document",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-spreadsheet-model",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-week-plan",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/docblocks-theme-roundtrip",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/meeting-followup",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/plan-and-estimate",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/records-intake",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/wikipedia-research-brief",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          }
+        ]
+      },
+      "judge": {
+        "units": 19,
+        "diff": 0.08771929824561396,
+        "ci": [
+          -0.10526315789473689,
+          0.2684210526315788
+        ],
+        "exact": {
+          "differingScenarios": 17,
+          "p": 0.38812255859375
+        },
+        "perUnit": [
+          {
+            "unit": "complex-work/craftbook-invoice-run",
+            "a": {
+              "mean": 5.466666666666666,
+              "n": 3,
+              "sum": 16.4
+            },
+            "b": {
+              "mean": 5.066666666666666,
+              "n": 3,
+              "sum": 15.2
+            },
+            "diff": 0.39999999999999947
+          },
+          {
+            "unit": "core/petshop",
+            "a": {
+              "mean": 6.6000000000000005,
+              "n": 3,
+              "sum": 19.8
+            },
+            "b": {
+              "mean": 6.866666666666667,
+              "n": 3,
+              "sum": 20.6
+            },
+            "diff": -0.2666666666666666
+          },
+          {
+            "unit": "core/tankcombat",
+            "a": {
+              "mean": 5.533333333333334,
+              "n": 3,
+              "sum": 16.6
+            },
+            "b": {
+              "mean": 5.366666666666667,
+              "n": 3,
+              "sum": 16.1
+            },
+            "diff": 0.16666666666666696
+          },
+          {
+            "unit": "core/tictactoe",
+            "a": {
+              "mean": 6.766666666666667,
+              "n": 3,
+              "sum": 20.3
+            },
+            "b": {
+              "mean": 6.833333333333333,
+              "n": 3,
+              "sum": 20.5
+            },
+            "diff": -0.06666666666666643
+          },
+          {
+            "unit": "developer/craftbook-api-contract-review",
+            "a": {
+              "mean": 7.5,
+              "n": 3,
+              "sum": 22.5
+            },
+            "b": {
+              "mean": 7.333333333333333,
+              "n": 3,
+              "sum": 22
+            },
+            "diff": 0.16666666666666696
+          },
+          {
+            "unit": "developer/craftbook-bug-fix-tdd",
+            "a": {
+              "mean": 5.666666666666667,
+              "n": 3,
+              "sum": 17
+            },
+            "b": {
+              "mean": 5.666666666666667,
+              "n": 3,
+              "sum": 17
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-code-review",
+            "a": {
+              "mean": 7,
+              "n": 3,
+              "sum": 21
+            },
+            "b": {
+              "mean": 7,
+              "n": 3,
+              "sum": 21
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-codemod-sweep",
+            "a": {
+              "mean": 6.233333333333333,
+              "n": 3,
+              "sum": 18.7
+            },
+            "b": {
+              "mean": 5.433333333333334,
+              "n": 3,
+              "sum": 16.3
+            },
+            "diff": 0.7999999999999998
+          },
+          {
+            "unit": "developer/craftbook-deep-security-review",
+            "a": {
+              "mean": 7.033333333333334,
+              "n": 3,
+              "sum": 21.1
+            },
+            "b": {
+              "mean": 6.666666666666667,
+              "n": 3,
+              "sum": 20
+            },
+            "diff": 0.36666666666666714
+          },
+          {
+            "unit": "developer/craftbook-refactor-module",
+            "a": {
+              "mean": 6.433333333333334,
+              "n": 3,
+              "sum": 19.3
+            },
+            "b": {
+              "mean": 6.033333333333334,
+              "n": 3,
+              "sum": 18.1
+            },
+            "diff": 0.39999999999999947
+          },
+          {
+            "unit": "productivity/craftbook-ab-test-readout",
+            "a": {
+              "mean": 8.333333333333334,
+              "n": 3,
+              "sum": 25
+            },
+            "b": {
+              "mean": 8.233333333333333,
+              "n": 3,
+              "sum": 24.7
+            },
+            "diff": 0.10000000000000142
+          },
+          {
+            "unit": "productivity/craftbook-annotated-bibliography",
+            "a": {
+              "mean": 6.866666666666667,
+              "n": 3,
+              "sum": 20.6
+            },
+            "b": {
+              "mean": 6.533333333333334,
+              "n": 3,
+              "sum": 19.6
+            },
+            "diff": 0.33333333333333304
+          },
+          {
+            "unit": "productivity/craftbook-powerpoint-deck",
+            "a": {
+              "mean": 5.933333333333334,
+              "n": 3,
+              "sum": 17.8
+            },
+            "b": {
+              "mean": 6.433333333333334,
+              "n": 3,
+              "sum": 19.3
+            },
+            "diff": -0.5
+          },
+          {
+            "unit": "productivity/craftbook-research-to-document",
+            "a": {
+              "mean": 8.3,
+              "n": 3,
+              "sum": 24.900000000000002
+            },
+            "b": {
+              "mean": 8.200000000000001,
+              "n": 3,
+              "sum": 24.6
+            },
+            "diff": 0.09999999999999964
+          },
+          {
+            "unit": "productivity/craftbook-spreadsheet-model",
+            "a": {
+              "mean": 6.833333333333333,
+              "n": 3,
+              "sum": 20.5
+            },
+            "b": {
+              "mean": 6.333333333333333,
+              "n": 3,
+              "sum": 19
+            },
+            "diff": 0.5
+          },
+          {
+            "unit": "productivity/craftbook-week-plan",
+            "a": {
+              "mean": 6.466666666666666,
+              "n": 3,
+              "sum": 19.4
+            },
+            "b": {
+              "mean": 5.866666666666667,
+              "n": 3,
+              "sum": 17.6
+            },
+            "diff": 0.5999999999999988
+          },
+          {
+            "unit": "productivity/docblocks-theme-roundtrip",
+            "a": {
+              "mean": 5.133333333333334,
+              "n": 3,
+              "sum": 15.4
+            },
+            "b": {
+              "mean": 6.033333333333334,
+              "n": 3,
+              "sum": 18.1
+            },
+            "diff": -0.9000000000000004
+          },
+          {
+            "unit": "productivity/meeting-followup",
+            "a": {
+              "mean": 6.766666666666667,
+              "n": 3,
+              "sum": 20.3
+            },
+            "b": {
+              "mean": 6.7,
+              "n": 3,
+              "sum": 20.1
+            },
+            "diff": 0.06666666666666643
+          },
+          {
+            "unit": "productivity/wikipedia-research-brief",
+            "a": {
+              "mean": 6.333333333333333,
+              "n": 3,
+              "sum": 19
+            },
+            "b": {
+              "mean": 6.933333333333334,
+              "n": 3,
+              "sum": 20.8
+            },
+            "diff": -0.6000000000000005
+          }
+        ]
+      }
+    },
+    {
+      "a": "gemma4-12b-q4.mtp",
+      "b": "gemma4-12b-q4.none",
+      "pass": {
+        "units": 43,
+        "diff": 0.02325581395348837,
+        "ci": [
+          -0.03875968992248062,
+          0.08527131782945738
+        ],
+        "exact": {
+          "differingScenarios": 11,
+          "p": 0.63671875
+        },
+        "perUnit": [
+          {
+            "unit": "complex-work/craftbook-author-fanout",
+            "a": {
+              "mean": 0,
+              "n": 3,
+              "sum": 0
+            },
+            "b": {
+              "mean": 0,
+              "n": 3,
+              "sum": 0
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-author-gate-script",
+            "a": {
+              "mean": 0,
+              "n": 3,
+              "sum": 0
+            },
+            "b": {
+              "mean": 0,
+              "n": 3,
+              "sum": 0
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-author-linear",
+            "a": {
+              "mean": 0.3333333333333333,
+              "n": 3,
+              "sum": 1
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": -0.3333333333333333
+          },
+          {
+            "unit": "complex-work/craftbook-author-params",
+            "a": {
+              "mean": 0,
+              "n": 3,
+              "sum": 0
+            },
+            "b": {
+              "mean": 0,
+              "n": 3,
+              "sum": 0
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-edit-midtask",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-export-generalize",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0,
+              "n": 3,
+              "sum": 0
+            },
+            "diff": 0.6666666666666666
+          },
+          {
+            "unit": "complex-work/craftbook-find-vs-create",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-invoice-run",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-route-multi",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/conflict-synthesis",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/data-wrangle",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/failing-tests-spec",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": -0.33333333333333337
+          },
+          {
+            "unit": "core/incident-postmortem",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/ops-runbook-anomaly",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          },
+          {
+            "unit": "core/petshop",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/plan-and-estimate",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/schema-migration",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/symptom-debug",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/tankcombat",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/tictactoe",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-api-contract-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-bug-fix-tdd",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-code-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-codemod-sweep",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-deep-security-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          },
+          {
+            "unit": "developer/craftbook-refactor-module",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          },
+          {
+            "unit": "developer/dev-craftbook-routing",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/fix-squisq-bugs",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/interface-contract",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/large-pr-review",
+            "a": {
+              "mean": 0.3333333333333333,
+              "n": 3,
+              "sum": 1
+            },
+            "b": {
+              "mean": 0,
+              "n": 3,
+              "sum": 0
+            },
+            "diff": 0.3333333333333333
+          },
+          {
+            "unit": "productivity/conflict-synthesis",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": -0.33333333333333337
+          },
+          {
+            "unit": "productivity/constrained-comms",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-ab-test-readout",
+            "a": {
+              "mean": 0,
+              "n": 3,
+              "sum": 0
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": -0.6666666666666666
+          },
+          {
+            "unit": "productivity/craftbook-annotated-bibliography",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-powerpoint-deck",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0.3333333333333333,
+              "n": 3,
+              "sum": 1
+            },
+            "diff": 0.3333333333333333
+          },
+          {
+            "unit": "productivity/craftbook-research-to-document",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-spreadsheet-model",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-week-plan",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/docblocks-theme-roundtrip",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/meeting-followup",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          },
+          {
+            "unit": "productivity/plan-and-estimate",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/records-intake",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/wikipedia-research-brief",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0
+          }
+        ]
+      },
+      "passExSpeed": {
+        "units": 43,
+        "diff": 0.02325581395348837,
+        "ci": [
+          -0.03875968992248062,
+          0.08527131782945738
+        ],
+        "exact": {
+          "differingScenarios": 11,
+          "p": 0.63671875
+        },
+        "perUnit": [
+          {
+            "unit": "complex-work/craftbook-author-fanout",
+            "a": {
+              "mean": 0,
+              "n": 3,
+              "sum": 0
+            },
+            "b": {
+              "mean": 0,
+              "n": 3,
+              "sum": 0
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-author-gate-script",
+            "a": {
+              "mean": 0,
+              "n": 3,
+              "sum": 0
+            },
+            "b": {
+              "mean": 0,
+              "n": 3,
+              "sum": 0
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-author-linear",
+            "a": {
+              "mean": 0.3333333333333333,
+              "n": 3,
+              "sum": 1
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": -0.3333333333333333
+          },
+          {
+            "unit": "complex-work/craftbook-author-params",
+            "a": {
+              "mean": 0,
+              "n": 3,
+              "sum": 0
+            },
+            "b": {
+              "mean": 0,
+              "n": 3,
+              "sum": 0
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-edit-midtask",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-export-generalize",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0,
+              "n": 3,
+              "sum": 0
+            },
+            "diff": 0.6666666666666666
+          },
+          {
+            "unit": "complex-work/craftbook-find-vs-create",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-invoice-run",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-route-multi",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/conflict-synthesis",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/data-wrangle",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/failing-tests-spec",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": -0.33333333333333337
+          },
+          {
+            "unit": "core/incident-postmortem",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/ops-runbook-anomaly",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          },
+          {
+            "unit": "core/petshop",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/plan-and-estimate",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/schema-migration",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/symptom-debug",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/tankcombat",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/tictactoe",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-api-contract-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-bug-fix-tdd",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-code-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-codemod-sweep",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-deep-security-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          },
+          {
+            "unit": "developer/craftbook-refactor-module",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          },
+          {
+            "unit": "developer/dev-craftbook-routing",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/fix-squisq-bugs",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/interface-contract",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/large-pr-review",
+            "a": {
+              "mean": 0.3333333333333333,
+              "n": 3,
+              "sum": 1
+            },
+            "b": {
+              "mean": 0,
+              "n": 3,
+              "sum": 0
+            },
+            "diff": 0.3333333333333333
+          },
+          {
+            "unit": "productivity/conflict-synthesis",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": -0.33333333333333337
+          },
+          {
+            "unit": "productivity/constrained-comms",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-ab-test-readout",
+            "a": {
+              "mean": 0,
+              "n": 3,
+              "sum": 0
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": -0.6666666666666666
+          },
+          {
+            "unit": "productivity/craftbook-annotated-bibliography",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-powerpoint-deck",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0.3333333333333333,
+              "n": 3,
+              "sum": 1
+            },
+            "diff": 0.3333333333333333
+          },
+          {
+            "unit": "productivity/craftbook-research-to-document",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-spreadsheet-model",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-week-plan",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/docblocks-theme-roundtrip",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/meeting-followup",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          },
+          {
+            "unit": "productivity/plan-and-estimate",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/records-intake",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/wikipedia-research-brief",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0
+          }
+        ]
+      },
+      "judge": {
+        "units": 19,
+        "diff": 0.03157894736842107,
+        "ci": [
+          -0.09824561403508783,
+          0.16491228070175426
+        ],
+        "exact": {
+          "differingScenarios": 16,
+          "p": 0.671905517578125
+        },
+        "perUnit": [
+          {
+            "unit": "complex-work/craftbook-invoice-run",
+            "a": {
+              "mean": 4.2,
+              "n": 3,
+              "sum": 12.600000000000001
+            },
+            "b": {
+              "mean": 3.733333333333333,
+              "n": 3,
+              "sum": 11.2
+            },
+            "diff": 0.46666666666666723
+          },
+          {
+            "unit": "core/petshop",
+            "a": {
+              "mean": 5.3,
+              "n": 3,
+              "sum": 15.899999999999999
+            },
+            "b": {
+              "mean": 5.366666666666667,
+              "n": 3,
+              "sum": 16.1
+            },
+            "diff": -0.06666666666666732
+          },
+          {
+            "unit": "core/tankcombat",
+            "a": {
+              "mean": 3.9333333333333336,
+              "n": 3,
+              "sum": 11.8
+            },
+            "b": {
+              "mean": 3.6999999999999997,
+              "n": 3,
+              "sum": 11.1
+            },
+            "diff": 0.23333333333333384
+          },
+          {
+            "unit": "core/tictactoe",
+            "a": {
+              "mean": 5.7,
+              "n": 3,
+              "sum": 17.1
+            },
+            "b": {
+              "mean": 6.133333333333333,
+              "n": 3,
+              "sum": 18.4
+            },
+            "diff": -0.4333333333333327
+          },
+          {
+            "unit": "developer/craftbook-api-contract-review",
+            "a": {
+              "mean": 4.666666666666667,
+              "n": 3,
+              "sum": 14
+            },
+            "b": {
+              "mean": 4.666666666666667,
+              "n": 3,
+              "sum": 14
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-bug-fix-tdd",
+            "a": {
+              "mean": 3.3333333333333335,
+              "n": 3,
+              "sum": 10
+            },
+            "b": {
+              "mean": 3.233333333333333,
+              "n": 3,
+              "sum": 9.7
+            },
+            "diff": 0.10000000000000053
+          },
+          {
+            "unit": "developer/craftbook-code-review",
+            "a": {
+              "mean": 6.166666666666667,
+              "n": 3,
+              "sum": 18.5
+            },
+            "b": {
+              "mean": 6.333333333333333,
+              "n": 3,
+              "sum": 19
+            },
+            "diff": -0.16666666666666607
+          },
+          {
+            "unit": "developer/craftbook-codemod-sweep",
+            "a": {
+              "mean": 1.1333333333333333,
+              "n": 3,
+              "sum": 3.4
+            },
+            "b": {
+              "mean": 0.43333333333333335,
+              "n": 3,
+              "sum": 1.3
+            },
+            "diff": 0.7
+          },
+          {
+            "unit": "developer/craftbook-deep-security-review",
+            "a": {
+              "mean": 3.9,
+              "n": 3,
+              "sum": 11.7
+            },
+            "b": {
+              "mean": 3.6666666666666665,
+              "n": 3,
+              "sum": 11
+            },
+            "diff": 0.2333333333333334
+          },
+          {
+            "unit": "developer/craftbook-refactor-module",
+            "a": {
+              "mean": 3,
+              "n": 3,
+              "sum": 9
+            },
+            "b": {
+              "mean": 3,
+              "n": 3,
+              "sum": 9
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-ab-test-readout",
+            "a": {
+              "mean": 5.633333333333333,
+              "n": 3,
+              "sum": 16.9
+            },
+            "b": {
+              "mean": 6.2,
+              "n": 3,
+              "sum": 18.6
+            },
+            "diff": -0.5666666666666673
+          },
+          {
+            "unit": "productivity/craftbook-annotated-bibliography",
+            "a": {
+              "mean": 6.2,
+              "n": 3,
+              "sum": 18.6
+            },
+            "b": {
+              "mean": 6.433333333333334,
+              "n": 3,
+              "sum": 19.3
+            },
+            "diff": -0.2333333333333334
+          },
+          {
+            "unit": "productivity/craftbook-powerpoint-deck",
+            "a": {
+              "mean": 4.533333333333333,
+              "n": 3,
+              "sum": 13.6
+            },
+            "b": {
+              "mean": 4.266666666666667,
+              "n": 3,
+              "sum": 12.8
+            },
+            "diff": 0.2666666666666666
+          },
+          {
+            "unit": "productivity/craftbook-research-to-document",
+            "a": {
+              "mean": 6.8999999999999995,
+              "n": 3,
+              "sum": 20.7
+            },
+            "b": {
+              "mean": 7,
+              "n": 3,
+              "sum": 21
+            },
+            "diff": -0.10000000000000053
+          },
+          {
+            "unit": "productivity/craftbook-spreadsheet-model",
+            "a": {
+              "mean": 5.666666666666667,
+              "n": 3,
+              "sum": 17
+            },
+            "b": {
+              "mean": 5.833333333333333,
+              "n": 3,
+              "sum": 17.5
+            },
+            "diff": -0.16666666666666607
+          },
+          {
+            "unit": "productivity/craftbook-week-plan",
+            "a": {
+              "mean": 4.866666666666666,
+              "n": 3,
+              "sum": 14.6
+            },
+            "b": {
+              "mean": 4.6000000000000005,
+              "n": 3,
+              "sum": 13.8
+            },
+            "diff": 0.2666666666666657
+          },
+          {
+            "unit": "productivity/docblocks-theme-roundtrip",
+            "a": {
+              "mean": 4.666666666666667,
+              "n": 3,
+              "sum": 14
+            },
+            "b": {
+              "mean": 4.666666666666667,
+              "n": 3,
+              "sum": 14
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/meeting-followup",
+            "a": {
+              "mean": 6,
+              "n": 3,
+              "sum": 18
+            },
+            "b": {
+              "mean": 6.1000000000000005,
+              "n": 3,
+              "sum": 18.3
+            },
+            "diff": -0.10000000000000053
+          },
+          {
+            "unit": "productivity/wikipedia-research-brief",
+            "a": {
+              "mean": 4.433333333333334,
+              "n": 3,
+              "sum": 13.3
+            },
+            "b": {
+              "mean": 4.266666666666667,
+              "n": 3,
+              "sum": 12.8
+            },
+            "diff": 0.16666666666666696
+          }
+        ]
+      }
+    },
+    {
+      "a": "muse-glimmer-30b-q4.dflash",
+      "b": "muse-glimmer-30b-q4.none",
+      "pass": {
+        "units": 43,
+        "diff": 0.062015503875969,
+        "ci": [
+          0.015503875968992244,
+          0.11627906976744189
+        ],
+        "exact": {
+          "differingScenarios": 8,
+          "p": 0.0546875
+        },
+        "perUnit": [
+          {
+            "unit": "complex-work/craftbook-author-fanout",
+            "a": {
+              "mean": 0,
+              "n": 3,
+              "sum": 0
+            },
+            "b": {
+              "mean": 0,
+              "n": 3,
+              "sum": 0
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-author-gate-script",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0.3333333333333333,
+              "n": 3,
+              "sum": 1
+            },
+            "diff": 0.3333333333333333
+          },
+          {
+            "unit": "complex-work/craftbook-author-linear",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-author-params",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-edit-midtask",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          },
+          {
+            "unit": "complex-work/craftbook-export-generalize",
+            "a": {
+              "mean": 0.3333333333333333,
+              "n": 3,
+              "sum": 1
+            },
+            "b": {
+              "mean": 0,
+              "n": 3,
+              "sum": 0
+            },
+            "diff": 0.3333333333333333
+          },
+          {
+            "unit": "complex-work/craftbook-find-vs-create",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-invoice-run",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-route-multi",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.3333333333333333,
+              "n": 3,
+              "sum": 1
+            },
+            "diff": 0.6666666666666667
+          },
+          {
+            "unit": "core/conflict-synthesis",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/data-wrangle",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/failing-tests-spec",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/incident-postmortem",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/ops-runbook-anomaly",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/petshop",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": -0.33333333333333337
+          },
+          {
+            "unit": "core/plan-and-estimate",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/schema-migration",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/symptom-debug",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/tankcombat",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/tictactoe",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-api-contract-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-bug-fix-tdd",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-code-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-codemod-sweep",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0.3333333333333333,
+              "n": 3,
+              "sum": 1
+            },
+            "diff": 0.3333333333333333
+          },
+          {
+            "unit": "developer/craftbook-deep-security-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-refactor-module",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/dev-craftbook-routing",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/fix-squisq-bugs",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/interface-contract",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/large-pr-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/conflict-synthesis",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/constrained-comms",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-ab-test-readout",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-annotated-bibliography",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-powerpoint-deck",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.3333333333333333,
+              "n": 3,
+              "sum": 1
+            },
+            "diff": 0.6666666666666667
+          },
+          {
+            "unit": "productivity/craftbook-research-to-document",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-spreadsheet-model",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-week-plan",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/docblocks-theme-roundtrip",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/meeting-followup",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/plan-and-estimate",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/records-intake",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/wikipedia-research-brief",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          }
+        ]
+      },
+      "passExSpeed": {
+        "units": 43,
+        "diff": 0.050387596899224806,
+        "ci": [
+          0.003875968992248061,
+          0.10465116279069768
+        ],
+        "exact": {
+          "differingScenarios": 7,
+          "p": 0.078125
+        },
+        "perUnit": [
+          {
+            "unit": "complex-work/craftbook-author-fanout",
+            "a": {
+              "mean": 0,
+              "n": 3,
+              "sum": 0
+            },
+            "b": {
+              "mean": 0,
+              "n": 3,
+              "sum": 0
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-author-gate-script",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0.3333333333333333,
+              "n": 3,
+              "sum": 1
+            },
+            "diff": 0.3333333333333333
+          },
+          {
+            "unit": "complex-work/craftbook-author-linear",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-author-params",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-edit-midtask",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 2,
+              "sum": 2
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-export-generalize",
+            "a": {
+              "mean": 0.5,
+              "n": 2,
+              "sum": 1
+            },
+            "b": {
+              "mean": 0,
+              "n": 3,
+              "sum": 0
+            },
+            "diff": 0.5
+          },
+          {
+            "unit": "complex-work/craftbook-find-vs-create",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-invoice-run",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "complex-work/craftbook-route-multi",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.3333333333333333,
+              "n": 3,
+              "sum": 1
+            },
+            "diff": 0.6666666666666667
+          },
+          {
+            "unit": "core/conflict-synthesis",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/data-wrangle",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/failing-tests-spec",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/incident-postmortem",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/ops-runbook-anomaly",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/petshop",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": -0.33333333333333337
+          },
+          {
+            "unit": "core/plan-and-estimate",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/schema-migration",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/symptom-debug",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/tankcombat",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "core/tictactoe",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-api-contract-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-bug-fix-tdd",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-code-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-codemod-sweep",
+            "a": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "b": {
+              "mean": 0.5,
+              "n": 2,
+              "sum": 1
+            },
+            "diff": 0.16666666666666663
+          },
+          {
+            "unit": "developer/craftbook-deep-security-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-refactor-module",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/dev-craftbook-routing",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/fix-squisq-bugs",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/interface-contract",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/large-pr-review",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/conflict-synthesis",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/constrained-comms",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-ab-test-readout",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-annotated-bibliography",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-powerpoint-deck",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.5,
+              "n": 2,
+              "sum": 1
+            },
+            "diff": 0.5
+          },
+          {
+            "unit": "productivity/craftbook-research-to-document",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-spreadsheet-model",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-week-plan",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/docblocks-theme-roundtrip",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/meeting-followup",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/plan-and-estimate",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/records-intake",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/wikipedia-research-brief",
+            "a": {
+              "mean": 1,
+              "n": 3,
+              "sum": 3
+            },
+            "b": {
+              "mean": 0.6666666666666666,
+              "n": 3,
+              "sum": 2
+            },
+            "diff": 0.33333333333333337
+          }
+        ]
+      },
+      "judge": {
+        "units": 19,
+        "diff": 0.016666666666666653,
+        "ci": [
+          -0.09473684210526329,
+          0.12543859649122832
+        ],
+        "exact": {
+          "differingScenarios": 16,
+          "p": 0.7918701171875
+        },
+        "perUnit": [
+          {
+            "unit": "complex-work/craftbook-invoice-run",
+            "a": {
+              "mean": 4.666666666666667,
+              "n": 3,
+              "sum": 14
+            },
+            "b": {
+              "mean": 4.866666666666667,
+              "n": 3,
+              "sum": 14.600000000000001
+            },
+            "diff": -0.20000000000000018
+          },
+          {
+            "unit": "core/petshop",
+            "a": {
+              "mean": 5.5,
+              "n": 3,
+              "sum": 16.5
+            },
+            "b": {
+              "mean": 5.933333333333334,
+              "n": 3,
+              "sum": 17.8
+            },
+            "diff": -0.43333333333333357
+          },
+          {
+            "unit": "core/tankcombat",
+            "a": {
+              "mean": 4.1000000000000005,
+              "n": 3,
+              "sum": 12.3
+            },
+            "b": {
+              "mean": 3.9333333333333336,
+              "n": 3,
+              "sum": 11.8
+            },
+            "diff": 0.16666666666666696
+          },
+          {
+            "unit": "core/tictactoe",
+            "a": {
+              "mean": 5.2,
+              "n": 3,
+              "sum": 15.600000000000001
+            },
+            "b": {
+              "mean": 5.366666666666667,
+              "n": 3,
+              "sum": 16.1
+            },
+            "diff": -0.16666666666666696
+          },
+          {
+            "unit": "developer/craftbook-api-contract-review",
+            "a": {
+              "mean": 5.833333333333333,
+              "n": 3,
+              "sum": 17.5
+            },
+            "b": {
+              "mean": 5.833333333333333,
+              "n": 3,
+              "sum": 17.5
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-bug-fix-tdd",
+            "a": {
+              "mean": 4.333333333333333,
+              "n": 3,
+              "sum": 13
+            },
+            "b": {
+              "mean": 4,
+              "n": 3,
+              "sum": 12
+            },
+            "diff": 0.33333333333333304
+          },
+          {
+            "unit": "developer/craftbook-code-review",
+            "a": {
+              "mean": 6.5,
+              "n": 3,
+              "sum": 19.5
+            },
+            "b": {
+              "mean": 6.5,
+              "n": 3,
+              "sum": 19.5
+            },
+            "diff": 0
+          },
+          {
+            "unit": "developer/craftbook-codemod-sweep",
+            "a": {
+              "mean": 4.2,
+              "n": 3,
+              "sum": 12.6
+            },
+            "b": {
+              "mean": 4.433333333333334,
+              "n": 3,
+              "sum": 13.3
+            },
+            "diff": -0.2333333333333334
+          },
+          {
+            "unit": "developer/craftbook-deep-security-review",
+            "a": {
+              "mean": 5.333333333333333,
+              "n": 3,
+              "sum": 16
+            },
+            "b": {
+              "mean": 4.8999999999999995,
+              "n": 3,
+              "sum": 14.7
+            },
+            "diff": 0.43333333333333357
+          },
+          {
+            "unit": "developer/craftbook-refactor-module",
+            "a": {
+              "mean": 4.1000000000000005,
+              "n": 3,
+              "sum": 12.3
+            },
+            "b": {
+              "mean": 4.1000000000000005,
+              "n": 3,
+              "sum": 12.3
+            },
+            "diff": 0
+          },
+          {
+            "unit": "productivity/craftbook-ab-test-readout",
+            "a": {
+              "mean": 7.566666666666666,
+              "n": 3,
+              "sum": 22.7
+            },
+            "b": {
+              "mean": 7.333333333333333,
+              "n": 3,
+              "sum": 22
+            },
+            "diff": 0.2333333333333334
+          },
+          {
+            "unit": "productivity/craftbook-annotated-bibliography",
+            "a": {
+              "mean": 6.266666666666667,
+              "n": 3,
+              "sum": 18.8
+            },
+            "b": {
+              "mean": 6.6000000000000005,
+              "n": 3,
+              "sum": 19.8
+            },
+            "diff": -0.3333333333333339
+          },
+          {
+            "unit": "productivity/craftbook-powerpoint-deck",
+            "a": {
+              "mean": 5.766666666666667,
+              "n": 3,
+              "sum": 17.3
+            },
+            "b": {
+              "mean": 5.7,
+              "n": 3,
+              "sum": 17.1
+            },
+            "diff": 0.06666666666666643
+          },
+          {
+            "unit": "productivity/craftbook-research-to-document",
+            "a": {
+              "mean": 8.200000000000001,
+              "n": 3,
+              "sum": 24.6
+            },
+            "b": {
+              "mean": 8,
+              "n": 3,
+              "sum": 24
+            },
+            "diff": 0.20000000000000107
+          },
+          {
+            "unit": "productivity/craftbook-spreadsheet-model",
+            "a": {
+              "mean": 6.5,
+              "n": 3,
+              "sum": 19.5
+            },
+            "b": {
+              "mean": 6.166666666666667,
+              "n": 3,
+              "sum": 18.5
+            },
+            "diff": 0.33333333333333304
+          },
+          {
+            "unit": "productivity/craftbook-week-plan",
+            "a": {
+              "mean": 5.7,
+              "n": 3,
+              "sum": 17.1
+            },
+            "b": {
+              "mean": 5.933333333333334,
+              "n": 3,
+              "sum": 17.8
+            },
+            "diff": -0.2333333333333334
+          },
+          {
+            "unit": "productivity/docblocks-theme-roundtrip",
+            "a": {
+              "mean": 4.8999999999999995,
+              "n": 3,
+              "sum": 14.7
+            },
+            "b": {
+              "mean": 5.1000000000000005,
+              "n": 3,
+              "sum": 15.3
+            },
+            "diff": -0.20000000000000107
+          },
+          {
+            "unit": "productivity/meeting-followup",
+            "a": {
+              "mean": 6.6000000000000005,
+              "n": 3,
+              "sum": 19.8
+            },
+            "b": {
+              "mean": 6.633333333333333,
+              "n": 3,
+              "sum": 19.9
+            },
+            "diff": -0.03333333333333233
+          },
+          {
+            "unit": "productivity/wikipedia-research-brief",
+            "a": {
+              "mean": 5.933333333333334,
+              "n": 3,
+              "sum": 17.8
+            },
+            "b": {
+              "mean": 5.55,
+              "n": 2,
+              "sum": 11.1
+            },
+            "diff": 0.38333333333333375
+          }
+        ]
+      }
+    }
+  ],
+  "speedSensitive": [
+    {
+      "arm": "qwen3.8-27b-q4.none",
+      "round": "r1",
+      "unit": "developer/craftbook-deep-security-review",
+      "trialId": "craftbook-deep-security-review-qwen3-8-27b-q4-2026-11-14T22-56-33-335Z-y6o0",
+      "because": "turn 476 s old",
+      "reason": "craftbook-deep-security-review stale no-write repair loop: security-review/REPORT.md had unchanged content (2518 bytes) for 62s — a re-emission of identical bytes counts as unchanged here after repair feedback and newer chat activity; still failing 8/11: security-review/REPORT.md is missing required content /Systemic Themes|root cause|blast radius/ — nothing in its 2518 bytes matches. Add that content."
+    },
+    {
+      "arm": "qwen3.8-27b-q4.none",
+      "round": "r2",
+      "unit": "developer/craftbook-codemod-sweep",
+      "trialId": "craftbook-codemod-sweep-qwen3-8-27b-q4-2026-11-18T00-28-42-002Z-len8",
+      "because": "turn 452 s old",
+      "reason": "craftbook-codemod-sweep stale no-write repair loop: tasks/1/sites.md had unchanged content (2249 bytes) for 244s — a re-emission of identical bytes counts as unchanged here after repair feedback and newer chat activity; still failing 27/32: tests/verify-sweep.mjs did not pass when run with node: exit=1\nCommand failed: <home>/.nvm/versions/node/v24.19.0/bin/node tests/verify-sweep.mjs\nnode:internal/modules/run_main:107\n    triggerUncaughtException(\n    ^\n\nAssertionError [ERR_ASSERTION]: the old name survives outside the exclusions in: tasks/1/sites.md\n+ actual - expected\n\n+ [\n+   'tasks/1/sites.md'\n+ ]\n- []\n\n    at <sandbox>/tests/verify-sweep.mjs:32:8\n    at ModuleJob.run (node:internal/modules/esm/module_job:439:25)\n    at async node:internal/modules/esm/loader:643:26\n    at async asyncRunEntryPointWithESMLoader (node:internal/modules/run_main:101:5) {\n  generatedMessage: false,\n  code: 'ERR_ASSERTION',\n  actual: [ 'tasks/1/sites.md' ],\n  expected: [],\n  operator: 'deepStrictEqual',\n  diff: 'simple'\n}\n\nNode.js v24.19.0"
+    },
+    {
+      "arm": "muse-glimmer-30b-q4.none",
+      "round": "r2",
+      "unit": "developer/craftbook-codemod-sweep",
+      "trialId": "craftbook-codemod-sweep-muse-glimmer-30b-q4-2026-11-18T06-11-24-057Z-qv3g",
+      "because": "turn 246 s old",
+      "reason": "craftbook-codemod-sweep stale no-write repair loop: tasks/1/sites.md had unchanged content (2021 bytes) for 180s — a re-emission of identical bytes counts as unchanged here after repair feedback and newer chat activity; still failing 26/32: tasks/1/sites.md is missing required content: sites sections in order — nothing in its 2021 bytes matches /^##\\s+Pattern[\\s\\S]*^##\\s+Sites found[\\s\\S]*^##\\s+Exclusions/. Add that content."
+    },
+    {
+      "arm": "muse-glimmer-30b-q4.none",
+      "round": "r2",
+      "unit": "complex-work/craftbook-edit-midtask",
+      "trialId": "craftbook-edit-midtask-muse-glimmer-30b-q4-2026-11-19T06-42-41-238Z-bwng",
+      "because": "hard ceiling",
+      "reason": "hit hard ceiling (2700000ms + 45m progress extensions) — last hard progress 67s before the end; the deliverable never closed"
+    },
+    {
+      "arm": "muse-glimmer-30b-q4.dflash",
+      "round": "r2",
+      "unit": "complex-work/craftbook-export-generalize",
+      "trialId": "craftbook-export-generalize-muse-glimmer-30b-q4-2026-11-18T13-34-23-894Z-02yy",
+      "because": "hard ceiling",
+      "reason": "hit hard ceiling (4800000ms + 80m progress extensions) — last hard progress 15s before the end; the deliverable never closed"
+    },
+    {
+      "arm": "qwen3.8-27b-q4.none",
+      "round": "r3",
+      "unit": "productivity/craftbook-spreadsheet-model",
+      "trialId": "craftbook-spreadsheet-model-qwen3-8-27b-q4-2026-11-20T10-34-15-541Z-zd7a",
+      "because": "hard ceiling",
+      "reason": "hit hard ceiling (1800000ms + 30m progress extensions) — last hard progress 241s before the end; the deliverable never closed"
+    },
+    {
+      "arm": "qwen3.8-27b-q4.none",
+      "round": "r3",
+      "unit": "developer/craftbook-codemod-sweep",
+      "trialId": "craftbook-codemod-sweep-qwen3-8-27b-q4-2026-11-21T00-03-02-750Z-9z9k",
+      "because": "turn 245 s old",
+      "reason": "craftbook-codemod-sweep stale no-write repair loop: tasks/1/sites.md had unchanged content (1103 bytes) for 131s — a re-emission of identical bytes counts as unchanged here after repair feedback and newer chat activity; still failing 29/32: tasks/1/sites.md is missing required content: sites sections in order — nothing in its 1103 bytes matches /^##\\s+Pattern[\\s\\S]*^##\\s+Sites found[\\s\\S]*^##\\s+Exclusions/. Add that content."
+    },
+    {
+      "arm": "muse-glimmer-30b-q4.none",
+      "round": "r3",
+      "unit": "productivity/craftbook-powerpoint-deck",
+      "trialId": "craftbook-powerpoint-deck-muse-glimmer-30b-q4-2026-11-20T15-19-47-887Z-48y7",
+      "because": "turn 242 s old",
+      "reason": "craftbook-powerpoint-deck stale no-write repair loop: powerpoint/eval/deck.md had unchanged content (1063 bytes) for 349s — a re-emission of identical bytes counts as unchanged here after repair feedback and newer chat activity; still failing 19/21: powerpoint/eval/deck.md slide 1 is \"Boreal Desk Returns Pilot\", but tasks/1/outline.md requires \"Title and Context\" in that position. Preserve the locked slide titles and order."
+    }
+  ]
+}
