@@ -195,7 +195,8 @@ describe('artifactReadRoots', () => {
 
     expect(await artifactReadRoots(root, [])).toEqual([root]);
     const roots = await artifactReadRoots(root, ['data/work', 'reports/week.md']);
-    expect(roots.map((r) => r.slice(root.length + 1)).sort()).toEqual([
+    // Grants are host paths, so Windows answers with backslashes.
+    expect(roots.map((r) => r.slice(root.length + 1).replaceAll('\\', '/')).sort()).toEqual([
       'data/news',
       'notes.md',
       'reports/month.md',

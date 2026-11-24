@@ -1,6 +1,7 @@
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { resolveSecurityPolicy } from '@bendyline/gezel';
 import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type RunningService, startService } from '../service.js';
@@ -115,14 +116,27 @@ for (const look of [() => readFileSync(root + '/${EVENT}', 'utf8'), () => readdi
       undefined,
       { userInitiated: true },
     );
-    const cloud = await script('cloud', 'peek.mjs');
-    expect(cloud.text).toContain('nothing private');
-    expect(cloud.text).not.toContain(SECRET);
-    expect(cloud.text).not.toContain('dentist.md');
-    expect(cloud.text).toContain('ERR_ACCESS_DENIED');
+    // A fresh home starts at Lockdown, which denies a script the network, and a
+    // host with no OS network boundary (Windows without the MXC launcher, a
+    // Linux runner without user namespaces) then refuses to start it at all.
+    // The read grants under test are the same either way.
+    const { store } = svc.context;
+    const prior = await store.readConfig();
+    await store.writeConfig({
+      securityPolicy: { ...resolveSecurityPolicy(prior), allowExternalServices: true },
+    });
+    try {
+      const cloud = await script('cloud', 'peek.mjs');
+      expect(cloud.text).toContain('nothing private');
+      expect(cloud.text).not.toContain(SECRET);
+      expect(cloud.text).not.toContain('dentist.md');
+      expect(cloud.text).toContain('ERR_ACCESS_DENIED');
 
-    const local = await script('local', 'peek.mjs');
-    expect(local.text).toContain(SECRET);
+      const local = await script('local', 'peek.mjs');
+      expect(local.text).toContain(SECRET);
+    } finally {
+      await store.writeConfig({ securityPolicy: prior.securityPolicy });
+    }
   }, 90_000);
 
   it('opens for a cloud gezel when the person allows it, and closes again', async () => {

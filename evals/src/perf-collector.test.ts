@@ -1,6 +1,7 @@
 import type { GezelClient } from '@bendyline/gezel-client';
 import { describe, expect, it } from 'vitest';
 import {
+  type GpuSampler,
   PerfCollector,
   extractBilling,
   parseAmdSysfsGpu,
@@ -560,33 +561,53 @@ describe('sumProviderTokens', () => {
 });
 
 describe('PerfCollector system-memory sampling', () => {
-  it('records host RAM every tick, independent of GPU telemetry', async () => {
-    // Regression: the merge that combined the pluggable GPU sampler with
-    // system-memory sampling nested the RAM push inside
-    // `if (gpuSampler) { if (gpuIntervalElapsed) { … } }`. That zeroed
-    // `systemMemory` on hosts with no GPU telemetry — precisely the
-    // unified-memory hosts where host RAM IS the headroom signal — and
-    // throttled it to the GPU interval everywhere else. It also missed the
-    // first tick on every host, because the GPU interval has not elapsed yet.
-    const collector = new PerfCollector({
-      sampleIntervalMs: 20,
-      log: () => {},
-      client: { getUsage: async () => ({ providers: {} }) } as unknown as GezelClient,
-    });
+  // Regression: the merge that combined the pluggable GPU sampler with
+  // system-memory sampling nested the RAM push inside
+  // `if (gpuSampler) { if (gpuIntervalElapsed) { … } }`. That zeroed
+  // `systemMemory` on hosts with no GPU telemetry — precisely the
+  // unified-memory hosts where host RAM IS the headroom signal — and
+  // throttled it to the GPU interval everywhere else. It also missed the
+  // first tick on every host, because the GPU interval has not elapsed yet.
+  //
+  // Both GPU conditions are injected rather than probed: the real Windows
+  // probe walks every GPU-engine counter instance, and with ~2,000 of them it
+  // took 16 s, more than this test's whole budget.
+  const reading = { utilPercent: 0, memUsedMb: null, memTotalMb: null };
+  const slowGpu: GpuSampler = {
+    kind: 'test',
+    minIntervalMs: 60_000,
+    sample: () => reading,
+    firstReading: reading,
+  };
 
-    collector.start(process.pid);
-    await new Promise((resolve) => setTimeout(resolve, 120));
-    const metrics = await collector.stop();
+  it.each([
+    ['no GPU telemetry', null, 0],
+    ['a GPU sampler slower than the tick', slowGpu, 1],
+  ] as const)(
+    'records host RAM every tick with %s',
+    async (_label, gpu, gpuSamples) => {
+      const collector = new PerfCollector({
+        sampleIntervalMs: 20,
+        log: () => {},
+        client: { getUsage: async () => ({ providers: {} }) } as unknown as GezelClient,
+        resolveGpuSampler: () => gpu,
+      });
 
-    expect(metrics.systemMemory.totalMb).toBeGreaterThan(0);
-    expect(metrics.systemMemory.peakUsedMb).toBeGreaterThan(0);
-    // The load-bearing assertion. `> 0` is too weak to catch the regression on
-    // a host that HAS a GPU: the misplaced push still fired on most ticks
-    // there. Host RAM is sampled unconditionally, the process tree only when
-    // `ps` succeeds, so RAM samples must never trail process samples. Under
-    // the nested version they do — it misses at least the first tick, before
-    // the GPU interval has elapsed.
-    expect(metrics.systemMemory.sampleCount).toBeGreaterThanOrEqual(metrics.process.sampleCount);
-    expect(metrics.systemMemory.sampleCount).toBeGreaterThan(1);
-  }, 15_000);
+      collector.start(process.pid);
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      const metrics = await collector.stop();
+
+      expect(metrics.systemMemory.totalMb).toBeGreaterThan(0);
+      expect(metrics.systemMemory.peakUsedMb).toBeGreaterThan(0);
+      // The GPU was read once (or never), so every further RAM sample proves
+      // the push is not gated on the GPU interval.
+      expect(metrics.gpu.sampleCount).toBe(gpuSamples);
+      // Host RAM is sampled unconditionally, the process tree only when its
+      // probe succeeds, so RAM samples must never trail process samples. Under
+      // the nested version they do: it misses at least the first tick.
+      expect(metrics.systemMemory.sampleCount).toBeGreaterThanOrEqual(metrics.process.sampleCount);
+      expect(metrics.systemMemory.sampleCount).toBeGreaterThan(1);
+    },
+    15_000,
+  );
 });
