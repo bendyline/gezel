@@ -1,10 +1,11 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { ChatSession, HistoryEvent } from '@bendyline/gezel';
 import { gezelSessionsDir, globalHistoryFile, projectHistoryFile } from '@bendyline/gezel/paths';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HISTORY_ORDER_SLACK_MS, HistoryManager } from './manager.js';
+import { BACKWARD_CHUNK_BYTES } from './read-backward.js';
 
 let home: string;
 let history: HistoryManager;
@@ -455,6 +456,78 @@ describe('HistoryManager', () => {
       expect(scoped.map((event) => event.id)).toEqual(expected.map((event) => event.id));
       // The window holds 760 lines (700 after `from` plus the 60-minute slack).
       expect(parsed).toBeLessThanOrEqual(Math.ceil(760 / 7));
+    });
+
+    // A task held for 13 days read back 1.25 GB to find 12 lines (2026-11-23).
+    it('a task scope spanning many chunks returns what a full scan filtered would', async () => {
+      const filler = 'x'.repeat(400);
+      await writeLoggedEvents(
+        'p',
+        Array.from({ length: 9000 }, (_, i) => ({
+          ...calls(i),
+          // `p/3` is also a prefix of `p/30` and `p/300`.
+          details: { taskRef: `p/${[3, 30, 300, 4, 5, 6, 7][i % 7]}`, stepId: 'work', filler },
+        })),
+      );
+      expect((await stat(projectHistoryFile(home, 'p'))).size).toBeGreaterThan(
+        4 * BACKWARD_CHUNK_BYTES,
+      );
+      const everything = await history.listEvents({ projectId: 'p' });
+      for (const taskRef of ['p/3', 'p/30', 'p/9']) {
+        for (const from of [minute(0), minute(4321), minute(8990), minute(9999)]) {
+          const scoped = await history.listEvents(
+            { projectId: 'p', kinds: ['tool.called'], from },
+            { taskRef },
+          );
+          const expected = everything.filter(
+            (event) =>
+              event.at >= from &&
+              event.kind === 'tool.called' &&
+              event.details?.taskRef === taskRef,
+          );
+          expect(scoped.map((event) => event.id)).toEqual(expected.map((event) => event.id));
+        }
+        const newest = await history.listEvents({ projectId: 'p', limit: 5 }, { taskRef });
+        expect(newest.map((event) => event.id)).toEqual(
+          everything
+            .filter((event) => event.details?.taskRef === taskRef)
+            .slice(0, 5)
+            .map((event) => event.id),
+        );
+      }
+    });
+
+    it('a task scope does not decode the lines of other tasks', async () => {
+      await writeLoggedEvents(
+        'p',
+        Array.from({ length: 5000 }, (_, i) => calls(i)),
+      );
+      const decode = vi.spyOn(Buffer.prototype, 'toString');
+      const none = await history.listEvents(
+        { projectId: 'p', kinds: ['tool.called'], from: minute(0) },
+        { taskRef: 'p/9' },
+      );
+      const decoded = decode.mock.calls.length;
+      decode.mockRestore();
+      expect(none).toEqual([]);
+      // The start of one line per chunk, not 5,000 lines.
+      expect(decoded).toBeLessThan(20);
+    });
+
+    it('a task scope stops at its bound even when the task has no recent event', async () => {
+      const filler = 'x'.repeat(400);
+      // Stamped ahead of its place: a read that went on to the start would return it.
+      await writeLoggedEvents('p', [
+        { at: minute(20_000), details: { taskRef: 'p/3' }, summary: 'misplaced' },
+        ...Array.from({ length: 9000 }, (_, i) => ({
+          at: minute(i),
+          details: { taskRef: 'p/other', filler },
+        })),
+      ]);
+      const read = (from: string) =>
+        history.listEvents({ projectId: 'p', kinds: ['tool.called'], from }, { taskRef: 'p/3' });
+      expect(await read(minute(8900))).toEqual([]);
+      expect((await read(minute(0))).map((event) => event.summary)).toEqual(['misplaced']);
     });
 
     it('a bounded kinds read stops and skips by the logged time without parsing', async () => {
