@@ -1,6 +1,7 @@
 import type { DragEvent, KeyboardEvent, ReactNode, PointerEvent as ReactPointerEvent } from 'react';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { PersonLabel } from './PersonLabel.js';
+import { attachHorizontalWheel } from './horizontal-wheel.js';
 import { snapRouteScroll } from './step-route-scroll.js';
 
 export type StepStatus = 'done' | 'active' | 'pending';
@@ -172,28 +173,7 @@ function TrackerScroll({
     const scroll = scrollRef.current;
     const vp = viewportRef.current;
     if (!scroll || !vp) return;
-    const onWheel = (event: WheelEvent) => {
-      if (event.ctrlKey || event.metaKey || event.defaultPrevented) return;
-      const delta = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? event.deltaX : event.deltaY;
-      const unit =
-        event.deltaMode === WheelEvent.DOM_DELTA_LINE
-          ? Number.parseFloat(getComputedStyle(vp).lineHeight) || 16
-          : event.deltaMode === WheelEvent.DOM_DELTA_PAGE
-            ? vp.clientWidth
-            : 1;
-      const left = Math.max(
-        0,
-        Math.min(vp.scrollWidth - vp.clientWidth, vp.scrollLeft + delta * unit),
-      );
-      if (Math.abs(left - vp.scrollLeft) < 0.5) return;
-      event.preventDefault();
-      event.stopPropagation();
-      vp.scrollLeft = left;
-    };
-    // React's delegated wheel listener is passive; this listener must be able
-    // to stop the surrounding page from scrolling when the route consumes it.
-    scroll.addEventListener('wheel', onWheel, { passive: false });
-    return () => scroll.removeEventListener('wheel', onWheel);
+    return attachHorizontalWheel(scroll, vp);
   }, []);
 
   const pan = useRef<{ x: number; left: number; pointerId: number; moved: boolean } | null>(null);

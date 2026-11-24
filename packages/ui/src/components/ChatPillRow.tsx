@@ -13,6 +13,7 @@ import { DropdownMenu } from '../primitives/index.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { AreaIcon } from './AreaIcon.js';
 import { GezelIcon } from './GezelIcon.js';
+import { attachHorizontalWheel } from './horizontal-wheel.js';
 import { humanMessagePreview } from './message-preview.js';
 import { formatFolderLabel } from './terminal-folder-label.js';
 import { toolActivityPhrase } from './tool-display.js';
@@ -288,6 +289,13 @@ function useOverflowBar(
     observer.observe(el);
     return () => observer.disconnect();
   }, [measure, shown]);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `shown` is the re-attach trigger, as above.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    return attachHorizontalWheel(el);
+  }, [shown]);
 
   const onThumbPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
     const scroller = scrollRef.current;
