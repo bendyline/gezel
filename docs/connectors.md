@@ -442,6 +442,15 @@ flow now:
 
 A provider that returns no ID token is logged and connected on the hint alone.
 
+### Cloud models and a connection's data
+
+A Google connection's data stays on models on this computer until the person
+turns on **Let cloud AI read this** for it, when connecting or on its row
+(`allowCloudModels` on `POST …/connectors/bind`, `…/oauth/start` and
+`PATCH …/connectors/:bindingId`, read only from the person's own app). The status
+payload carries `allowCloudModels` for types that ask, and only those. What that
+covers, and what it does not, is in [kept-local-data.md](kept-local-data.md).
+
 ### Removing a connection
 
 Remove deletes the binding, its saved sign-in and its private state. What it downloaded

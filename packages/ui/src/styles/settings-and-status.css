@@ -1114,6 +1114,17 @@ label.gz-setting-inline {
   background: var(--surface);
 }
 
+/* A connection's facts give way to its keys, so a row with a setting keeps its
+   keys where every other row has them until the window is narrow. */
+.gz-connection-facts {
+  flex: 1 1 18rem;
+  min-width: 0;
+}
+
+.gz-connection-facts > .gz-setting-check {
+  margin-top: var(--space-sm);
+}
+
 /* A website connection's row: the sign-in prompt and the in-place editor
    take the row's full width under its name. */
 .website-binding-row > div:first-child {

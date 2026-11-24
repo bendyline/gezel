@@ -403,6 +403,20 @@ action gated and recorded with a plain reason. Gezels only **propose** (stored d
 session tokens cannot create, edit, test, or approve. Contract: [docs/lookouts.md](docs/lookouts.md),
 [ADR 0026](docs/decisions/0026-lookouts.md).
 
+### Data kept on this computer
+
+A Google connection's data stays on models that run here until the person turns on "Let cloud AI
+read this" for it. `connectionKeepsLocal` and `modelRunsOnThisComputer`
+([core connector-cloud.ts](packages/core/src/connector-cloud.ts)) are the only two answers. A cloud
+gezel still works in the project; it cannot list, read, search, query or script its way to the
+records. A route that opens artifacts for a caller asks
+[kept-local-gate.ts](packages/service/src/http/kept-local-gate.ts), judged on the real file. A local
+session that was shown the data is marked (`ChatSession.keptLocal`) before the answer leaves: it
+cannot move to a cloud provider, no one-shot quoting it may run on one (pass `ofSessionId`), and what
+it writes, remembers, replies and hands on stays too. Workspace files and the shared library are not
+tracked. Contract: [docs/kept-local-data.md](docs/kept-local-data.md),
+[ADR 0035](docs/decisions/0035-kept-local-data.md).
+
 ### Interest areas
 
 What the person said they want help with: `config.interests.areas`, ids from
@@ -890,6 +904,7 @@ No rotation yet, and task-heavy projects grow fast: every model tool call is a `
   - `~/.gezel/projects/{id}/digest-state.json` — weekly-digest idempotency state, owned by [ProjectDigestGenerator](packages/service/src/digest/generator.ts)
   - `~/.gezel/projects/{id}/captures/<corpus>/` (`projectCapturesDir`, the per-account private sidecar) — pictures a camera binding saved under its storage policy, owned by [connectors/live/camera/captures-store.ts](packages/service/src/connectors/live/camera/captures-store.ts). Bounded by the binding's `keepDays` and `maxGigabytes`, paused when the disk runs low, deleted with the binding unless the person keeps them. Never in artifacts (which may be cloud-synced or machine-shared) and never written through Store (which would mark the project active on every frame)
   - `~/.gezel/projects/{id}/connectors/<bindingId>/` (`projectConnectorStateDir`) — a connector binding's private working state: what an adapter remembers between passes but must not keep in `project.json` (rewritten every pass) or the corpus (gezel-readable, `_`-writable). The website connector keeps `crawl.json`, `text/`, `changes/` and an encrypted `session.enc` here, owned by [connectors/natives/website.ts](packages/service/src/connectors/natives/website.ts) and [website-session.ts](packages/service/src/connectors/natives/website-session.ts). Removed with the binding; `crawl.json` is rebuildable (the writer dedupes), `session.enc` is the person's sign-in
+  - `~/.gezel/projects/{id}/kept-local.json` — artifacts that hold data kept on models on this computer, through `Store.readKeptLocal`/`updateKeptLocal`; losing it frees what a conversation wrote, never a connection's own folder
   - `~/.gezel/projects/{id}/lookouts.json` and `lookout-state.json` — the person's lookouts and the daemon's counters plus last 25 firings, owned by [LookoutManager](packages/service/src/lookouts/manager.ts) through `Store.listLookouts`/`writeLookouts`/`readLookoutState`/`writeLookoutState`; never in `project.json`, whose `updatedAt` reads as activity. `~/.gezel/lookouts/` holds the install-wide daily ceilings (`daily.json`), synthesized alert clips (`sounds/`) and spoken alerts (`speech/`); derived except `daily.json`
   - `~/.gezel/projects/{id}/thumbs/` (`projectThumbnailsDir`, the per-account private sidecar) — small JPEG thumbnails of workspace photos for grids, albums, search and the morning view, owned by [index-store/thumbnails.ts](packages/service/src/index-store/thumbnails.ts) and served by `GET /api/projects/:id/index/thumb`. Keyed by path, size, mtime and width (160/320/640), least-recently-served pruned past 512 MB, made by `sips` on macOS and pure JS elsewhere. Deliberately not under `artifacts/shadow/` (orphan-swept, readable by gezels) nor the workspace. Regenerable, safe to delete
   - `~/.gezel/handboek/narration/` — content-hash-keyed TTS narration WAVs + duration sidecars for Handboek articles, owned by [handboek/narration.ts](packages/service/src/handboek/narration.ts); derived cache, safe to delete

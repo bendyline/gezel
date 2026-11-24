@@ -9,6 +9,7 @@ import { safeJoin } from '@bendyline/gezel-inference/internal/fs/safe-paths';
 import { OutputRingBuffer } from '../fs/ring.js';
 import type { Store } from '../fs/store.js';
 import { denyNetBoundaryAvailable, runInSandbox } from '../sandbox/runner.js';
+import { artifactReadRoots } from './artifact-read-roots.js';
 import { WorkspaceWriteDeniedError } from './errors.js';
 import { restoreGitControl, snapshotGitControl } from './git-control-guard.js';
 import { restoreGatedManifestEdits, snapshotRootManifests } from './manifest-guard.js';
@@ -27,6 +28,8 @@ export interface RunWorkspaceScriptOptions {
   scriptPath: string;
   args?: string[];
   timeoutMs?: number;
+  /** Artifacts this run's caller may not read (`artifactReadRoots`). */
+  hiddenArtifacts?: readonly string[];
 }
 
 export interface RunWorkspaceScriptResult {
@@ -124,7 +127,7 @@ export async function runWorkspaceScript(
       cwd: workspaceDir,
       input: '',
       timeoutMs: timeout,
-      extraReadPaths: [artifactsDir],
+      extraReadPaths: [...(await artifactReadRoots(artifactsDir, opts.hiddenArtifacts ?? []))],
       // The artifacts drawer is read-only to a script; a link into it would carry writes.
       linkTargets: 'write',
       stripTypes: true,

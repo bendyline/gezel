@@ -40,6 +40,7 @@ import type {
 } from '@bendyline/gezel';
 import { type Context, type Handler, Hono } from 'hono';
 import { z } from 'zod';
+import { taskArtifactFolder } from '../../connectors/kept-local.js';
 import {
   type DiskProbeBudget,
   MAX_DISK_PROBES_PER_MESSAGE,
@@ -67,6 +68,7 @@ import {
 } from '../../tasks/session-recipe-guard.js';
 import { askTaskTeammate } from '../../tasks/teammates.js';
 import type { ServiceContext } from '../context.js';
+import { keptLocalFileRefusal } from '../kept-local-gate.js';
 
 const taskDocLog = createLogger('craftbooks');
 
@@ -650,6 +652,8 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
     const num = parseNum(c.req.param('num'));
     if (num == null) return c.json({ error: 'invalid num' }, 400);
     const step = c.req.query('step') || undefined;
+    const refused = await keptLocalFileRefusal(ctx, c, projectId, taskArtifactFolder(num));
+    if (refused) return c.json({ error: refused }, 403);
     const notes = await ctx.tasks.listNotes(projectId, num, step);
     // Opt-in: the UI links the paths a note names; the MCP reader passes
     // notes to a model, which has no use for them.
@@ -663,6 +667,8 @@ export function projectTaskRoutes(ctx: ServiceContext): Hono {
     const projectId = c.req.param('projectId');
     const num = parseNum(c.req.param('num'));
     if (num == null) return c.json({ error: 'invalid num' }, 400);
+    const refused = await keptLocalFileRefusal(ctx, c, projectId, taskArtifactFolder(num));
+    if (refused) return c.json({ error: refused }, 403);
     const task = await ctx.tasks.get(projectId, num);
     if (!task) return c.json({ error: 'not found' }, 404);
     const result = await loadTaskResult(ctx.store, task);

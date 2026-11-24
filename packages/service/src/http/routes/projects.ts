@@ -129,6 +129,12 @@ import { isFirstPartyCaller, isOwnerCaller } from '../auth.js';
 import { CAMERA_PIXELS_WITHHELD, callerMaySeeFilePixels } from '../caller-location.js';
 import type { ServiceContext } from '../context.js';
 import { revealInFileManager } from '../file-manager.js';
+import {
+  carryKeptLocal,
+  keptLocalFileRefusal,
+  keptLocalGate,
+  rememberKeptLocalWrite,
+} from '../kept-local-gate.js';
 import { mutationActor } from '../mutation-actor.js';
 import { buildTimeline } from './timeline.js';
 
@@ -968,6 +974,12 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     if (!base || !abs || !(await realpathContained(base, abs))) {
       return c.json({ error: 'not found' }, 404);
     }
+    if (
+      kind !== 'document' &&
+      (await keptLocalFileRefusal(ctx, c, id, kind === 'artifact' ? rel : '', abs))
+    ) {
+      return c.json({ error: 'not found' }, 404);
+    }
     const thumb = await thumbnailFor({
       cacheDir: projectThumbnailsDir(ctx.home, id),
       absPath: abs,
@@ -1299,6 +1311,9 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     if (!joined || !(await realpathContained(base, joined))) {
       return c.json({ error: 'path traversal' }, 400);
     }
+    if (await keptLocalFileRefusal(ctx, c, id, artifactReferencePath(request), joined)) {
+      return c.json({ error: 'not found' }, 404);
+    }
     try {
       const file = await stat(joined);
       if (!file.isFile()) return c.json({ error: 'not found' }, 404);
@@ -1325,6 +1340,9 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     if (!joined || !(await realpathContained(base, joined))) {
       return c.json({ error: 'path traversal' }, 400);
     }
+    if (await keptLocalFileRefusal(ctx, c, id, artifactReferencePath(request), joined)) {
+      return c.json({ error: 'not found' }, 404);
+    }
     let path: string;
     try {
       const file = await stat(joined);
@@ -1343,6 +1361,42 @@ export function projectRoutes(ctx: ServiceContext): Hono {
 
   // ── artifacts (read-write, always internal) ──
 
+  /** The file an artifact read opens. Null when it would open nothing. */
+  const artifactReadFile = (projectId: string, path: string): Promise<string | null> =>
+    ctx.store.resolveProjectArtifactReadPath(projectId, path).catch(() => null);
+
+  /**
+   * A lookup's answer with what stays on models here taken out for a caller
+   * elsewhere. Judged on the path it resolved to: a bare filename finds a
+   * file anywhere in the drawer, and an ambiguous one lists every candidate.
+   */
+  const keptLocalResolved = async <
+    T extends { kind: string; path?: string; candidates?: string[] },
+  >(
+    c: Context,
+    projectId: string,
+    asked: string,
+    found: T,
+  ): Promise<Response> => {
+    const gate = await keptLocalGate(ctx, c, projectId);
+    if (!gate) return c.json(found);
+    if (found.kind === 'ambiguous' && found.candidates) {
+      const candidates = found.candidates.filter((path) => !gate.hidesPath(path));
+      await gate.settle();
+      return c.json(candidates.length > 0 ? { ...found, candidates } : { kind: 'missing' });
+    }
+    const path = found.path ?? asked;
+    const refused = await gate.refusal(path, await artifactReadFile(projectId, path));
+    if (refused) {
+      // A name the caller did not spell out must not confirm what is there.
+      return found.kind === 'found' && artifactBasename(asked) === asked
+        ? c.json({ kind: 'missing' })
+        : c.json({ error: refused }, 403);
+    }
+    await gate.settle();
+    return c.json(found);
+  };
+
   app.get('/:id/artifacts', async (c) => {
     const id = c.req.param('id');
     const subpath = c.req.query('path') ?? '';
@@ -1353,23 +1407,37 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     // `hidden=1` is the file panel's "show hidden files" toggle: Office lock
     // files, dotfiles, plus the reserved shadow/ cache.
     const includeHidden = c.req.query('hidden') === '1';
+    const gate = await keptLocalGate(ctx, c, id);
     if (recursive) {
       const detailed = await ctx.store.listProjectArtifactsRecursiveDetailed(id, {
         ...(withStats ? { withStats: true } : {}),
         ...(includeHidden ? { includeHidden: true } : {}),
         ...(subpath ? { subpath } : {}),
       });
-      return c.json({ files: detailed.entries, truncated: detailed.truncated });
+      const files = gate
+        ? detailed.entries.filter((e) => !gate.hidesPath(e.path))
+        : detailed.entries;
+      await gate?.settle();
+      return c.json({ files, truncated: detailed.truncated });
     }
-    return c.json({
-      files: await ctx.store.listProjectArtifacts(id, subpath, { includeHidden }),
-    });
+    const files = await ctx.store.listProjectArtifacts(id, subpath, { includeHidden });
+    const shown = gate ? files.filter((e) => !gate.hidesPath(e.path)) : files;
+    await gate?.settle();
+    return c.json({ files: shown });
   });
 
   app.get('/:id/artifacts/read', async (c) => {
     const id = c.req.param('id');
     const filePath = c.req.query('path');
     if (!filePath) return c.json({ error: 'missing ?path=' }, 400);
+    const refused = await keptLocalFileRefusal(
+      ctx,
+      c,
+      id,
+      filePath,
+      await artifactReadFile(id, filePath),
+    );
+    if (refused) return c.json({ error: refused }, 403);
     if (c.req.query('raw') === '1') {
       return serveRawFile(c, ctx.store.projectArtifactsDir(id), normalizeArtifactPath(filePath));
     }
@@ -1387,7 +1455,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     const filePath = c.req.query('path');
     if (!filePath) return c.json({ error: 'missing ?path=' }, 400);
     const res = await ctx.store.resolveProjectArtifact(id, filePath);
-    return c.json(res);
+    return keptLocalResolved(c, id, filePath, res);
   });
 
   // Read with optional line-based slicing — used by the `read_artifact`
@@ -1437,7 +1505,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       if (Number.isFinite(n) && n >= 0) opts.tail = n;
     }
     const res = await ctx.store.readProjectArtifactSlice(id, filePath, opts);
-    return c.json(res);
+    return keptLocalResolved(c, id, filePath, res);
   });
 
   // Regex-grep over a single artifact. Body shape mirrors
@@ -1460,7 +1528,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       ...(body.contextLines !== undefined ? { contextLines: body.contextLines } : {}),
       ...(body.maxMatches !== undefined ? { maxMatches: body.maxMatches } : {}),
     });
-    return c.json(res);
+    return keptLocalResolved(c, id, body.path, res);
   });
 
   const initiatedByGezel = (
@@ -1487,6 +1555,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       // An album a gezel just wrote links workspace photos; store copies with it.
       if (isPhotoAlbumPath(body.path))
         scheduleAlbumPhotos(albumMediaDeps(ctx.store), id, body.path);
+      await rememberKeptLocalWrite(ctx, c, id, [body.path]);
       return c.json({ ok: true, path: body.path });
     } catch (err) {
       if (err instanceof ArtifactPathDeniedError) {
@@ -1510,6 +1579,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         createOnly: c.req.query('create') === '1',
         initiatedByGezel: initiatedByGezel(c),
       });
+      await rememberKeptLocalWrite(ctx, c, id, [written]);
       return c.json({ ok: true, path: written });
     } catch (err) {
       if (err instanceof ArtifactPathDeniedError) {
@@ -1569,7 +1639,16 @@ export function projectRoutes(ctx: ServiceContext): Hono {
       sessionId?: string;
     };
     if (!body.fromPath || !body.toPath) return c.json({ error: 'missing fromPath / toPath' }, 400);
+    const refused = await keptLocalFileRefusal(
+      ctx,
+      c,
+      id,
+      body.fromPath,
+      await artifactReadFile(id, body.fromPath),
+    );
+    if (refused) return c.json({ error: refused }, 403);
     try {
+      await carryKeptLocal(ctx, id, body.fromPath, body.toPath);
       const moved = await ctx.store.renameProjectArtifactPath(id, body.fromPath, body.toPath, {
         initiatedByGezel: initiatedByGezel(c, body),
       });
@@ -1976,6 +2055,8 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     if (project && source && !(await callerMaySeeFilePixels(ctx, c, project, source))) {
       return c.json({ error: CAMERA_PIXELS_WITHHELD }, 403);
     }
+    const keptLocal = await keptLocalFileRefusal(ctx, c, id, body.source, source);
+    if (keptLocal) return c.json({ error: keptLocal }, 403);
     try {
       const result = await ctx.store.copyProjectArtifactToWorkspace(id, body.source, body.dest, {
         ...mutationActor(c, body),
@@ -2725,6 +2806,21 @@ export function projectRoutes(ctx: ServiceContext): Hono {
     }
   });
 
+  /**
+   * What a script run for this caller may read. Its output is what the model
+   * sees, so a run that can read kept-local data marks the conversation.
+   */
+  const scriptArtifactAccess = async (
+    c: Context,
+    projectId: string,
+  ): Promise<{ hiddenArtifacts?: string[] }> => {
+    const gate = await keptLocalGate(ctx, c, projectId);
+    if (!gate) return {};
+    if (await gate.refusalForAll()) return { hiddenArtifacts: gate.paths };
+    await gate.settle();
+    return {};
+  };
+
   app.post('/:id/run-nodejs-script', async (c) => {
     const id = c.req.param('id');
     const body = (await c.req.json()) as {
@@ -2747,6 +2843,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         scriptPath: body.path,
         ...(body.args ? { args: body.args } : {}),
         ...(effectiveTimeout ? { timeoutMs: effectiveTimeout } : {}),
+        ...(await scriptArtifactAccess(c, id)),
       });
       recordBlockedScript(c, id, 'run_nodejs_script', result.egressIndicators);
       return c.json(result);
@@ -2776,6 +2873,7 @@ export function projectRoutes(ctx: ServiceContext): Hono {
         script: body.script,
         outputPath: body.outputPath,
         ...(effectiveTimeout ? { timeoutMs: effectiveTimeout } : {}),
+        ...(await scriptArtifactAccess(c, id)),
       });
       recordBlockedScript(c, id, 'derive_file', result.egressIndicators);
       return c.json(result);
@@ -2941,6 +3039,15 @@ function playwrightTestConfigSource(scriptAbs: string): string {
  */
 function referenceRelativePath(request: { kind: string; path: string }): string {
   return request.kind === 'artifact' ? normalizeArtifactPath(request.path) : request.path;
+}
+
+function artifactBasename(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
+}
+
+/** The artifacts-drawer path a reference names; empty when it names another tree. */
+function artifactReferencePath(request: { kind: string; path: string }): string {
+  return request.kind === 'artifact' ? request.path : '';
 }
 
 async function serveRawFile(c: import('hono').Context, base: string, filePath: string) {

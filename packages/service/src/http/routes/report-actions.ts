@@ -7,6 +7,7 @@ import { Hono } from 'hono';
 import { ReportNotFoundError } from '../../report-actions/report-action-manager.js';
 import { CraftbookSetupRequiredError } from '../../tasks/manager.js';
 import type { ServiceContext } from '../context.js';
+import { keptLocalFileRefusal } from '../kept-local-gate.js';
 
 const log = createLogger('http');
 
@@ -34,6 +35,8 @@ export function reportActionRoutes(ctx: ServiceContext): Hono {
     const projectId = c.req.param('id');
     const path = c.req.query('path');
     if (!path) return c.json({ error: 'query parameter "path" is required' }, 400);
+    const refused = await keptLocalFileRefusal(ctx, c, projectId, path);
+    if (refused) return c.json({ error: refused }, 403);
     try {
       return c.json(await ctx.reportActions.listForReport(projectId, path));
     } catch (err) {

@@ -136,6 +136,26 @@ describe('MemoryCompactor', () => {
     expect(rewritten).toMatch(/^## 00:00 \[decision\]$/m);
   });
 
+  it('never shows the model what stays on this computer, and puts it back as it was', async () => {
+    const { aged } = await seedAgedCorpus();
+    const kept = '\n## 11:00 [fact] {kept:calendar-google.ab12}\n\nThe dentist is on Tuesday.\n';
+    const before = await store.readMemoryDay('gezel', 'compactee', aged[1]!);
+    await store.writeMemoryDay('gezel', 'compactee', aged[1]!, before + kept);
+    let prompt = '';
+    await compactor(async (p) => {
+      prompt = p;
+      return `${aged[0]} [fact] Facts zero through two about the system, merged.`;
+    }).sweep();
+    expect(prompt).toContain('Fact number 1');
+    expect(prompt).not.toContain('dentist');
+    const day = await store.readMemoryDay('gezel', 'compactee', aged[1]!);
+    expect(day).toContain('The dentist is on Tuesday.');
+    expect(day).toContain('{kept:calendar-google.ab12}');
+    expect((await memory.authoredEntries('compactee')).map((e) => e.text)).not.toContain(
+      'The dentist is on Tuesday.',
+    );
+  });
+
   it('leaves the corpus untouched when the LLM throws', async () => {
     const { aged } = await seedAgedCorpus();
     const before = await Promise.all(aged.map((d) => store.readMemoryDay('gezel', 'compactee', d)));

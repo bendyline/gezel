@@ -98,6 +98,13 @@ export const ProjectConnectorBindingSchema = z.object({
    * made before it was recorded.
    */
   account: z.string().optional(),
+  /**
+   * The person allowed models that do not run on this computer to read what
+   * this connection brings in. Read through `connectionKeepsLocal`: only the
+   * types that ask (a Google account's data) stay local without it. A camera
+   * keeps its own switch in `config`. Only the person's own app sets it.
+   */
+  allowCloudModels: z.boolean().optional(),
   lastSyncedAt: z.string().optional(),
   /** Last sync error, surfaced in the UI; cleared on the next success. */
   lastError: z.string().optional(),

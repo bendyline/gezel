@@ -2,6 +2,7 @@ import { RenderImageRequestSchema, createLogger } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { CAMERA_PIXELS_WITHHELD, callerMaySeeFilePixels } from '../caller-location.js';
 import type { ServiceContext } from '../context.js';
+import { keptLocalFileRefusal } from '../kept-local-gate.js';
 
 const log = createLogger('http');
 
@@ -38,6 +39,8 @@ export function renderRoutes(ctx: ServiceContext): Hono {
           if (project && file && !(await callerMaySeeFilePixels(ctx, c, project, file))) {
             throw new CameraPixelsWithheldError(CAMERA_PIXELS_WITHHELD);
           }
+          const keptLocal = await keptLocalFileRefusal(ctx, c, projectId, hit.path, file);
+          if (keptLocal) throw new CameraPixelsWithheldError(keptLocal);
           // The resolve path returns string content; for binary images we
           // re-read via the dedicated binary path so we get raw bytes.
           const raw = await ctx.store.readProjectArtifactBinary(projectId, hit.path);

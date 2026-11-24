@@ -340,6 +340,10 @@ export async function retrieveProjectContext(args: {
    * the message): an excerpt of the same file would spend the budget twice.
    */
   alreadyGiven?: readonly string[];
+  /** Artifacts the session's model may not see (data kept on this computer). */
+  omitArtifact?: (projectId: string, path: string) => boolean;
+  /** Leave out memories kept on models on this computer. */
+  omitKeptLocalMemory?: boolean;
   /**
    * Fired as soon as the scoped search returns — BEFORE the relevance floor
    * and hydration can turn the whole call into `null`. This is the telemetry
@@ -405,6 +409,8 @@ export async function retrieveProjectContext(args: {
     // seconds of model load, so the keyword arms answer this turn and the
     // vector arm rejoins once the pipeline is warm.
     skipColdEmbedder: true,
+    ...(args.omitArtifact ? { omitArtifact: args.omitArtifact } : {}),
+    ...(args.omitKeptLocalMemory ? { omitKeptLocalMemory: true } : {}),
     ...(relevance
       ? { relevance: { surface: 'turn' as const, mode: 'filter' as const, active: relevance } }
       : {}),

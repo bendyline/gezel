@@ -145,6 +145,11 @@ export interface SessionOpts {
      */
     allowedMcpTools?: string[];
     /**
+     * Absolute files and folders the CLI's own file tools may not read:
+     * connector data kept on models on this computer, in any project.
+     */
+    denyReadPaths?: string[];
+    /**
      * Mints a short-lived code the gezel MCP server trades for its session
      * token at startup. When present, the provider writes a fresh code into
      * the MCP config in place of `GEZEL_TOKEN` each time it starts the CLI,

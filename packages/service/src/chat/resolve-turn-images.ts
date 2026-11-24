@@ -82,6 +82,12 @@ export interface ResolveTurnImagesInput {
    * same way a model without vision gets them.
    */
   withholdPixels?: (ref: string) => boolean | Promise<boolean>;
+  /**
+   * Why an image must not reach this model in any form, or null. Unlike
+   * {@link withholdPixels} it is not described either: the person sees the
+   * reason on their message.
+   */
+  withholdImage?: (ref: string) => Promise<string | null>;
 }
 
 export interface ResolveTurnImagesResult {
@@ -122,6 +128,18 @@ export async function resolveTurnImages(
   }
   if (images.length === 0) return EMPTY;
 
+  const leftOut: string[] = [];
+  if (input.withholdImage) {
+    const shown: ResolvedImage[] = [];
+    for (const image of images) {
+      const reason = await input.withholdImage(image.ref);
+      if (reason) leftOut.push(reason);
+      else shown.push(image);
+    }
+    images = shown;
+    if (images.length === 0) return { ...EMPTY, warnings: [...new Set(leftOut)] };
+  }
+
   const recognitionAvailable = input.recognition
     ? await input.recognition.isAvailable().catch(() => false)
     : false;
@@ -151,7 +169,7 @@ export async function resolveTurnImages(
       return {
         attachments: shipped.map((i) => i.attachment),
         digests: [],
-        warnings: [],
+        warnings: [...new Set(leftOut)],
         verdict: 'native',
         reason: plan.reason,
       };
@@ -167,7 +185,7 @@ export async function resolveTurnImages(
   const overflow = images.slice(limits.maxImagesPerTurn);
 
   const digests: MessageImageDigest[] = [];
-  const warnings: string[] = [];
+  const warnings: string[] = [...new Set(leftOut)];
   let announced = false;
   // Images this turn MEANT to read but couldn't. Tracked only over
   // `described` — an overflow image is static-only by design and already

@@ -89,6 +89,7 @@ import {
   type ImageSettings,
   type ImageSizeSettings,
   type InstalledToolset,
+  type KeptLocalSource,
   KeyedLock,
   type ModelTier,
   NEW_THREAD_TITLE,
@@ -126,6 +127,7 @@ import {
   isTaskOrCraftbookSession,
   isTaskWorkAllowed,
   leaksUntaggedReasoning,
+  modelRunsOnThisComputer,
   normalizeCodexPermissionMode,
   nowIso,
   oneShotSystemMessage,
@@ -199,7 +201,7 @@ import { rankProjectsForGezel } from '../gezels/roster.js';
 import { inspectGitWorkdir } from '../git/inspect.js';
 import type { KeurmeesterManager } from '../keurmeester/manager.js';
 import { isSilentStallAbort, isTransportErrorMessage } from '../keurmeester/manager.js';
-import { USER_MEMORY_ID } from '../memory/daily-markdown.js';
+import { USER_MEMORY_ID, keptMemoryTag } from '../memory/daily-markdown.js';
 import {
   extractMemories,
   isCancelledExtraction,
@@ -417,11 +419,21 @@ import {
 import type { RecognitionMode } from '@bendyline/gezel-inference/internal/chat/vision-capability';
 import { nativeVisionEnabledFor } from '@bendyline/gezel-inference/internal/chat/vision-capability';
 import {
+  type KeptLocalArea,
+  KeptLocalData,
+  KeptLocalDataError,
+  keptLocalPassOnRefusal,
+  sourceNames,
+  taskArtifactFolder,
+  uniqueSources,
+} from '../connectors/kept-local.js';
+import {
   cameraPixelsWithheld,
   cameraPixelsWithheldForFile,
 } from '../connectors/live/camera/frame-access.js';
 import { extractReferencedTasks } from '../references/task-references.js';
 import { readTaskWithEffectiveStatus } from '../tasks/effective-status.js';
+import { artifactReadRoots } from '../workspace/artifact-read-roots.js';
 import { artifactReadSlices } from './artifact-read-evidence.js';
 import { type ResidentModel, selectBackgroundEngine } from './background-routing.js';
 import {
@@ -974,6 +986,8 @@ interface LiveSessionState {
    * serving tuning from content that is no longer active.
    */
   catalogContentSnapshot: string | null;
+  /** What this session's model may not read here when it was built. */
+  keptLocalSnapshot: string;
   /**
    * Identity of the app-registered tools this session was offered at build
    * time. An app may register or withdraw tools at any moment, and
@@ -1086,9 +1100,20 @@ type BuiltSessionOpts = SessionOpts & {
  * no compiler complaint, and the drift would only show as a message that
  * comes back after a boot missing whatever field was added.
  */
+/** What an extraction or summary of this session stamps on the memories it saves. */
+function keptTagOf(record: Pick<ChatSession, 'keptLocal'>): { kept?: string } {
+  const kept = keptMemoryTag((record.keptLocal ?? []).map((source) => source.bindingId));
+  return kept ? { kept } : {};
+}
+
 export interface MessageGezelArgs {
   fromGezelId: string;
   fromSessionId?: string;
+  /**
+   * The session that is really asking, when `fromSessionId` is left out for
+   * routing. What it read decides whether the message may leave this computer.
+   */
+  callerSessionId?: string;
   toGezelIdOrName: string;
   projectId?: string;
   text: string;
@@ -3377,6 +3402,210 @@ export class ChatManager extends LocalEngineRuntime {
     return this.store.findSessionById(sessionId);
   }
 
+  /* ─── Data kept on models on this computer (connectors/kept-local.ts) ─── */
+
+  private readonly keptLocalNoticed = new Set<string>();
+  private keptLocalData: KeptLocalData | null = null;
+
+  private get keptLocal(): KeptLocalData {
+    this.keptLocalData ??= new KeptLocalData(this.store);
+    return this.keptLocalData;
+  }
+
+  /** Whether this session's model runs on this computer. */
+  async sessionRunsOnThisComputer(sessionId: string): Promise<boolean> {
+    const record = await this.getSessionRecord(sessionId).catch(() => null);
+    return record ? this.recordRunsHere(record) : false;
+  }
+
+  private async recordRunsHere(record: ChatSession, effectiveModel?: string): Promise<boolean> {
+    if (record.providerName !== 'ollama') return modelRunsOnThisComputer(record.providerName);
+    const config = await this.store.readConfig();
+    const gezel = await this.store.getGezel(record.gezelId).catch(() => null);
+    const models = effectiveModel
+      ? [effectiveModel]
+      : [
+          record.servedModel,
+          effectiveSessionModel({
+            record,
+            frontmatterModel: gezel?.parsed.frontmatter.model,
+            config,
+          }),
+        ];
+    return models.every((model) =>
+      modelRunsOnThisComputer('ollama', model, { ollamaBaseUrl: config.ollamaBaseUrl }),
+    );
+  }
+
+  /** Whether a gezel's next turn would run on this computer. */
+  async gezelRunsOnThisComputer(gezelId: string): Promise<boolean> {
+    const provider = (await this.resolveProviderRoute(gezelId)).name;
+    if (provider !== 'ollama') return modelRunsOnThisComputer(provider);
+    const config = await this.store.readConfig();
+    const gezel = await this.store.getGezel(gezelId).catch(() => null);
+    return modelRunsOnThisComputer(
+      provider,
+      gezel?.parsed.frontmatter.model ?? config.defaultModel?.ollama,
+      { ollamaBaseUrl: config.ollamaBaseUrl },
+    );
+  }
+
+  /** The connections this conversation read that still keep their data here. */
+  async keptLocalSources(sessionId: string): Promise<KeptLocalSource[]> {
+    const record = await this.getSessionRecord(sessionId).catch(() => null);
+    return this.keptLocal.active(record?.keptLocal);
+  }
+
+  /** This conversation was shown these connections' data: it stays here from now on. */
+  async markKeptLocal(sessionId: string, sources: readonly KeptLocalSource[]): Promise<void> {
+    const record = await this.getSessionRecord(sessionId).catch(() => null);
+    if (record) await this.markRecordKeptLocal(record, sources);
+  }
+
+  private async markRecordKeptLocal(
+    record: ChatSession,
+    sources: readonly KeptLocalSource[],
+  ): Promise<void> {
+    if (sources.length === 0) return;
+    const before = record.keptLocal ?? [];
+    const next = uniqueSources([...before, ...sources]);
+    if (next.length > before.length) {
+      record.keptLocal = next;
+      await this.store.writeSession(record);
+      log.info(
+        `session ${record.id.slice(0, 8)} read ${sourceNames(sources)}; it stays on this computer`,
+      );
+    }
+    // The task's notes and files come from here too, so its other steps are
+    // judged by the same data.
+    if (!record.taskRef) return;
+    const ref = parseTaskRef(record.taskRef);
+    if (!ref) return;
+    const task = await this.store.readTask(ref.projectId, ref.num).catch(() => null);
+    await this.keptLocal.remember(
+      ref.projectId,
+      [
+        taskArtifactFolder(ref.num),
+        ...(task?.artifactDir ? [task.artifactDir] : []),
+        ...(task?.diffpackId ? [`diffpacks/${task.diffpackId}`] : []),
+      ],
+      sources,
+    );
+  }
+
+  /** {@link markKeptLocal} from the tags of memories the conversation was shown. */
+  async markKeptLocalTags(sessionId: string, tags: readonly string[]): Promise<void> {
+    if (tags.length === 0) return;
+    const record = await this.getSessionRecord(sessionId).catch(() => null);
+    if (record) await this.markRecordKeptLocal(record, await this.keptLocal.sourcesForTags(tags));
+  }
+
+  /**
+   * Take on what a session's task or the conversation it came from already
+   * holds, then refuse to run it on a model that is not on this computer.
+   */
+  private async inheritKeptLocal(record: ChatSession): Promise<KeptLocalSource[]> {
+    const inherited: KeptLocalSource[] = [];
+    for (const from of [record.parentSession?.sessionId, record.handoffFrom?.sessionId]) {
+      if (from) inherited.push(...(await this.keptLocalSources(from)));
+    }
+    const ref = record.taskRef ? parseTaskRef(record.taskRef) : null;
+    if (ref) inherited.push(...(await this.keptLocalTaskSources(ref.projectId, ref.num)));
+    const held = await this.keptLocal.active(inherited);
+    if (held.length > 0) {
+      const before = record.keptLocal ?? [];
+      const next = uniqueSources([...before, ...held]);
+      if (next.length > before.length) record.keptLocal = next;
+    }
+    return this.keptLocal.active(record.keptLocal);
+  }
+
+  /**
+   * What this session's model may not read in its project. The prompt, the
+   * sandbox and a CLI agent's shell are built from it, so a change rebuilds
+   * the session.
+   */
+  private async keptLocalFingerprint(record: ChatSession): Promise<string> {
+    if (await this.recordRunsHere(record)) return '';
+    const areas = await this.keptLocal.areas(record.projectId).catch(() => []);
+    return areas.map((area) => area.path).join('\n');
+  }
+
+  /** Why a picture a message names may not reach this session's model, when it may not. */
+  private async withholdTurnImages(
+    record: ChatSession,
+  ): Promise<{ withholdImage?: (ref: string) => Promise<string | null> }> {
+    const areas = await this.keptLocal.areas(record.projectId).catch(() => []);
+    if (areas.length === 0) return {};
+    const runsHere = await this.recordRunsHere(record);
+    return {
+      withholdImage: async (ref) => {
+        const path = /^artifacts\/(.+)$/.exec(ref)?.[1] ?? ref;
+        const file = await this.store
+          .resolveProjectArtifactReadPath(record.projectId, path)
+          .catch(() => null);
+        const area =
+          this.keptLocal.areaForPath(areas, path) ??
+          (file ? await this.keptLocal.areaForFile(record.projectId, areas, file) : undefined);
+        if (!area) return null;
+        if (!runsHere) {
+          return `A picture from ${area.source.name} was left out: ${area.source.name} stays on this computer, and this chat runs on a cloud AI.`;
+        }
+        await this.markRecordKeptLocal(record, [area.source]);
+        return null;
+      },
+    };
+  }
+
+  /** Said once, when a gezel's move to a cloud model leaves this conversation behind. */
+  private keptLocalNotice(sessionId: string, kept: readonly KeptLocalSource[]): string | null {
+    if (this.keptLocalNoticed.has(sessionId)) return null;
+    this.keptLocalNoticed.add(sessionId);
+    return `This conversation read ${sourceNames(kept)}, which stays on this computer, so a model here answered. A new conversation uses the cloud model.`;
+  }
+
+  /** The kept-local data a task's notes and files hold. */
+  async keptLocalTaskSources(projectId: string, num: number): Promise<KeptLocalSource[]> {
+    const areas = await this.keptLocal.areas(projectId);
+    if (areas.length === 0) return [];
+    const task = await this.store.readTask(projectId, num).catch(() => null);
+    const folders = [taskArtifactFolder(num), ...(task?.artifactDir ? [task.artifactDir] : [])];
+    return folders.flatMap((folder) => this.keptLocal.areaForPath(areas, folder)?.source ?? []);
+  }
+
+  /**
+   * What a message from one session to a gezel would carry. Throws when the
+   * gezel runs elsewhere, with words for the model that sent it.
+   */
+  private async keptLocalPassOn(
+    from: ChatSession | null,
+    target: { id: string; name: string },
+  ): Promise<KeptLocalSource[]> {
+    const sources = await this.keptLocal.active(from?.keptLocal);
+    if (sources.length > 0 && !(await this.gezelRunsOnThisComputer(target.id))) {
+      throw new Error(keptLocalPassOnRefusal(sources, target.name));
+    }
+    return sources;
+  }
+
+  /**
+   * A reply on its way back to whoever asked. A conversation here takes on
+   * what the reply holds; one on a cloud model gets a sentence instead.
+   */
+  private async keptLocalReply(
+    replySessionId: string,
+    askerSessionId: string,
+    replierName: string,
+  ): Promise<string | null> {
+    const sources = await this.keptLocalSources(replySessionId);
+    if (sources.length === 0) return null;
+    if (await this.sessionRunsOnThisComputer(askerSessionId)) {
+      await this.markKeptLocal(askerSessionId, sources);
+      return null;
+    }
+    return `${replierName} answered, but the answer draws on ${sourceNames(sources)}, which stays on this computer, and you run on a cloud model. Tell the person they can read it in ${replierName}'s chat, or turn on "Let cloud AI read this" for ${sourceNames(sources)} under the project's Connections.`;
+  }
+
   /**
    * Begin one request in a caller-owned conversation loop (Pi, OpenCode, or VS Code).
    * The recorder reconciles the caller's authoritative transcript into a
@@ -3891,6 +4120,7 @@ export class ChatManager extends LocalEngineRuntime {
         `[chat] createSession: engineKey pre-bind failed (${err instanceof Error ? err.message : String(err)}); deferring to first turn`,
       );
     }
+    await this.inheritKeptLocal(record).catch(() => []);
     await this.store.writeSession(record);
     if (isScheduledRunSession(record)) this.events.markScheduledRun(record.id);
     if (args.oneShot) this.cacheController?.markEphemeral(record.id);
@@ -5050,6 +5280,10 @@ export class ChatManager extends LocalEngineRuntime {
     if (target.id === args.fromGezelId) {
       throw new Error('cannot message yourself');
     }
+    const passedOn = await this.keptLocalPassOn(
+      fromRec ?? (args.callerSessionId ? await this.getSessionRecord(args.callerSessionId) : null),
+      target,
+    );
 
     // Smart project routing: if the caller didn't pass `project` AND we
     // resolved to `default`, check whether the target already has an
@@ -5135,6 +5369,7 @@ export class ChatManager extends LocalEngineRuntime {
           projectId,
           ...(delegationParent ? { parentSession: delegationParent } : {}),
         });
+    if (passedOn.length > 0) await this.markKeptLocal(session.id, passedOn);
 
     const fromGezel = await this.store.getGezel(args.fromGezelId);
     const fromConfigPre = await this.store.readConfig();
@@ -5488,6 +5723,16 @@ export class ChatManager extends LocalEngineRuntime {
       };
     }
 
+    try {
+      await this.keptLocalPassOn(fromRec, target);
+    } catch (err) {
+      return {
+        outcome: 'error',
+        reason: 'delivery-failed',
+        message: err instanceof Error ? err.message : String(err),
+      };
+    }
+
     // Cycle + depth check is keyed by GEZEL id (since this ask creates
     // a brand-new consultation session, the cycle would form across
     // sessions of the same gezel pair). Walk forward from the target
@@ -5641,7 +5886,9 @@ export class ChatManager extends LocalEngineRuntime {
         case 'complete':
           return {
             outcome: 'reply',
-            text: result.text,
+            text:
+              (await this.keptLocalReply(session.id, args.fromSessionId, targetDisplayName)) ??
+              result.text,
             toGezelId: target.id,
             toGezelName: targetDisplayName,
             sessionId: session.id,
@@ -5764,7 +6011,7 @@ export class ChatManager extends LocalEngineRuntime {
       case 'complete':
         return {
           outcome: 'reply',
-          text: result.text,
+          text: (await this.keptLocalReply(session.id, args.fromSessionId, name)) ?? result.text,
           toGezelId: gezel.id,
           toGezelName: name,
           sessionId: session.id,
@@ -6205,9 +6452,13 @@ export class ChatManager extends LocalEngineRuntime {
       // "[While you were away...]" onto whatever the user types next,
       // and Florian's model processes the reply immediately instead of
       // waiting for the user to send something unrelated.
-      const seed = `[Message from ${args.toName}]: ${replyText}`;
-      this.trackBackground(
-        this.deliverReply({
+      const deliver = async () => {
+        const withheld = await this.keptLocalReply(
+          args.targetSessionId,
+          args.fromSessionId,
+          args.toName,
+        );
+        await this.deliverReply({
           targetSessionId: args.fromSessionId,
           fromGezelId: args.toGezelId,
           fromName: args.toName,
@@ -6219,11 +6470,14 @@ export class ChatManager extends LocalEngineRuntime {
             gezelId: args.fromGezelId,
             projectId: args.projectId,
           },
-          seed,
-          ...(pictures.length > 0
+          seed: `[Message from ${args.toName}]: ${withheld ?? replyText}`,
+          ...(pictures.length > 0 && !withheld
             ? { relayedImages: { projectId: args.projectId, images: pictures } }
             : {}),
-        }).catch((err) => {
+        });
+      };
+      this.trackBackground(
+        deliver().catch((err) => {
           log.error('reply delivery failed:', err);
         }),
       );
@@ -7114,7 +7368,10 @@ export class ChatManager extends LocalEngineRuntime {
       // parking against a session that will never go idle again. It stays
       // in the record for provenance, not for routing.
       const { id, at, fromSessionId, ...rest } = entry;
-      const delivered = await this.messageGezel(rest)
+      const delivered = await this.messageGezel({
+        ...rest,
+        ...(fromSessionId ? { callerSessionId: fromSessionId } : {}),
+      })
         .then(() => true)
         .catch((err) => {
           log.warn(
@@ -7394,6 +7651,7 @@ export class ChatManager extends LocalEngineRuntime {
       if (!isProactiveAllowed(config)) return;
       await summarizeSessionForMemory({
         record,
+        ...keptTagOf(record),
         chat: this,
         memory: this.memory,
         config,
@@ -8297,6 +8555,7 @@ export class ChatManager extends LocalEngineRuntime {
         sessionId,
         markdown: userText,
         provider: state.record.providerName,
+        ...(await this.withholdTurnImages(state.record)),
         ...(turnProject?.connectors?.some((b) => b.driver === 'device')
           ? {
               withholdPixels: async (ref: string) => {
@@ -10224,11 +10483,13 @@ export class ChatManager extends LocalEngineRuntime {
                       ...(snap.model ? { model: snap.model } : {}),
                     }),
                 jobLabel: `memory · ${snap.id.slice(0, 8)}`,
+                ofSessionId: snap.id,
               }),
             memory: this.memory,
             gezelId: snap.gezelId,
             projectId: snap.projectId,
             personMemory: mayWritePersonMemory(snap),
+            ...keptTagOf(snap),
             debug: this.debug,
           })
             .then(async () => {
@@ -12238,6 +12499,8 @@ export class ChatManager extends LocalEngineRuntime {
       onQueueWait?: (info: { aheadOf: number }) => void;
       /** Cancel this ephemeral provider turn and release its session. */
       signal?: AbortSignal;
+      /** The session whose conversation the prompt quotes, for what it may reach. */
+      ofSessionId?: string;
       /**
        * The chat session whose tool call is waiting on this one-shot, e.g. a
        * script it ran that calls `llm.oneShot`. See {@link sessionHoldsQueueSlot}.
@@ -12369,6 +12632,24 @@ export class ChatManager extends LocalEngineRuntime {
     // the routed engine falls back to the foreground provider.
     let effectiveProviderName = providerName;
     let provider: LLMProvider;
+    // What a kept-local conversation said goes only to a model here. Judged
+    // before anything is loaded, and again below if the chore is rerouted.
+    const kept = await wait(
+      Promise.all(
+        [opts.ofSessionId, opts.onBehalfOfSessionId].map((id) =>
+          id ? this.keptLocalSources(id) : Promise.resolve([]),
+        ),
+      ),
+    ).then((sources) => uniqueSources(sources.flat()));
+    const mustStayHere = (name: ProviderName, modelId: string | undefined) => {
+      if (
+        kept.length > 0 &&
+        !modelRunsOnThisComputer(name, modelId, { ollamaBaseUrl: config.ollamaBaseUrl })
+      ) {
+        throw new KeptLocalDataError(kept);
+      }
+    };
+    mustStayHere(providerName, model);
     const modelWasPinned = Boolean(opts.model) || pinnedByGezel;
     // Housekeeping waits for an engine instead of taking one from a turn.
     const engine = opts.ambient ? { engineBackground: true } : {};
@@ -13179,6 +13460,7 @@ export class ChatManager extends LocalEngineRuntime {
                           ...(snap.model ? { model: snap.model } : {}),
                         }),
                     jobLabel: `memory · ${snap.id.slice(0, 8)}`,
+                    ofSessionId: snap.id,
                   }),
                 memory: this.memory,
                 gezelId: snap.gezelId,
@@ -14375,6 +14657,15 @@ export class ChatManager extends LocalEngineRuntime {
         state.session?.numCtx ??
         this.providers.get(state.record.providerName)?.getContextWindow?.();
       const linkedProjectIds = await this.store.linkedProjectIds(state.record.projectId);
+      const runsHere = await this.recordRunsHere(state.record);
+      const keptAreas = new Map<string, KeptLocalArea[]>();
+      for (const id of [state.record.projectId, ...linkedProjectIds]) {
+        keptAreas.set(id, await this.keptLocal.areas(id));
+      }
+      const keptAreaFor = (projectId: string | undefined, path: string | undefined) =>
+        projectId && path
+          ? this.keptLocal.areaForPath(keptAreas.get(projectId) ?? [], path)
+          : undefined;
       const evidenceLedger = this.evidenceLedgers.get(state.record.id);
       // Captured by the probe callback so telemetry exists even when the
       // floor/hydration turn the whole retrieval into null — the exact blind
@@ -14401,6 +14692,13 @@ export class ChatManager extends LocalEngineRuntime {
         ...(excludeSources.length > 0 ? { excludeSources } : {}),
         ...(alreadyGiven && alreadyGiven.length > 0 ? { alreadyGiven } : {}),
         projectIds: [state.record.projectId, ...linkedProjectIds],
+        ...(runsHere
+          ? {}
+          : {
+              omitArtifact: (projectId: string, path: string) =>
+                keptAreaFor(projectId, path) !== undefined,
+              omitKeptLocalMemory: true,
+            }),
         ...(contextWindow ? { contextWindow } : {}),
         availableToolNames: liveTurnToolNames(state.session),
         ...(evidenceLedger
@@ -14466,6 +14764,16 @@ export class ChatManager extends LocalEngineRuntime {
       if (already.has(result.queryHash)) return null;
       already.add(result.queryHash);
       state.retrievalQueryHashes = already;
+      if (runsHere) {
+        const sources = result.hits.flatMap((hit) =>
+          hit.source === 'artifacts' ? (keptAreaFor(hit.projectId, hit.path)?.source ?? []) : [],
+        );
+        const tags = result.hits.flatMap((hit) => (hit.memory?.kept ? [hit.memory.kept] : []));
+        await this.markRecordKeptLocal(state.record, [
+          ...sources,
+          ...(await this.keptLocal.sourcesForTags(tags)),
+        ]);
+      }
       const probeArms = (probe as { arms?: unknown[] } | null)?.arms;
       await this.historyManager
         ?.log({
@@ -14589,6 +14897,10 @@ export class ChatManager extends LocalEngineRuntime {
       existing.session = null;
     }
     if (existing?.session) {
+      const kept = await this.inheritKeptLocal(existing.record);
+      if (kept.length > 0 && !(await this.recordRunsHere(existing.record))) {
+        throw new KeptLocalDataError(kept);
+      }
       // Rebuild if the gezel's about OR tools.md has drifted since we
       // created the session. about.md drives the gezel's character +
       // most of the system prompt; tools.md (when present) replaces
@@ -14651,6 +14963,7 @@ export class ChatManager extends LocalEngineRuntime {
           (gezel.toolsMd ?? null) !== existing.toolsMdSnapshot ||
           growthSignature(gezel, await this.socialMode()) !== existing.growthSnapshot ||
           this.catalog.contentRoot() !== existing.catalogContentSnapshot ||
+          (await this.keptLocalFingerprint(existing.record)) !== existing.keptLocalSnapshot ||
           this.appToolsFingerprint(existing.record) !== existing.appToolsSnapshot ||
           immediateFileWriteConstrained !== existing.immediateFileWriteConstrained ||
           directFileWorkConstrained !== existing.directFileWorkConstrained ||
@@ -14748,8 +15061,17 @@ export class ChatManager extends LocalEngineRuntime {
     // fallback while its paired server is away, and back again after.
     if (pendingUserText !== undefined) await this.probeRemoteRoute(record.gezelId);
     const route = await this.resolveProviderRoute(record.gezelId);
-    const currentProviderName = route.name;
-    const routeNotice = this.remoteRouteNotice(record.id, route);
+    // A conversation that read kept-local data stays on the model here that
+    // read it, whatever the gezel was moved to since.
+    const kept = await this.inheritKeptLocal(record);
+    const held =
+      kept.length > 0 &&
+      !modelRunsOnThisComputer(route.name) &&
+      modelRunsOnThisComputer(record.providerName);
+    const currentProviderName = held ? record.providerName : route.name;
+    const routeNotice = held
+      ? this.keptLocalNotice(record.id, kept)
+      : this.remoteRouteNotice(record.id, route);
     if (currentProviderName !== record.providerName) {
       log.info(
         `migrating session ${record.id.slice(0, 8)} from ${record.providerName} → ${currentProviderName}`,
@@ -14774,6 +15096,9 @@ export class ChatManager extends LocalEngineRuntime {
     }
 
     const effectiveModel = await this.resolveEffectiveSessionModel(record, gezel);
+    if (kept.length > 0 && !(await this.recordRunsHere(record, effectiveModel))) {
+      throw new KeptLocalDataError(kept);
+    }
     const provider = await this.ensureProviderForSession(record, gezel, effectiveModel, bind);
     // Pool-route may have rebound the session; persist the new
     // engineKey so a restart routes consistently.
@@ -14953,6 +15278,7 @@ export class ChatManager extends LocalEngineRuntime {
       toolsMdSnapshot: gezel.toolsMd ?? null,
       growthSnapshot: growthSignature(gezel, await this.socialMode()),
       catalogContentSnapshot: this.catalog.contentRoot(),
+      keptLocalSnapshot: await this.keptLocalFingerprint(record),
       appToolsSnapshot: this.appToolsFingerprint(record),
       ...(sessionOpts.codexCliContext?.permissionModeOverride
         ? {
@@ -15415,9 +15741,22 @@ export class ChatManager extends LocalEngineRuntime {
       : undefined;
     // What the crew knows about the person, read the same way. A visitor on a
     // shared mini-site is someone else, so they never see it.
+    const runsHere = await this.recordRunsHere(record, runtime?.effectiveModel);
     const personEntries = record.visitorAccess
       ? []
-      : await this.memory.allEntries?.('user', USER_MEMORY_ID).catch(() => []);
+      : ((await this.memory.allEntries?.('user', USER_MEMORY_ID).catch(() => [])) ?? []).filter(
+          (entry) => runsHere || !entry.source?.kept,
+        );
+    if (runsHere) {
+      await this.markRecordKeptLocal(
+        record,
+        await this.keptLocal.sourcesForTags(
+          personEntries.flatMap((entry) => (entry.source?.kept ? [entry.source.kept] : [])),
+        ),
+      );
+    }
+    // What this session's model may not read here, and what it is told of it.
+    const keptAreas = runsHere ? [] : await this.keptLocal.areas(record.projectId);
     const voorman =
       project?.voormanGezelId && !record.visitorAccess
         ? await this.store.getGezel(project.voormanGezelId).catch(() => null)
@@ -16229,6 +16568,9 @@ export class ChatManager extends LocalEngineRuntime {
       generalistKickoff,
       project: project && record.visitorAccess ? visitorPromptProject(project) : project,
       hasObservationTables: hasTables && !record.visitorAccess,
+      ...(keptAreas.length > 0
+        ? { keptLocalBindings: new Set(keptAreas.map((area) => area.source.bindingId)) }
+        : {}),
       workspaceFiles,
       ...(workspaceListing.truncated ? { workspaceFilesTruncated: true } : {}),
       documentFiles,
@@ -16392,7 +16734,9 @@ export class ChatManager extends LocalEngineRuntime {
     // A CLI agent's own shell and unsandboxed modes run as the person, with
     // no Gezel gate between them and `runtime/auth-token`. Below the level
     // that allows that, the sandbox stays on whatever the setting says.
-    const agentShell = resolveSecurityPolicy(config).allowAgentShell;
+    // Where a connection keeps its data here, a shell would read past every
+    // check on it, so a cloud CLI agent has none in that project.
+    const agentShell = resolveSecurityPolicy(config).allowAgentShell && keptAreas.length === 0;
     const sandboxCopilotEffective =
       record.providerName === 'copilot'
         ? reviewFocus ||
@@ -17493,13 +17837,20 @@ export class ChatManager extends LocalEngineRuntime {
       // directories that exist (the artifacts drawer is gezel-owned and safe
       // to create here; an external workingDir is not ours to create).
       if (t.toolsetId === 'docblocks') {
-        const { existsSync } = await import('node:fs');
+        const { existsSync, statSync } = await import('node:fs');
         const { mkdir } = await import('node:fs/promises');
+        const runsHere = await this.recordRunsHere(record);
         const workspaceDir = await this.store.projectWorkspaceDir(record.projectId);
         const artifactsDir = this.store.projectArtifactsDir(record.projectId);
         await mkdir(artifactsDir, { recursive: true });
         if (!t.runtime.args.includes('--allow-read')) {
-          const readRoots = [workspaceDir, artifactsDir].filter((dir) => existsSync(dir));
+          const artifactRoots = await artifactReadRoots(
+            artifactsDir,
+            runsHere ? [] : (await this.keptLocal.areas(record.projectId)).map((a) => a.path),
+          );
+          const readRoots = [workspaceDir, ...artifactRoots].filter(
+            (dir) => existsSync(dir) && statSync(dir).isDirectory(),
+          );
           if (readRoots.length > 0) extraArgs.push('--allow-read', ...readRoots);
         }
         if (!t.runtime.args.includes('--allow-write')) {
@@ -17707,6 +18058,7 @@ export class ChatManager extends LocalEngineRuntime {
         ...(disallowedBuiltinTools.length > 0 ? { disallowedBuiltinTools } : {}),
         ...(allowedBuiltinTools.length > 0 ? { allowedBuiltinTools } : {}),
         ...(allowedMcpTools.length > 0 ? { allowedMcpTools } : {}),
+        denyReadPaths: await this.keptLocal.everywhere(),
         ...this.mcpBootstrapMinter(record.id),
       };
     }

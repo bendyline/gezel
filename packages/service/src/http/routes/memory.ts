@@ -1,13 +1,16 @@
 import { MemorySearchRequestSchema, parseHarnessAppId } from '@bendyline/gezel';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import {
   type MemoryScope,
   type MemorySource,
   USER_MEMORY_ID,
   isMemoryKind,
   isMemoryScope,
+  parseMemoryDay,
+  withoutKeptMemories,
 } from '../../memory/daily-markdown.js';
 import type { ServiceContext } from '../context.js';
+import { callerKeptTag, callerRunsHere, markKeptLocalTags } from '../kept-local-gate.js';
 
 const MEMORY_DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const MEMORY_ID_PATTERN = /^(?!\.{1,2}$)[^/\\]+$/;
@@ -35,6 +38,17 @@ function requestSource(value: unknown): MemorySource | undefined {
 export function memoryRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
 
+  /** A day file as this caller may read it: no kept-local entries for a model elsewhere. */
+  const forCaller = async (c: Context, content: string): Promise<string> => {
+    if (!(await callerRunsHere(ctx, c))) return withoutKeptMemories(content);
+    await markKeptLocalTags(
+      ctx,
+      c,
+      parseMemoryDay(content).flatMap((b) => (b.source?.kept ? [b.source.kept] : [])),
+    );
+    return content;
+  };
+
   app.post('/search', async (c) => {
     const body = MemorySearchRequestSchema.parse(await c.req.json());
     const outcome = await ctx.memory.searchAllDetailed(
@@ -42,6 +56,14 @@ export function memoryRoutes(ctx: ServiceContext): Hono {
       body.projectId,
       body.query,
       body.topK ?? 10,
+    );
+    if (!(await callerRunsHere(ctx, c))) {
+      return c.json({ ...outcome, results: outcome.results.filter((r) => !r.source?.kept) });
+    }
+    await markKeptLocalTags(
+      ctx,
+      c,
+      outcome.results.flatMap((r) => (r.source?.kept ? [r.source.kept] : [])),
     );
     return c.json(outcome);
   });
@@ -60,7 +82,10 @@ export function memoryRoutes(ctx: ServiceContext): Hono {
     // the request: project memory reaches every gezel's prompt in that project,
     // so where it came from has to be legible.
     const harnessApp = parseHarnessAppId(c.get('auth')?.appId ?? '');
-    const source = harnessApp ? { app: harnessApp.client } : requestSource(body.source);
+    const requested = harnessApp ? { app: harnessApp.client } : requestSource(body.source);
+    // A conversation that read kept-local data says so on what it remembers.
+    const kept = await callerKeptTag(ctx, c);
+    const source = kept ? { ...requested, kept } : requested;
     const outcome = await ctx.memory.save(
       body.scope,
       scopeId(body.scope, body.id),
@@ -75,8 +100,7 @@ export function memoryRoutes(ctx: ServiceContext): Hono {
     const scope = requestScope(c.req.query('scope'));
     const id = scopeId(scope, c.req.query('id') ?? '');
     const days = Number.parseInt(c.req.query('days') ?? '7', 10);
-    const content = await ctx.memory.getRecent(scope, id, days);
-    return c.json({ content });
+    return c.json({ content: await forCaller(c, await ctx.memory.getRecent(scope, id, days)) });
   });
 
   app.get('/days', async (c) => {
@@ -91,8 +115,7 @@ export function memoryRoutes(ctx: ServiceContext): Hono {
     const id = scopeId(scope, c.req.query('id') ?? '');
     const day = c.req.query('day') ?? '';
     if (!day) return c.json({ error: 'missing ?day=YYYY-MM-DD' }, 400);
-    const content = await ctx.memory.readDay(scope, id, day);
-    return c.json({ content });
+    return c.json({ content: await forCaller(c, await ctx.memory.readDay(scope, id, day)) });
   });
 
   app.patch('/day', async (c) => {

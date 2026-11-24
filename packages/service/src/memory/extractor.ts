@@ -196,6 +196,8 @@ export interface ExtractMemoriesArgs {
    * person memory existed.
    */
   personMemory?: boolean;
+  /** The conversation read data kept on models on this computer: its memory tag. */
+  kept?: string;
   debug?: { isEnabled(): boolean };
 }
 
@@ -307,6 +309,7 @@ export async function extractMemories(args: ExtractMemoriesArgs): Promise<void> 
       const outcome = await memory.save(m.scope, targetId, m.text, m.kind, {
         project: projectId,
         gezel: gezelId,
+        ...(args.kept ? { kept: args.kept } : {}),
       });
       if (outcome?.status === 'duplicate') deduped++;
       else saved++;

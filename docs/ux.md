@@ -799,6 +799,12 @@ Don't restyle a settings page per surface; extend the recipe and this section.
   description. Never put a heading line above a checkbox whose only
   neighbor is the explanation: the box reads as belonging to the
   paragraph.
+- **A switch that lets something leave says what it sends.** The hint
+  describes the state it is in, so ticked and unticked each read as a plain
+  answer ("What it reads goes to that provider"). It starts off, is never
+  ticked for the person, and forgets a tick when they choose something else.
+  Turning it off says what it cannot take back. `ConnectionCloudSwitch` is
+  the reference.
 - **One heading per section.** An embedded view that brings its own title
   turns it off when it is placed in a section (`HistoryView`
   `showTitle={false}`). A section heading over the view's own copy of the

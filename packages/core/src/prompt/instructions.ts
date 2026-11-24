@@ -235,6 +235,8 @@ export interface BuildInstructionsOptions {
    * the query tools exist precisely so the model never handles the rows.
    */
   hasObservationTables?: boolean;
+  /** Connections whose data this session's model may not read (kept on this computer). */
+  keptLocalBindings?: ReadonlySet<string>;
   workspaceFiles?: ProjectFileEntry[];
   /**
    * True when the recursive workspace walk hit its entry cap, i.e.
@@ -1043,6 +1045,8 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
       const shown = bindings.slice(0, 8);
       const lines = shown.map((b) => {
         const label = b.displayName ?? b.type;
+        if (opts.keptLocalBindings?.has(b.id))
+          return `- **${label}** (${b.type}): not yours to read`;
         const corpus = b.corpusDir ?? 'data';
         const synced = b.lastSyncedAt
           ? `, synced ${b.lastSyncedAt.slice(0, 10)}`
@@ -1055,6 +1059,13 @@ export function buildInstructions(opts: BuildInstructionsOptions): BuiltInstruct
       // they no longer only come from connectors — a project can hold nothing
       // but spreadsheets, in which case this section does not render at all.
       const tabularNote = '';
+      const kept = shown.filter((b) => opts.keptLocalBindings?.has(b.id));
+      if (kept.length > 0) {
+        const names = kept.map((b) => b.displayName ?? b.type).join(', ');
+        lines.push(
+          `${names} stays on this computer and you run on a cloud model. If the person asks for it, tell them they can turn on "Let cloud AI read this" under the project's Connections, or ask a gezel on a local model. Don't look for another way to it.`,
+        );
+      }
       projectContext += `\n\n### Connected data\n\nExternal sources mirrored into this project's artifacts as readable files:\n${lines.join('\n')}\nUse the artifact listing/reading tools for these paths.${tabularNote} These directories are read-only mirrors — write analysis elsewhere in artifacts. To change something at the source, draft a connector action for the user to approve.`;
     }
     // Data tables — a standalone block, because they come from two places now:

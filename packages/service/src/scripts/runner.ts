@@ -12,12 +12,16 @@ import type { MemoryManager } from '../memory/manager.js';
 import { type CredentialRegistry, DefaultCredentialRegistry } from '../secrets/registry.js';
 import type { TaskManager } from '../tasks/manager.js';
 import { type DispatcherDeps, buildDispatcher } from './dispatcher.js';
+import { type KeptLocalChat, ScriptKeptLocal } from './kept-local.js';
 import { NodeScriptExecutor } from './node-executor.js';
 import { NodeScriptHost, extractScriptFailureFromStderr } from './node-host.js';
 
 export { extractScriptFailureFromStderr };
 
 const log = createLogger('scripts');
+
+/** A chat manager that answers one-shots, and says what a run's conversation may read. */
+export type ScriptRunnerChat = Pick<ChatManager, 'oneShotCompletion'> & Partial<KeptLocalChat>;
 
 export interface ScriptRunnerOptions {
   /** Host-selected execution engine. Scripts cannot select or replace it. */
@@ -26,7 +30,7 @@ export interface ScriptRunnerOptions {
   /** Told when a script sets or clears its project's reminder. */
   remindersChanged?: (projectId: string) => void;
   /** Backs `llm.oneShot`; a runner without one refuses that call. */
-  chat?: Pick<ChatManager, 'oneShotCompletion'>;
+  chat?: ScriptRunnerChat;
   /** Backs the `gezel.memory.*` script API. Injected by service.ts. */
   memory?: MemoryManager;
   /** Backs the mutating `gezel.task.*` script API. Injected by service.ts. */
@@ -67,7 +71,7 @@ const MAX_CASCADE_DEPTH = 4;
  */
 export class ScriptRunner {
   private readonly store: Store;
-  private readonly chat: Pick<ChatManager, 'oneShotCompletion'> | undefined;
+  private readonly chat: ScriptRunnerChat | undefined;
   private readonly memory?: MemoryManager;
   private readonly tasks?: TaskManager;
   private readonly credentials?: CredentialRegistry;
@@ -125,6 +129,9 @@ export class ScriptRunner {
       credentials: this.credentials,
       ...(this.http ? { http: this.http } : {}),
       index: this.indexAccess,
+      ...(typeof this.chat?.sessionRunsOnThisComputer === 'function'
+        ? { keptLocal: new ScriptKeptLocal(this.store, this.chat as KeptLocalChat) }
+        : {}),
       ...(this.remindersChanged ? { remindersChanged: this.remindersChanged } : {}),
     });
   }

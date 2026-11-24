@@ -296,4 +296,5 @@ export * from './camera/index.js';
 export * from './lookouts/index.js';
 export * from './web-pages/index.js';
 export * from './prompt-connectors/index.js';
+export * from './connector-cloud.js';
 export * from './connector-corpus.js';

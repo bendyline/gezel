@@ -11,6 +11,7 @@ import {
   isConvertibleDoc,
 } from '../../index-store/docs.js';
 import type { ServiceContext } from '../context.js';
+import { keptLocalFileRefusal } from '../kept-local-gate.js';
 
 const IMAGE_EXTS = new Set([
   '.png',
@@ -107,6 +108,11 @@ export function referencePreviewRoutes(ctx: ServiceContext): Hono {
       if (!file.isFile()) return c.json({ error: 'not found' }, 404);
       sourcePath = await realpath(joined);
     } catch {
+      return c.json({ error: 'not found' }, 404);
+    }
+
+    const artifactPath = request.kind === 'artifact' ? path : '';
+    if (await keptLocalFileRefusal(ctx, c, projectId, artifactPath, sourcePath)) {
       return c.json({ error: 'not found' }, 404);
     }
 

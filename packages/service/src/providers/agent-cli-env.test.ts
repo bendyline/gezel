@@ -8,6 +8,7 @@ import {
 import {
   claudeAbsoluteRulePath,
   claudeCredentialDenyRules,
+  claudeKeptLocalDenyRules,
 } from './anthropic-cli/credential-deny.js';
 
 describe('agentCliEnv', () => {
@@ -61,6 +62,18 @@ describe('withMcpBootstrapCode', () => {
         throw new Error('no session token');
       }),
     ).toBe(env);
+  });
+});
+
+describe('claudeKeptLocalDenyRules', () => {
+  it('covers a kept folder and everything below it, in any project', () => {
+    expect(claudeKeptLocalDenyRules(['/home/me/.gezel/projects/week/artifacts/data/work'])).toEqual(
+      [
+        'Read(//home/me/.gezel/projects/week/artifacts/data/work)',
+        'Read(//home/me/.gezel/projects/week/artifacts/data/work/**)',
+      ],
+    );
+    expect(claudeKeptLocalDenyRules(['relative/data'])).toEqual([]);
   });
 });
 

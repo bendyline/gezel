@@ -6,6 +6,7 @@ import {
 } from '@bendyline/gezel';
 import { Hono } from 'hono';
 import type { ServiceContext } from '../context.js';
+import { withoutKeptLocalSessions } from '../kept-local-gate.js';
 import { noteMessageSurface } from './app-tools.js';
 
 const DEFAULT_PROJECT = 'default';
@@ -26,7 +27,8 @@ export function chatRoutes(ctx: ServiceContext): Hono {
     const active = sessions.find((s) => !s.archived && !isTaskOrCraftbookSession(s));
     if (!active) return c.json({ gezelId: id, projectId, messages: [] });
     const messages = await ctx.chat.history(active.id);
-    return c.json({ gezelId: id, projectId, messages });
+    const shown = await withoutKeptLocalSessions(ctx, c, messages, () => active.id);
+    return c.json({ gezelId: id, projectId, messages: shown });
   });
 
   app.post('/:id/chat/send', async (c) => {

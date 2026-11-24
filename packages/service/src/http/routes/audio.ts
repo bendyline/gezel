@@ -12,6 +12,7 @@ import { streamSSE } from 'hono/streaming';
 import type { SynthesizeChunk } from '@bendyline/gezel-inference/internal/providers/audio/types';
 
 import type { ServiceContext } from '../context.js';
+import { keptLocalFileRefusal } from '../kept-local-gate.js';
 import { audioModelRoutes } from './audio-models.js';
 
 const log = createLogger('audio');
@@ -118,6 +119,14 @@ export function audioRoutes(ctx: ServiceContext): Hono {
     try {
       if ('artifactPath' in req.audio) {
         const stripped = req.audio.artifactPath.replace(/^artifacts\//, '');
+        const refused = await keptLocalFileRefusal(
+          ctx,
+          c,
+          projectId,
+          stripped,
+          await ctx.store.resolveProjectArtifactReadPath(projectId, stripped),
+        );
+        if (refused) return c.json({ error: refused }, 403);
         const found = await ctx.store.readProjectArtifactBinary(projectId, stripped);
         if (!found) {
           return c.json({ error: `Audio not found at artifacts/${stripped}` }, 404);

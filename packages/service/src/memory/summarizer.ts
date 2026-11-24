@@ -49,6 +49,8 @@ interface SummarizeArgs {
   history?: HistoryManager;
   /** Set when invoked by the idle scheduler so the history log notes the reason. */
   trigger: 'archive' | 'idle';
+  /** The conversation read data kept on models on this computer: its memory tag. */
+  kept?: string;
 }
 
 /**
@@ -90,6 +92,7 @@ export async function summarizeSessionForMemory(args: SummarizeArgs): Promise<vo
     raw = await chat.oneShotCompletion(`${SUMMARY_PROMPT}${transcript}`, 180_000, {
       jobLabel: `summary · ${record.id.slice(0, 8)}`,
       ambient: true,
+      ofSessionId: record.id,
       ...(settings.provider
         ? {
             // Explicit per-install summarization override wins over the
@@ -125,6 +128,7 @@ export async function summarizeSessionForMemory(args: SummarizeArgs): Promise<vo
       // extractor owns gezel-scope (transferable) routing.
       await memory.save('project', record.projectId, line.text, line.kind, {
         gezel: record.gezelId,
+        ...(args.kept ? { kept: args.kept } : {}),
       });
     }
   } catch (err) {

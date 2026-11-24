@@ -147,6 +147,13 @@ import {
   callerMaySeeLocation as sharedCallerMaySeeLocation,
 } from '../caller-location.js';
 import type { ServiceContext } from '../context.js';
+import {
+  type KeptLocalGate,
+  callerRunsHere,
+  keptLocalFileRefusal,
+  keptLocalGate,
+  markKeptLocalMemory,
+} from '../kept-local-gate.js';
 import { classifyUpstreamFetchError, describeError } from '../upstream-fetch-error.js';
 
 const log = createLogger('tools');
@@ -652,11 +659,24 @@ export function toolRoutes(ctx: ServiceContext): Hono {
   // first. See observations/statement-guard.ts for why a leading-keyword
   // check would not be enough.
 
+  /** The tables this caller may see: a corpus kept on this computer is not a cloud model's. */
+  const callerTables = async (
+    c: Context,
+    project: Parameters<typeof listProjectTables>[1],
+  ): Promise<Awaited<ReturnType<typeof listProjectTables>>> => {
+    const gate = await keptLocalGate(ctx, c, project.id);
+    const tables = await listProjectTables(ctx.store, project);
+    if (!gate) return tables;
+    const shown = tables.filter((t) => !gate.hidesPath(t.corpusDir));
+    await gate.settle();
+    return shown;
+  };
+
   app.post('/:id/tools/list-tables', async (c) => {
     const id = c.req.param('id');
     const project = await ctx.store.getProject(id);
     if (!project) return c.json({ error: 'project not found' }, 404);
-    const tables = await listProjectTables(ctx.store, project);
+    const tables = await callerTables(c, project);
     return c.json({ tables: tables.map(summarizeTable) });
   });
 
@@ -665,7 +685,7 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     const project = await ctx.store.getProject(id);
     if (!project) return c.json({ error: 'project not found' }, 404);
     const body = DescribeTableRequestSchema.parse(await c.req.json());
-    const tables = await listProjectTables(ctx.store, project);
+    const tables = await callerTables(c, project);
     const ref = findTable(tables, body.table);
     if (!ref) {
       // Naming what IS there turns a dead end into the next call.
@@ -694,7 +714,13 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     if (!project) return c.json({ error: 'project not found' }, 404);
     const body = QueryTableRequestSchema.parse(await c.req.json());
     try {
-      return c.json(await runQuery({ store: ctx.store, duck: ctx.duck }, project, body));
+      const gate = await keptLocalGate(ctx, c, id);
+      const result = await runQuery({ store: ctx.store, duck: ctx.duck }, project, {
+        ...body,
+        ...(gate ? { omitCorpus: (dir: string) => gate.hidesPath(dir) } : {}),
+      });
+      await gate?.settle();
+      return c.json(result);
     } catch (err) {
       // A rejected statement is the caller's mistake to fix, so it comes back
       // as a 400 carrying the reason verbatim; a missing engine or an absent
@@ -1139,9 +1165,22 @@ export function toolRoutes(ctx: ServiceContext): Hono {
       });
     }
     const linkedProjectIds = await ctx.store.linkedProjectIds(id);
+    const runsHere = await callerRunsHere(ctx, c);
+    const gates = new Map<string, KeptLocalGate>();
+    for (const projectId of [id, ...linkedProjectIds]) {
+      const gate = await keptLocalGate(ctx, c, projectId);
+      if (gate) gates.set(projectId, gate);
+    }
     const [searchResult, rankedCraftbooks] = await Promise.all([
       ctx.search.searchProject(body.query, {
         projectIds: [id, ...linkedProjectIds],
+        ...(runsHere
+          ? {}
+          : {
+              omitArtifact: (projectId: string, path: string) =>
+                gates.get(projectId)?.hidesPath(path) === true,
+              omitKeptLocalMemory: true,
+            }),
         ...(body.gezelId ? { gezelId: body.gezelId } : {}),
         includeShared: body.includeShared !== false,
         ...(body.sources ? { sources: body.sources } : {}),
@@ -1202,6 +1241,14 @@ export function toolRoutes(ctx: ServiceContext): Hono {
           !isHarnessHiddenCatalog(r.uri),
       );
     }
+    // A session on this computer was shown these, so its conversation stays.
+    for (const r of found.results) {
+      if (r.retrievalSource === 'artifacts' && r.projectId && r.path) {
+        gates.get(r.projectId)?.hidesPath(r.path);
+      }
+    }
+    for (const gate of gates.values()) await gate.settle();
+    await markKeptLocalMemory(ctx, c, found.results);
     return c.json({
       ...found,
       craftbooks,
@@ -1371,6 +1418,16 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     const id = c.req.param('id');
     if (!(await ctx.store.getProject(id))) return c.json({ error: 'project not found' }, 404);
     const body = ReadDocAsMarkdownRequestSchema.parse(await c.req.json());
+    if (body.artifact) {
+      const refused = await keptLocalFileRefusal(
+        ctx,
+        c,
+        id,
+        body.path,
+        await ctx.store.resolveProjectArtifactReadPath(id, body.path),
+      );
+      if (refused) return c.json({ error: refused }, 403);
+    }
     return c.json(
       await ctx.contentIndex.readDocAsMarkdown(id, body.path, {
         ...(body.artifact ? { artifact: true } : {}),
@@ -1526,6 +1583,14 @@ export function toolRoutes(ctx: ServiceContext): Hono {
     if (!(await callerMaySeeFilePixels(ctx, c, project, resolved))) {
       return c.json({ error: CAMERA_PIXELS_WITHHELD }, 403);
     }
+    const keptLocal = await keptLocalFileRefusal(
+      ctx,
+      c,
+      id,
+      body.artifact ? body.path : '',
+      resolved,
+    );
+    if (keptLocal) return c.json({ error: keptLocal }, 403);
     let buf: Buffer;
     try {
       const st = await stat(resolved);

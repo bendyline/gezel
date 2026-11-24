@@ -73,6 +73,7 @@ import {
 import { collapseCraftbookForTier as collapseCraftbookPass } from '@bendyline/gezel';
 import { PROJECT_OUTCOME_REVIEW_DIR_NAME } from '@bendyline/gezel/paths';
 import { evaluateDeliverableGate } from '../chat/deliverable-gate.js';
+import { KeptLocalData, taskArtifactFolder } from '../connectors/kept-local.js';
 import type { DraftOverlayReader } from '../diffpack/draft-store.js';
 import type { Store } from '../fs/store.js';
 import { TaskWriteConflictError } from '../fs/task-files-store.js';
@@ -1312,6 +1313,18 @@ export class TaskManager {
       createdBy: input.createdBy ?? { kind: 'user' },
     };
 
+    // A manifest lists its input's file names, and a connection's name its
+    // events and subjects. Noted first, so no step opens it unjudged.
+    for (const record of Object.values(inputsPlan?.records ?? {})) {
+      if (record.drawer !== 'artifacts') continue;
+      const keptLocal = new KeptLocalData(this.store);
+      const touched = keptLocal.areasTouching(await keptLocal.areas(projectId), record.path);
+      await keptLocal.remember(
+        projectId,
+        [taskArtifactFolder(num), artifactDir],
+        touched.map((area) => area.source),
+      );
+    }
     await writeTaskWithInputs(inputsPlan, () => this.store.createTask(task));
     // Pre-create the task's artifact folder so it shows in the artifacts
     // browser from minute one. Purely a UX affordance — `write_artifact`
@@ -3149,7 +3162,7 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
           }
           return execNodeRunsInSandbox({ read: ws.read, file, timeoutMs });
         },
-        judgeExec: async (prompt, timeoutMs) => {
+        judgeExec: async (prompt, timeoutMs, paths) => {
           if (!this.keurmeester) return { unavailable: 'keurmeester not armed' };
           const budgetKey = `${task.ref}:${step.id}`;
           const used = this.judgeCallCounts.get(budgetKey) ?? 0;
@@ -3157,7 +3170,11 @@ Pausing so it stops re-running unattended. Check what ${assignee} has already wr
             return { unavailable: 'per-step judge budget exhausted (3 calls)' };
           }
           this.judgeCallCounts.set(budgetKey, used + 1);
-          return this.keurmeester.judgeOneShot(prompt, timeoutMs);
+          return this.keurmeester.judgeOneShot(prompt, timeoutMs, {
+            projectId,
+            num: task.num,
+            paths,
+          });
         },
         ...gateHistoryEvidence(this.history, projectId, task, step, ws),
         givenText: taskGivenText(task, new Date()),

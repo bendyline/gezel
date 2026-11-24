@@ -21,6 +21,7 @@ import type {
 } from '../../providers/recognition/types.js';
 import { callerMaySeeLocation } from '../caller-location.js';
 import type { ServiceContext } from '../context.js';
+import { keptLocalFileRefusal } from '../kept-local-gate.js';
 import { subscribeToInstallSse } from './install-sse.js';
 
 const log = createLogger('recognition');
@@ -54,6 +55,14 @@ export function recognitionRoutes(ctx: ServiceContext): Hono {
     try {
       if (req.artifactPath) {
         const stripped = req.artifactPath.replace(/^artifacts\//, '');
+        const refused = await keptLocalFileRefusal(
+          ctx,
+          c,
+          projectId,
+          stripped,
+          await ctx.store.resolveProjectArtifactReadPath(projectId, stripped),
+        );
+        if (refused) return c.json({ error: refused }, 403);
         const found = await ctx.store.readProjectArtifactBinary(projectId, stripped);
         if (!found) return c.json({ error: `Image not found at artifacts/${stripped}` }, 404);
         bytes = found.data;
@@ -108,6 +117,14 @@ export function recognitionRoutes(ctx: ServiceContext): Hono {
     let bytes: Buffer;
     if (req.artifactPath) {
       const stripped = req.artifactPath.replace(/^artifacts\//, '');
+      const refused = await keptLocalFileRefusal(
+        ctx,
+        c,
+        projectId,
+        stripped,
+        await ctx.store.resolveProjectArtifactReadPath(projectId, stripped),
+      );
+      if (refused) return c.json({ error: refused }, 403);
       const found = await ctx.store.readProjectArtifactBinary(projectId, stripped);
       if (!found) return c.json({ error: `Image not found at artifacts/${stripped}` }, 404);
       bytes = found.data;

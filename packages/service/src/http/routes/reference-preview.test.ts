@@ -33,6 +33,8 @@ function app() {
     projectArtifactsDir: () => artifacts,
     projectWorkspaceDir: async () => workspace,
     documentsDir: () => documents,
+    getProject: async () => null,
+    readKeptLocal: async () => [],
   } as unknown as Store;
   return referencePreviewRoutes({ store } as unknown as ServiceContext);
 }

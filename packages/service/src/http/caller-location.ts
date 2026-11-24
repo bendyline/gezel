@@ -1,9 +1,11 @@
 import { isLocalProvider } from '@bendyline/gezel';
 import type { ProjectConnectorBinding } from '@bendyline/gezel';
 import type { Context } from 'hono';
+import { KeptLocalData } from '../connectors/kept-local.js';
 import { cameraAllowsCloud, cameraBindingForFile } from '../connectors/live/camera/frame-access.js';
 import { isOwnerCaller } from './auth.js';
 import type { ServiceContext } from './context.js';
+import { keptLocalFileRefusal } from './kept-local-gate.js';
 
 /**
  * Whether this caller may see where a photo was taken. A photo's coordinates
@@ -72,6 +74,29 @@ export const CAMERA_PIXELS_PAIRED_VIDEO_ENGINE =
   "This camera's pictures stay on this computer, so they can't be sent to another computer's video engine. Pick a video model on this computer, or turn on Let cloud AI see these pictures for this camera.";
 
 /**
+ * A picture from a connection whose data stays on models here goes to an
+ * engine here, whoever asks, like a camera's keyframe.
+ */
+async function keptLocalInputRefusal(
+  ctx: ServiceContext,
+  c: Context,
+  projectId: string,
+  path: string,
+  file: string | null,
+  engine: 'this-computer' | 'paired' | 'cloud',
+): Promise<string | null> {
+  if (engine === 'this-computer') return keptLocalFileRefusal(ctx, c, projectId, path, file);
+  const data = new KeptLocalData(ctx.store);
+  const areas = await data.areas(projectId);
+  const area =
+    data.areaForPath(areas, path) ??
+    (file ? await data.areaForFile(projectId, areas, file) : undefined);
+  return area
+    ? `${area.source.name} stays on this computer, so this picture can't be sent to ${engine === 'cloud' ? 'a cloud' : "another computer's"} image engine. Pick a model on this computer, or turn on "Let cloud AI read this" for ${area.source.name} under the project's Connections.`
+    : null;
+}
+
+/**
  * Why a picture input must not reach the engine about to use it, or null.
  * A camera keyframe whose pictures stay on this computer may go to an engine
  * here, for a caller allowed to see it (the result goes back to the caller),
@@ -93,6 +118,8 @@ export async function cameraInputWithheld(
     if (!('artifactPath' in entry)) continue;
     const stripped = entry.artifactPath.replace(/^artifacts\//, '');
     const file = await ctx.store.resolveProjectArtifactReadPath(projectId, stripped);
+    const keptLocal = await keptLocalInputRefusal(ctx, c, projectId, stripped, file, engine);
+    if (keptLocal) return keptLocal;
     if (!file || !(await cameraKeepsFileLocal(ctx, project, file))) continue;
     if (engine === 'cloud') return CAMERA_PIXELS_CLOUD_ENGINE;
     if (engine === 'paired') {

@@ -452,7 +452,10 @@ export class MemoryManager {
       this.allEntries('gezel', gezelId),
       this.allEntries('user', USER_MEMORY_ID),
     ]);
-    return [...own, ...person.filter((entry) => entry.source?.gezel === gezelId)];
+    // Growth hands these to a model of its own choosing, which may be a cloud one.
+    return [...own, ...person.filter((entry) => entry.source?.gezel === gezelId)].filter(
+      (entry) => !entry.source?.kept,
+    );
   }
 
   async reindex(scope: MemoryScope, id: string): Promise<number> {

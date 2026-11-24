@@ -7,6 +7,7 @@ import {
   IMAGE_QUALITIES,
   type RetrievalSource,
   type UnifiedSearchResult,
+  isConnectorCorpusPath,
   isHarnessHiddenCatalog,
   parseKnowledgeUri,
 } from '@bendyline/gezel';
@@ -868,6 +869,11 @@ async function readAllowedImage(
   const where = rootedPath(binding, path);
   if (!where)
     return { error: `${absoluteFromApp(binding, path)} is outside ${whereFilesMayBe(binding)}.` };
+  // A connection's own records (a camera's pictures, a mailbox's attachments)
+  // have their own rules about which models see them, and this app's model is
+  // one Gezel cannot see.
+  if (where.root === 'artifacts' && isConnectorCorpusPath(where.rel))
+    return { error: `${where.abs} belongs to a connection. Ask for it in Gezel instead.` };
   const mimeType = IMAGE_MIME[extname(where.abs).toLowerCase()];
   if (!mimeType)
     return {

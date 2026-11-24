@@ -86,6 +86,7 @@ function harness(installed: InstalledVideoModelInfo[], defaultVideoModel?: strin
   };
   const ctx = {
     store: {
+      readKeptLocal: async () => [],
       getProject: async (id: string) => ({ id, connectors: [] }),
       resolveProjectArtifactReadPath: async () => null,
       readProjectArtifactBinary: async () => ({ data: PORTRAIT_PNG, mimeType: 'image/png' }),

@@ -16,6 +16,7 @@ import { isHttpSpec, isStdioSpec } from '../mcp-bridge.js';
 import {
   CLAUDE_PROJECT_SETTINGS_DENY_RULES,
   claudeCredentialDenyRules,
+  claudeKeptLocalDenyRules,
 } from './credential-deny.js';
 import type { ClaudePermissionMode } from './provider.js';
 import {
@@ -773,6 +774,7 @@ export class ClaudeWorker {
       denyRules: [
         ...claudeCredentialDenyRules(this.opts.mcpServer?.env.GEZEL_HOME ?? process.env.GEZEL_HOME),
         ...CLAUDE_PROJECT_SETTINGS_DENY_RULES,
+        ...claudeKeptLocalDenyRules(this.opts.context.denyReadPaths ?? []),
       ],
     });
   }

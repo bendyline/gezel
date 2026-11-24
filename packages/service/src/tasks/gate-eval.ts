@@ -240,6 +240,8 @@ export interface GateEvalDeps {
   judgeExec?: (
     prompt: string,
     timeoutMs: number,
+    /** The files the prompt quotes. */
+    paths: readonly string[],
   ) => Promise<{ text: string } | { unavailable: string }>;
   /**
    * Observable tool-call evidence for `researchEvidence`. The task manager
@@ -1691,7 +1693,7 @@ async function evalCheckInner(
       const timeoutMs = Math.min(c.timeoutMs ?? 60_000, 120_000);
       let raw: { text: string } | { unavailable: string };
       try {
-        raw = await deps.judgeExec(prompt, timeoutMs);
+        raw = await deps.judgeExec(prompt, timeoutMs, [c.file, ...(c.sourceFiles ?? [])]);
       } catch (err) {
         return failOpen(err instanceof Error ? err.message : String(err));
       }

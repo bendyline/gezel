@@ -287,13 +287,16 @@ export class MemoryCompactor {
     const fedDays: string[] = [];
     let inputChars = 0;
     for (const day of eligibleDays) {
-      const dayEntries = entries.filter((e) => e.day === day);
+      const dayEntries = entries.filter((e) => e.day === day && !e.source?.kept);
       const rendered = dayEntries.map(renderEntry).join('\n');
       if (inputChars + rendered.length > COMPACT_INPUT_BUDGET && fedDays.length > 0) break;
       fedDays.push(day);
       inputChars += rendered.length + 1;
     }
-    const fedEntries = entries.filter((e) => fedDays.includes(e.day));
+    // The compactor may run on a cloud model; what is kept on this computer
+    // goes back into its day as it was.
+    const keptEntries = entries.filter((e) => fedDays.includes(e.day) && e.source?.kept);
+    const fedEntries = entries.filter((e) => fedDays.includes(e.day) && !e.source?.kept);
     if (fedEntries.length < minEntries) return false;
     const input = fedEntries.map(renderEntry).join('\n');
 
@@ -325,7 +328,7 @@ export class MemoryCompactor {
 
     // (b) Rewrite surviving days atomically.
     const byDay = new Map<string, ParsedEntry[]>();
-    for (const s of survivors) {
+    for (const s of [...survivors, ...keptEntries]) {
       const bucket = byDay.get(s.day) ?? [];
       bucket.push(s);
       byDay.set(s.day, bucket);
