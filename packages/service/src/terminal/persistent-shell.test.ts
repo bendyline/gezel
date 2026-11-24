@@ -291,6 +291,10 @@ describe('PersistentShell (POSIX)', () => {
 });
 
 describe('PersistentShell (Windows)', () => {
+  // A cold powershell.exe under ConPTY takes ~1.3 s on a workstation but ran
+  // past Vitest's default 5 s on both Windows CI runners, beside the other
+  // portability suites (2026-11-24). Init and the command each have the 10 s
+  // command timeout below, so a real hang still fails with its own message.
   itWindows(
     'finishes initialization before accepting and streaming the first command',
     async () => {
@@ -330,5 +334,6 @@ describe('PersistentShell (Windows)', () => {
         await shell.whenExited();
       }
     },
+    30_000,
   );
 });
