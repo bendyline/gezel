@@ -35,16 +35,14 @@ jobs:
         run: node scripts/check-workflow-action-pins.mjs
 
   unit:
-    name: Build, lint, typecheck, and unit tests
+    name: Build, lint, typecheck, and package tests
     needs: workflow-policy
     runs-on: ubuntu-latest
-    # Runtime coverage used to tail this job; it is now the separate
-    # `coverage` job below, for the reasons recorded there. What remains is
-    # build/typecheck/lint plus stability pass 1: 30-60 min from 2026-10-19 to
-    # 10-23 (unit suites 24-52, slowed ~44% on a slow runner), with three runs
-    # cut off at the old 60 min cap. Shard the service suite before raising
-    # this again.
-    timeout-minutes: 80
+    # Build, typecheck, lint, and every package's suite except the UI and the
+    # service, which the `suites` job runs three times over, split across
+    # runners. Until 2026-11-23 this job also ran those two (as the first of
+    # three passes) and took 46-71 min; the package suites alone are ~9 min.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-workspace
@@ -56,18 +54,19 @@ jobs:
       - run: pnpm lint
       - uses: ./.github/actions/setup-test-embedder
       - name: Install Chromium
-        # The evals suite (run by `pnpm test:ci`) launches a real headless
-        # chromium for its runtime-validation scenarios (petshop, tictactoe,
+        # The evals suite launches a real headless chromium for its
+        # runtime-validation scenarios (petshop, tictactoe,
         # codebase-evolution). Same playwright version as the app package, so
         # this populates the shared ~/.cache/ms-playwright the evals import uses.
         uses: ./.github/actions/install-chromium
         with:
           filter: '@bendyline/gezel-evals'
-      - name: Run all unit suites (stability pass 1 of 3)
-        # test:ci, not test — the CI runner has 4 vCPUs, and pnpm otherwise
-        # runs several package suites at once, each with its own worker pool.
-        # Serialising the packages keeps fixed test timeouts meaningful.
-        run: pnpm test:ci
+      - name: Run the package suites (all but the UI and the service)
+        # One package after another, as `pnpm test:ci` runs them: the runner
+        # has 4 vCPUs, and pnpm otherwise runs several package suites at once,
+        # each with its own worker pool. scripts/run-test-lane.test.mjs checks
+        # that the lanes together run exactly what `pnpm test:ci` runs.
+        run: pnpm test:lane packages
       - name: Run the LibreOffice extension's Python tests
         # Stdlib-only unittest suites for the extension's pure modules
         # (discovery, HTTP/SSE, consent, relay, tool definitions). The UNO
@@ -107,8 +106,8 @@ jobs:
             args: --exclude-package service
     # A FOURTH execution of the UI, service and package suites, this one under
     # V8 instrumentation. It is a separate job because it reports rather than
-    # gates: `unit` (stability pass 1) and `stability` (passes 2 and 3) have
-    # already run these suites to completion, so a coverage timeout must never
+    # gates: `unit` (the packages) and `suites` (three passes over the UI and
+    # service) have already run these suites, so a coverage timeout must never
     # be able to fail the correctness gate — and run concurrently it costs no
     # extra wall clock at all.
     #
@@ -128,7 +127,7 @@ jobs:
       - run: pnpm build
       - uses: ./.github/actions/setup-test-embedder
       - name: Install Chromium
-        # Required for the same reasons as in `unit` and `stability`, and this
+        # Required for the same reasons as in `unit` and `suites`, and this
         # job needs both: it instruments the evals suite, whose scenarios
         # launch a real headless chromium, and the service suite, whose
         # page-check tests gate on the shared ~/.cache/ms-playwright existing.
@@ -136,6 +135,14 @@ jobs:
         uses: ./.github/actions/install-chromium
         with:
           filter: '@bendyline/gezel-evals'
+      - name: Let Chromium's sandbox start
+        if: matrix.shard.id == 'service'
+        # As in `suites`: page capture's real-browser test needs the user
+        # namespace Ubuntu 24.04's AppArmor policy denies by default.
+        run: |
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
       - name: Measure executable V8 coverage
         run: pnpm test:coverage -- ${{ matrix.shard.args }}
       - name: Preserve executable coverage reports
@@ -190,7 +197,7 @@ jobs:
       - name: Build the service dependency graph
         run: pnpm --filter @bendyline/gezel-service... run build
       - name: Verify platform service-home resolution
-        run: pnpm --filter @bendyline/gezel-client test src/system-service.test.ts
+        run: pnpm --filter @bendyline/gezel-client test src/system-service.test.ts src/process-lifecycle.integration.test.ts
       - name: Exercise Windows host isolation and command shims
         run: >-
           pnpm --filter @bendyline/gezel-service test
@@ -210,6 +217,17 @@ jobs:
           src/http/mutation-authority.test.ts
           src/chat/manager-machine-shared-mcp.test.ts
           src/machine-engine/bridge.integration.test.ts
+          src/workspace/command.test.ts
+          src/packages/win-shell.test.ts
+          src/packages/pnpm.test.ts
+          src/terminal/persistent-shell.test.ts
+          src/providers/native/supervisor.test.ts
+          src/providers/anthropic-cli/binary.test.ts
+          src/engines/resolver.test.ts
+          src/machine-engine/knowledge-assets-registry.test.ts
+          src/chat/session-tool-surface.test.ts
+          src/fs/git-control-writes.test.ts
+          src/office-host/uninstall-ca-filter.test.ts
       # Native discovery picks a different engine build per arch (CUDA on an
       # RTX Spark, CPU on other Windows on ARM machines), and on Windows the
       # storage suites link folders with junctions, which need no Developer
@@ -218,14 +236,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          pnpm --filter @bendyline/gezel test src/native/discover.test.ts src/native/llama-backend.test.ts
+          pnpm --filter @bendyline/gezel test src/native/discover.test.ts src/native/llama-backend.test.ts src/local-loop/native-engine-crashed-error.test.ts
           pnpm --filter @bendyline/gezel-service test src/storage/sizes.test.ts src/storage/safe-remove.test.ts src/projects/infer-project.test.ts src/models/storage-roots.test.ts
       # The installer's link helper decides what an elevated recursive ACL sweep
       # may follow, and only Windows has junctions; a release-only run would
       # find a regression after the merge. The compiled permission helper
       # (gezel-acl.exe) is built and driven here too, elevated, on both arches.
       - name: Test the installer link and ACL helpers against real junctions
-        run: pnpm --filter @bendyline/gezel-app exec vitest run src/reparse-sweep.test.ts src/windows-acl.test.ts
+        run: pnpm --filter @bendyline/gezel-app exec vitest run src/reparse-sweep.test.ts src/windows-acl.test.ts src/updater/windows-signature.test.ts
       - name: Stage the Windows sandbox launcher
         working-directory: packages/app
         run: node scripts/fetch-mxc.mjs
@@ -240,39 +258,42 @@ jobs:
       # Full assertions where the probe passes; where it does not (Windows
       # Server images may lack the container), the suite proves fail-closed.
       - name: Exercise the Windows sandbox
+        # The script suites run their deny-net cases wherever a boundary exists
+        # (DENY_NET_BOUNDARY): here when the probe passed, else they skip and
+        # the fail-closed cases run instead.
         run: >-
           pnpm --filter @bendyline/gezel-service test
           src/sandbox/sandbox-mxc.integration.test.ts
           src/sandbox/windows-mxc.test.ts
           src/sandbox/stdio-rpc.test.ts
+          src/scripts/runner.test.ts
+          src/scripts/http-authed.test.ts
+          src/scripts/runner-secrets.test.ts
+          src/scripts/runner-stores.test.ts
+          src/tasks/manager-gates.test.ts
+          src/tasks/manager-scripts.test.ts
+          src/workspace/derive.test.ts
 
-  stability:
-    name: Test stability pass ${{ matrix.pass }} of 3 (UI, service, and CLI TUI)
+  suites:
+    name: Test pass ${{ matrix.pass }} of 3 (${{ matrix.lane }})
     needs: workflow-policy
     runs-on: ubuntu-latest
-    # Passes 2 and 3 run here rather than tailing the `unit` job, which
-    # reached ~30 min sequentially and was cancelled at that ceiling on
-    # 2026-07-27. Each pass runs its suites one after another (see
-    # test:stability:pass) so its timings do not depend on what else shares
-    # the 4 vCPUs. The CLI repeat is intentionally limited to its
-    # interaction-heavy App suite; repeating daemon integration here would
-    # consume the timeout without adding coverage for render/input timing
-    # regressions.
-    # Both passes shared one job until 2026-09-30, and its ceiling went 40 ->
-    # 50 -> 70 min as the service suite grew; with a pass at ~34 min (service
-    # alone ~29) two back to back overran 70 on every push to main, and the
-    # green PR runs cleared it by two minutes. A runner per pass keeps each
-    # pass's timings independent and puts each job near half its ceiling. Not
-    # fail-fast: whether a flake reproduces in the other pass is the point.
+    # Three passes over the UI and service suites (and the CLI's TUI suite),
+    # as the release gate runs them: `test:ci` once, then `test:stability`'s
+    # two passes. Each pass is split into lanes (scripts/run-test-lane.mjs),
+    # each on a runner of its own, so a lane's timings do not depend on
+    # another sharing the 4 vCPUs. A whole pass ran on one runner until
+    # 2026-11-23 and took 40-57 min; a lane is 5-15 min after the build.
+    # Not fail-fast: whether a flake reproduces in another pass is the point.
     # A job timeout surfaces as "The operation was canceled", indistinguishable
     # from a concurrency cancel, so read the elapsed time before hunting for a
     # hung test.
     strategy:
       fail-fast: false
       matrix:
-        pass: [2, 3]
-    # Peaked at 50 and 54 min (2026-10-23) under the old 60 min cap.
-    timeout-minutes: 80
+        pass: [1, 2, 3]
+        lane: [service-unit, service-integration-chat, service-integration, ui]
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-workspace
@@ -280,17 +301,40 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           pnpm-version: ${{ env.PNPM_VERSION }}
       - run: pnpm build
-      - uses: ./.github/actions/setup-test-embedder
+      - if: startsWith(matrix.lane, 'service-')
+        uses: ./.github/actions/setup-test-embedder
       - name: Install Chromium
+        if: startsWith(matrix.lane, 'service-')
         # The service suite's page-check tests gate a real-browser block on
-        # the shared ~/.cache/ms-playwright existing (see runner.test.ts).
-        # Without this the repeat passes would silently skip tests that pass 1
-        # runs, which is precisely the flake this job exists to catch.
+        # the shared ~/.cache/ms-playwright existing (see runner.test.ts), and
+        # page capture's real-browser test looks for Chromium there too.
+        # Without it those tests silently skip.
         uses: ./.github/actions/install-chromium
         with:
           filter: '@bendyline/gezel-app'
-      - name: Repeat UI, service, and CLI TUI suites (stability pass ${{ matrix.pass }} of 3)
-        run: pnpm test:stability:pass
+      - name: Let Chromium's sandbox start
+        if: startsWith(matrix.lane, 'service-')
+        # Ubuntu 24.04 denies unprivileged user namespaces through AppArmor,
+        # and Chromium's sandbox needs one. Page capture never turns the
+        # sandbox off, so page-capture/capture.real.test.ts needs what a
+        # desktop Linux install allows.
+        run: |
+          if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+      - name: Run the ${{ matrix.lane }} lane (pass ${{ matrix.pass }} of 3)
+        env:
+          TEST_TIMINGS_DIR: ${{ github.workspace }}/artifacts/test-timings
+        run: pnpm test:lane ${{ matrix.lane }}
+      - name: Preserve per-file timings
+        # Read these to rebalance the lanes when one grows past the others.
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-timings-pass-${{ matrix.pass }}-${{ matrix.lane }}
+          path: artifacts/test-timings/
+          if-no-files-found: ignore
+          retention-days: 14
 
   packaged-bundle:
     name: Release-stamped packaged and published-artifact contracts
@@ -342,8 +386,7 @@ jobs:
       - name: Verify publishable package shapes and subpaths
         # Source-level tests resolve through workspace links and cannot catch a
         # missing export, leaked workspace range, or omitted tarball asset.
-        # Keep the full clean-consumer install in the release gate, but catch
-        # the hermetic packaging contract on every pull request.
+        # The full clean-consumer install runs in `npm-release-candidate`.
         run: pnpm test:published
 
   npm-release-candidate:

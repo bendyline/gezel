@@ -16,6 +16,7 @@ import {
   extractBody,
   llmsTxt,
   markdownTwin,
+  masthead,
   openInGezelSection,
   pageScripts,
   resolveCssHref,
@@ -313,17 +314,14 @@ describe('runHandboekExport', () => {
     }
   });
 
-  it('omits the wordmark entirely when no site url is given', async () => {
-    const bare = await mkdtemp(join(tmpdir(), 'gezel-handboek-bare-'));
-    try {
-      await runHandboekExport({ out: bare });
-      const html = await readFile(join(bare, 'index.html'), 'utf8');
-      expect(html).not.toContain('hb-wordmark');
-      expect(html).toContain('class="hb-brand"');
-    } finally {
-      await rm(bare, { recursive: true, force: true }).catch(() => {});
-    }
-  }, 120_000);
+  it('omits the wordmark entirely when no site url is given', () => {
+    // Asserted on the masthead itself: a second full export to read two
+    // substrings cost 42 s of this file's 85 s on CI.
+    const bare = masthead([], 0, undefined);
+    expect(bare).not.toContain('hb-wordmark');
+    expect(bare).toContain('class="hb-brand"');
+    expect(masthead([], 0, '/')).toContain('<a class="hb-wordmark" href="/">gezel</a>');
+  });
 
   it('puts generated catalog tables in a scroll container and lets cells wrap', async () => {
     const page = await readFile(join(out, 'project-types-index', 'index.html'), 'utf8');

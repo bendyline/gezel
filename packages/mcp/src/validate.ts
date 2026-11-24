@@ -27,8 +27,9 @@
  * `file-non-empty` check and nothing else.
  */
 
-import ts from 'typescript';
+import type ts from 'typescript';
 import { locateUnterminatedConstruct } from './source-validation.js';
+import { typescript } from './typescript-lazy.js';
 
 export type ValidateCheck =
   | { ok: true; name: string; detail?: string }
@@ -359,7 +360,7 @@ function validateHtml(_path: string, content: FileContent): ValidateCheck[] {
     const openLine = (html.slice(0, openIdx).match(/\n/g)?.length ?? 0) + 1;
     scripts.push({ body, attrs, openLine });
     const parseError = isModuleScript(attrs)
-      ? tryParseSource(body, ts.ScriptKind.JS)
+      ? tryParseSource(body, typescript().ScriptKind.JS)
       : tryParseFunctionBody(body);
     if (parseError) {
       // An unclosed comment/brace/template consumes the remainder of the
@@ -470,15 +471,15 @@ function validateUniqueTopLevelFunctions(scripts: InlineScriptForLint[]): Valida
   const seen = new Map<string, number>();
   let count = 0;
   for (const script of scripts) {
-    const sf = ts.createSourceFile(
+    const sf = typescript().createSourceFile(
       'inline-script.js',
       script.body,
-      ts.ScriptTarget.ES2022,
+      typescript().ScriptTarget.ES2022,
       true,
-      ts.ScriptKind.JS,
+      typescript().ScriptKind.JS,
     );
     for (const statement of sf.statements) {
-      if (!ts.isFunctionDeclaration(statement) || !statement.name) continue;
+      if (!typescript().isFunctionDeclaration(statement) || !statement.name) continue;
       count += 1;
       const relative = sf.getLineAndCharacterOfPosition(statement.name.getStart(sf));
       const line = script.openLine + relative.line;
@@ -505,21 +506,24 @@ function validateUniqueTopLevelFunctions(scripts: InlineScriptForLint[]): Valida
 }
 
 function tryParseSource(source: string, scriptKind: ts.ScriptKind): string | null {
-  const fileName = scriptKind === ts.ScriptKind.TSX ? 'source.tsx' : 'source.js';
-  const output = ts.transpileModule(source, {
+  const fileName = scriptKind === typescript().ScriptKind.TSX ? 'source.tsx' : 'source.js';
+  const output = typescript().transpileModule(source, {
     fileName,
     reportDiagnostics: true,
-    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
+    compilerOptions: {
+      target: typescript().ScriptTarget.ES2022,
+      module: typescript().ModuleKind.ESNext,
+    },
   });
   const diagnostics = output.diagnostics?.filter(
     (diagnostic): diagnostic is ts.DiagnosticWithLocation =>
-      diagnostic.category === ts.DiagnosticCategory.Error &&
+      diagnostic.category === typescript().DiagnosticCategory.Error &&
       diagnostic.file !== undefined &&
       diagnostic.start !== undefined,
   );
   if (!diagnostics || diagnostics.length === 0) return null;
   const first = diagnostics[0]!;
-  const message = ts.flattenDiagnosticMessageText(first.messageText, '\n');
+  const message = typescript().flattenDiagnosticMessageText(first.messageText, '\n');
   const { line, character } = first.file.getLineAndCharacterOfPosition(first.start);
   return `${message} at line ${line + 1}, col ${character + 1}`;
 }
@@ -542,16 +546,16 @@ function validateJsTs(path: string, content: FileContent): ValidateCheck[] {
   const checks: ValidateCheck[] = [fileNonEmptyCheck(content)];
   const lower = path.toLowerCase();
   const scriptKind = lower.endsWith('.tsx')
-    ? ts.ScriptKind.TSX
+    ? typescript().ScriptKind.TSX
     : lower.endsWith('.ts')
-      ? ts.ScriptKind.TS
+      ? typescript().ScriptKind.TS
       : lower.endsWith('.jsx')
-        ? ts.ScriptKind.JSX
-        : ts.ScriptKind.JS;
-  const sf = ts.createSourceFile(
+        ? typescript().ScriptKind.JSX
+        : typescript().ScriptKind.JS;
+  const sf = typescript().createSourceFile(
     path,
     content.text,
-    ts.ScriptTarget.ES2022,
+    typescript().ScriptTarget.ES2022,
     /*setParentNodes*/ true,
     scriptKind,
   );
@@ -575,12 +579,12 @@ function validateJsTs(path: string, content: FileContent): ValidateCheck[] {
     checks.push({
       ok: true,
       name: 'parses',
-      detail: `${scriptKind === ts.ScriptKind.TS || scriptKind === ts.ScriptKind.TSX ? 'TypeScript' : 'JavaScript'} parses cleanly`,
+      detail: `${scriptKind === typescript().ScriptKind.TS || scriptKind === typescript().ScriptKind.TSX ? 'TypeScript' : 'JavaScript'} parses cleanly`,
     });
     return checks;
   }
   const first = diags[0]!;
-  const msg = ts.flattenDiagnosticMessageText(first.messageText, '\n');
+  const msg = typescript().flattenDiagnosticMessageText(first.messageText, '\n');
   const { line, character } = sf.getLineAndCharacterOfPosition(first.start);
   checks.push({
     ok: false,
@@ -599,15 +603,15 @@ function findNestedStaticModuleDeclaration(sf: ts.SourceFile): ts.Node | null {
   const visit = (node: ts.Node): void => {
     if (found) return;
     if (
-      (ts.isImportDeclaration(node) ||
-        ts.isExportDeclaration(node) ||
-        ts.isExportAssignment(node)) &&
+      (typescript().isImportDeclaration(node) ||
+        typescript().isExportDeclaration(node) ||
+        typescript().isExportAssignment(node)) &&
       node.parent !== sf
     ) {
       found = node;
       return;
     }
-    ts.forEachChild(node, visit);
+    typescript().forEachChild(node, visit);
   };
   visit(sf);
   return found;

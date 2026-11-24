@@ -8,8 +8,14 @@ import { ChatManager } from '../chat/manager.js';
 import { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { MockProvider } from '../providers/mock.js';
+import { denyNetBoundaryAvailable } from '../sandbox/runner.js';
 import { FileSecretStore } from '../secrets/file-store.js';
 import { ScriptRunner } from './runner.js';
+
+// Deny-net script runs need an OS network boundary: Seatbelt on macOS, a
+// systemd unit or the sandbox helper on Linux, the MXC container on Windows.
+// These suites ran only on macOS until 2026-11-23, so CI never executed them.
+const DENY_NET_BOUNDARY = await denyNetBoundaryAvailable();
 
 const noopMemory = {
   search: async () => [],
@@ -27,7 +33,7 @@ it('resolves the stores subpath export from the built SDK', async () => {
   expect(typeof stores.rosterStore).toBe('function');
 });
 
-describe.runIf(process.platform === 'darwin')('ScriptRunner — SDK stores in the sandbox', () => {
+describe.runIf(DENY_NET_BOUNDARY)('ScriptRunner — SDK stores in the sandbox', () => {
   let home: string;
   let store: Store;
   let manager: ChatManager;

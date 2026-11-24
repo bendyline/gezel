@@ -36,12 +36,19 @@ let home: string;
 let store: Store;
 
 /**
+ * The bootstrap only reads the catalog, and a fresh service re-reads the
+ * bundled Gilde listing (a few hundred ms) where one keeps it cached, so the
+ * whole file shares one.
+ */
+const catalog = new CatalogService();
+
+/**
  * Asked through the same gate the picker uses, not a model-family pattern:
  * which family ranks first is gilde curation, and a new recoScore there
  * changes this host's pick without changing any behavior under test.
  */
 async function recommendedChatModelIds(): Promise<string[]> {
-  const items = await new CatalogService().list('chat-model');
+  const items = await catalog.list('chat-model');
   return items
     .map((i) => i.manifest)
     .filter((m) => m.kind === 'chat-model' && isRecommendedModel(m))
@@ -126,7 +133,7 @@ describe('bootstrapOnDeviceFirstRun', () => {
       store,
       llamaCppModels: manager,
       mlxModels: fakeMlxManager().manager,
-      catalog: new CatalogService(),
+      catalog,
     });
     expect(calls).toEqual([]);
     const config = await store.readConfig();
@@ -166,7 +173,7 @@ describe('bootstrapOnDeviceFirstRun', () => {
       store,
       llamaCppModels: llama,
       mlxModels: mlx,
-      catalog: new CatalogService(),
+      catalog,
       platformOverride: 'win32',
       archOverride: 'x64',
     });
@@ -198,7 +205,7 @@ describe('bootstrapOnDeviceFirstRun', () => {
       store,
       llamaCppModels: llama,
       mlxModels: mlx,
-      catalog: new CatalogService(),
+      catalog,
       platformOverride: 'win32',
       archOverride: 'x64',
     });
@@ -228,7 +235,7 @@ describe('bootstrapOnDeviceFirstRun', () => {
       store,
       llamaCppModels: llama,
       mlxModels: mlx,
-      catalog: new CatalogService(),
+      catalog,
       platformOverride: 'win32',
       archOverride: 'x64',
     });
@@ -254,7 +261,7 @@ describe('bootstrapOnDeviceFirstRun', () => {
       store,
       llamaCppModels: llama,
       mlxModels: mlx,
-      catalog: new CatalogService(),
+      catalog,
       platformOverride: 'win32',
       archOverride: 'x64',
     });
@@ -270,7 +277,7 @@ describe('bootstrapOnDeviceFirstRun', () => {
       store,
       llamaCppModels: manager,
       mlxModels: fakeMlxManager().manager,
-      catalog: new CatalogService(),
+      catalog,
     });
     expect(calls).toEqual([]);
     const config = await store.readConfig();
@@ -284,7 +291,7 @@ describe('bootstrapOnDeviceFirstRun', () => {
         store,
         llamaCppModels: fakeModelManager().manager,
         mlxModels: fakeMlxManager().manager,
-        catalog: new CatalogService(),
+        catalog,
         platformOverride,
         archOverride,
       });
@@ -326,7 +333,7 @@ describe('bootstrapOnDeviceFirstRun', () => {
       store,
       llamaCppModels: manager,
       mlxModels: fakeMlxManager().manager,
-      catalog: new CatalogService(),
+      catalog,
       platformOverride: 'linux',
       archOverride: 'x64',
     });
@@ -345,7 +352,7 @@ describe('bootstrapOnDeviceFirstRun', () => {
       store,
       llamaCppModels: manager,
       mlxModels: fakeMlxManager().manager,
-      catalog: new CatalogService(),
+      catalog,
       platformOverride: 'win32',
       archOverride: 'x64',
     });
@@ -363,27 +370,35 @@ describe('bootstrapOnDeviceFirstRun', () => {
     const installed = new Promise<Array<{ id: string }>>((resolve) => {
       releaseInstalled = resolve;
     });
+    let verificationStarted: () => void = () => {};
+    const verifying = new Promise<void>((resolve) => {
+      verificationStarted = resolve;
+    });
     const manager = {
-      listInstalled: () => installed,
+      listInstalled: () => {
+        verificationStarted();
+        return installed;
+      },
       getActiveInstalls: () => [],
     } as unknown as LlamaCppModelManager;
     const run = bootstrapOnDeviceFirstRun({
       store,
       llamaCppModels: manager,
       mlxModels: fakeMlxManager().manager,
-      catalog: new CatalogService(),
+      catalog,
       platformOverride: 'win32',
       archOverride: 'x64',
     });
 
-    let provisional = await store.readConfig();
-    for (let attempt = 0; !provisional.firstRunCompleted && attempt < 100; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      provisional = await store.readConfig();
-    }
+    // Read only once the bootstrap is parked on verification. Polling the
+    // config while it was still writing raced its atomic rename, which
+    // Windows refuses (EPERM) while a reader holds the file open.
+    await Promise.race([verifying, run]);
+    const provisional = await store.readConfig();
     releaseInstalled([{ id: 'shared-after-verification' }]);
     await run;
 
+    expect(provisional.firstRunCompleted).toBe(true);
     expect(provisional.provider).toBe('llama-cpp');
     expect(await recommendedChatModelIds()).toContain(provisional.defaultModel?.['llama-cpp']);
     expect((await store.readConfig()).defaultModel?.['llama-cpp']).toBe(
@@ -398,7 +413,7 @@ describe('bootstrapOnDeviceFirstRun', () => {
       store,
       llamaCppModels: llamaMgr,
       mlxModels: mlxMgr,
-      catalog: new CatalogService(),
+      catalog,
       platformOverride: 'darwin',
       archOverride: 'arm64',
     });
@@ -421,7 +436,7 @@ describe('bootstrapOnDeviceFirstRun', () => {
       store,
       llamaCppModels: manager,
       mlxModels: fakeMlxManager().manager,
-      catalog: new CatalogService(),
+      catalog,
       platformOverride: 'linux',
       archOverride: 'x64',
     });
@@ -477,7 +492,7 @@ describe('bootstrapOnDeviceFirstRun with an adopted machine engine', () => {
       store,
       llamaCppModels: fakeModelManager().manager,
       mlxModels: mlx,
-      catalog: new CatalogService(),
+      catalog,
       machineEngine,
       logger: { info: () => {}, warn: (m) => warnings.push(m) },
       platformOverride: 'darwin',

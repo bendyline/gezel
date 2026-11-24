@@ -18,6 +18,7 @@ import type { WorkspaceIndexManager } from './index-manager.js';
 const log = createLogger('workspace-watch');
 
 const RECONCILE_INTERVAL_MS = 60_000;
+const STARTUP_DELAY_MS = 5_000;
 const DEBOUNCE_MS = 2_000;
 const MAX_WATCHED = 3;
 
@@ -34,6 +35,10 @@ export interface WorkspaceWatchManagerOptions {
   maxWatched?: number;
   debounceMs?: number;
   reconcileIntervalMs?: number;
+  /** Wait after `start()` before the first reconcile attaches watchers. */
+  startupDelayMs?: number;
+  /** Told each project a watcher attaches to: from then on, outside changes land promptly. */
+  onWatching?: (projectId: string) => void;
   /**
    * Projects watched regardless of recency, ahead of the MRU slots. The
    * shared document library is pinned here: it is edited from outside the
@@ -69,6 +74,8 @@ export class WorkspaceWatchManager {
   private readonly maxWatched: number;
   private readonly debounceMs: number;
   private readonly reconcileIntervalMs: number;
+  private readonly startupDelayMs: number;
+  private readonly onWatching?: (projectId: string) => void;
   private readonly pinnedProjects: () => string[];
   private readonly holdsRefresh: (projectId: string) => Promise<boolean>;
   private readonly watchImpl: typeof watch;
@@ -90,6 +97,8 @@ export class WorkspaceWatchManager {
     this.maxWatched = opts.maxWatched ?? MAX_WATCHED;
     this.debounceMs = opts.debounceMs ?? DEBOUNCE_MS;
     this.reconcileIntervalMs = opts.reconcileIntervalMs ?? RECONCILE_INTERVAL_MS;
+    this.startupDelayMs = opts.startupDelayMs ?? STARTUP_DELAY_MS;
+    this.onWatching = opts.onWatching;
     this.pinnedProjects = opts.pinnedProjects ?? (() => []);
     this.holdsRefresh = opts.holdsRefresh ?? (async () => false);
     this.watchImpl = opts.watchImpl ?? watch;
@@ -99,7 +108,7 @@ export class WorkspaceWatchManager {
     this.startupTimer = setTimeout(() => {
       this.startupTimer = null;
       void this.reconcile().catch((err) => log.warn(`reconcile failed: ${describe(err)}`));
-    }, 5_000);
+    }, this.startupDelayMs);
     unref(this.startupTimer);
     this.reconcileTimer = setInterval(() => {
       void this.reconcile().catch((err) => log.warn(`reconcile failed: ${describe(err)}`));
@@ -169,6 +178,7 @@ export class WorkspaceWatchManager {
         });
         this.watchers.set(projectId, { dir, watcher });
         log.info(`watching ${projectId} (${dir})`);
+        this.onWatching?.(projectId);
       } catch (err) {
         if ((err as NodeJS.ErrnoException).code === 'ERR_FEATURE_UNAVAILABLE_ON_PLATFORM') {
           this.supported = false;

@@ -4,9 +4,18 @@ Shared infrastructure for testing the UI package. Three pieces:
 
 | File | Purpose |
 |---|---|
-| [`setup.ts`](./setup.ts) | Loaded by `vitest.config.ts` as a `setupFiles` entry. Wires up `@testing-library/jest-dom` matchers, registers a per-test `cleanup()` hook, and seeds `window.__GEZEL__` with stable defaults. |
+| [`setup.ts`](./setup.ts) | The `setupFiles` entry of the `dom` project in `vitest.config.ts`. Wires up `@testing-library/jest-dom` matchers, registers a per-test `cleanup()` hook, resets module-level stores, and seeds `window.__GEZEL__` with stable defaults. |
 | [`mockApi.ts`](./mockApi.ts) | `createMockApi()` — Proxy-backed `Partial<GezelClient>` factory. Every accessed method auto-creates a `vi.fn()` returning a sensible default (`{ gezels: [] }`, `{ projects: [] }`, etc.). Tests override per-call with `vi.mocked(api.x).mockResolvedValue(...)`. |
 | [`primitivesMock.tsx`](./primitivesMock.tsx) | Native-HTML stand-ins for the Radix primitives in `../primitives/`. Avoids fighting jsdom over portals, positioning, and pointer events. |
+
+## Where a test runs
+
+`vitest.config.ts` splits the suite into two projects. A `.test.ts` file under
+`src/` runs in the `node` project: plain Node, no jsdom and no setup file, so
+none of the above is loaded. Everything else (`.test.tsx`, `tests/`) runs in
+the `dom` project with jsdom and `setup.ts`. A `.test.ts` that needs a DOM
+fails in `node` with `window is not defined` or `document is not defined`:
+add it to `DOM_TS_TESTS` in `vitest.config.ts`, or make it a `.test.tsx`.
 
 ## Patterns to follow
 

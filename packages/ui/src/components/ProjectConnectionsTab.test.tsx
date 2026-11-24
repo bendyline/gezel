@@ -948,9 +948,7 @@ describe('ProjectConnectionsTab cloud AI switch', () => {
   it('says what each answer means, and saves the one the person picks', async () => {
     row(false);
     render(<ProjectConnectionsTab project={PROJECT} />);
-    expect(
-      await screen.findByText(/Only models that run on this computer/),
-    ).toBeVisible();
+    expect(await screen.findByText(/Only models that run on this computer/)).toBeVisible();
     expect(cloud()).not.toBeChecked();
 
     row(true);

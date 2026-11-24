@@ -1027,7 +1027,7 @@ GEZEL_EMBEDDED=1 pnpm app   # still embedded — to hit the foreground daemon,
 
 `gezel start --port N --foreground` spawns gezeld with inherited stdio (Ctrl+C stops it) and a specific port. With just `--port N` (no `--foreground`), it detaches as usual. With neither flag, it's the old "ensure running on ephemeral port" behavior.
 
-For automated coverage, [packages/cli/src/daemon-integration.test.ts](packages/cli/src/daemon-integration.test.ts) spawns a real `gezeld` and drives it with the real `GezelClient` — the one test that would catch token/transport bugs the in-process integration tests miss. Runs in ~0.5s.
+For automated coverage, [packages/cli/src/daemon-integration.test.ts](packages/cli/src/daemon-integration.test.ts) spawns a real `gezeld` and drives it with the real `GezelClient` — the one test that would catch token/transport bugs the in-process integration tests miss. It shares one daemon across the file, but each test launches the built CLI (about 1 s per launch), so the file takes about two minutes on CI. Test a command's logic in a unit test and keep only the transport, token and lifecycle checks here.
 
 ### Testing patterns
 

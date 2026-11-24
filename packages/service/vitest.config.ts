@@ -1,5 +1,6 @@
+import { readFileSync, readdirSync } from 'node:fs';
 import { availableParallelism, homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative, sep } from 'node:path';
 import { defineConfig } from 'vitest/config';
 
 /**
@@ -11,14 +12,74 @@ import { defineConfig } from 'vitest/config';
 const MAX_WORKERS = Math.max(2, Math.min(8, availableParallelism()));
 
 /**
- * Vitest projects run concurrently. The integration project below consumes one
- * worker because file parallelism is disabled, so leave that lane out of the
- * parallel project's budget. Without this subtraction an advertised 8-worker
- * cap actually starts 9 workers before accounting for the subprocesses many
- * integration tests create. Under full-suite pressure that can starve a fresh
- * fork long enough to hit Vitest's fixed worker-start timeout.
+ * The projects run one after another, not side by side: the unit files, then
+ * the fs-events group, then the integration files, which Vitest runs last
+ * because they are isolated with file parallelism off. On the 2026-11-23 CI
+ * run the unit project finished at 542 s and the first integration file
+ * started after it. Holding a worker back for the integration lane therefore
+ * only left one of four vCPUs idle for the whole unit phase.
  */
-const UNIT_WORKERS = Math.max(1, MAX_WORKERS - 1);
+const UNIT_WORKERS = MAX_WORKERS;
+
+const PACKAGE_ROOT = import.meta.dirname;
+
+/** Test files under a package-relative folder, as `src/...` paths. */
+function testFilesUnder(dir: string): string[] {
+  const out: string[] = [];
+  const walk = (abs: string): void => {
+    for (const entry of readdirSync(abs, { withFileTypes: true })) {
+      const path = join(abs, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (entry.name.endsWith('.test.ts'))
+        out.push(relative(PACKAGE_ROOT, path).split(sep).join('/'));
+    }
+  };
+  walk(join(PACKAGE_ROOT, dir));
+  return out.sort();
+}
+
+/**
+ * What puts a route or ChatManager suite in the serial lane: it boots a
+ * service, builds a ChatManager (whose sessions start an MCP child), or starts
+ * a process or server itself. The rest of those folders are pure tests that
+ * sat in the single worker only because of a folder glob: 55 route files and
+ * six `manager-*` files, each paying ~1.3 s of serial fork overhead.
+ */
+const STANDS_UP_PROCESSES =
+  /\bstartService\(|\bnew ChatManager\(|\bspawn(?:Sync)?\(|\bexecFile(?:Sync)?\(|\bfork\(|\bMcpBridge|\bcreateServer\(/;
+
+function standsUpProcesses(file: string): boolean {
+  return STANDS_UP_PROCESSES.test(readFileSync(join(PACKAGE_ROOT, file), 'utf8'));
+}
+
+const ROUTE_SUITES = testFilesUnder('src/http/routes').filter(standsUpProcesses);
+const MANAGER_SUITES = testFilesUnder('src/chat')
+  .filter((file) => /^src\/chat\/manager[^/]*\.test\.ts$/.test(file))
+  .filter(standsUpProcesses);
+
+/**
+ * Files in the git and script folders that start nothing. Their neighbours
+ * run git or the script sandbox from inside the code under test, where no
+ * reading of the test file can see it, so these are listed by hand after
+ * reading each one; a new file in those folders runs serially until added.
+ */
+const PURE_IN_SERIAL_FOLDERS = new Set([
+  'src/git/ai.test.ts',
+  'src/git/changes.test.ts',
+  'src/git/model-clone-policy.test.ts',
+  'src/git/manager.clone-auth.test.ts',
+  'src/scripts/sdk.test.ts',
+  'src/scripts/dispatcher-contract.test.ts',
+  'src/scripts/trust.test.ts',
+  'src/scripts/source.test.ts',
+  'src/scripts/runs.test.ts',
+  'src/scripts/dispatcher.test.ts',
+]);
+
+const GIT_AND_SCRIPT_SUITES = [
+  ...testFilesUnder('src/git').filter((file) => /^src\/git\/[^/]+\.test\.ts$/.test(file)),
+  ...testFilesUnder('src/scripts').filter((file) => /^src\/scripts\/[^/]+\.test\.ts$/.test(file)),
+].filter((file) => !PURE_IN_SERIAL_FOLDERS.has(file));
 
 /**
  * A large slice of the service tests stand up a real moving part: an
@@ -41,6 +102,31 @@ const NATIVE_MEMORY_SUITES = [
   'src/index-store/symbols-scala.test.ts',
 ];
 
+/**
+ * The serial lane in two halves of similar length, so CI can run each on its
+ * own runner (`--project integration-chat`, `--project integration`). The
+ * chat half is the ChatManager suites (mock provider + MCP bridge child) and
+ * the bridge itself.
+ */
+/**
+ * Kept in the other half only to even out the two runners' time: the chat
+ * half was ~15 min and the other ~11 by the 2026-11-23 timings. Each file has
+ * its own fork either way. Rebalance from the `test-timings-*` CI artifacts.
+ */
+const BALANCED_INTO_OTHER_HALF = [
+  'src/chat/manager-handoff-entry.test.ts',
+  'src/providers/mcp-bridge.test.ts',
+];
+
+const CHAT_INTEGRATION_SUITES = [
+  ...MANAGER_SUITES,
+  'src/chat/keurmeester-intervention.test.ts',
+  'src/chat/band-prefix-gating.test.ts',
+  'src/chat/prefix-layering.test.ts',
+  'src/chat/questions.test.ts',
+  'src/chat/session-token-rotation.test.ts',
+].filter((file) => !BALANCED_INTO_OTHER_HALF.includes(file));
+
 const INTEGRATION_SUITES = [
   // Naming is the primary contract: new integration suites should enter the
   // serialized pool automatically instead of relying on this list being
@@ -53,28 +139,17 @@ const INTEGRATION_SUITES = [
   'src/sessions-integration.test.ts',
   'src/service-runtime.test.ts',
   'src/web-ui-mode.test.ts',
-  // ChatManager-driven suites (mock provider + MCP bridge subprocess).
-  'src/chat/keurmeester-intervention.test.ts',
-  'src/chat/manager*.test.ts',
-  'src/chat/band-prefix-gating.test.ts',
-  'src/chat/prefix-layering.test.ts',
-  'src/chat/questions.test.ts',
-  'src/chat/session-token-rotation.test.ts',
+  // Route suites that boot a service; see STANDS_UP_PROCESSES.
+  ...ROUTE_SUITES,
+  ...BALANCED_INTO_OTHER_HALF,
   // Service boots that sit outside the route directory.
   'src/http/machine-engine*.test.ts',
   'src/http/ollama-emulation.test.ts',
-  // HTTP route suites stand up a Hono app + service context.
-  'src/http/routes/**/*.test.ts',
-  // Real git subprocesses, shared clones, and worktrees.
-  'src/git/*.test.ts',
-  // Node MCP subprocesses / external runtimes.
-  'src/providers/mcp-bridge.test.ts',
-  'src/providers/llama-cpp/provider.test.ts',
-  'src/providers/native/capacity-broker.test.ts',
+  // Real git subprocesses, shared clones, and worktrees; script runner
+  // sandbox spawns and nested runs.
+  ...GIT_AND_SCRIPT_SUITES,
   // WebAssembly grammar compilation has a high native-memory peak.
   ...NATIVE_MEMORY_SUITES,
-  // Script runner sandbox spawns + nested runs.
-  'src/scripts/*.test.ts',
   'src/workspace/derive.test.ts',
   // pnpm 11 installs into a folder with no node_modules before `pnpm run`, so
   // each approved run here is a sandboxed install plus a script: ~0.4 s warm,
@@ -187,12 +262,30 @@ export default defineConfig({
       GEZEL_LAN_DISCOVERY: 'off',
     },
     projects: [
-      {
+      ...(
+        [
+          // Each half runs on its own; a later group starts when the earlier
+          // finishes, so locally there is still one integration file at a time.
+          {
+            name: 'integration-chat',
+            include: CHAT_INTEGRATION_SUITES,
+            exclude: [],
+            groupOrder: 2,
+          },
+          {
+            name: 'integration',
+            include: INTEGRATION_SUITES,
+            exclude: CHAT_INTEGRATION_SUITES,
+            groupOrder: 3,
+          },
+        ] as const
+      ).map((half) => ({
         extends: true,
         test: {
-          name: 'integration',
-          include: INTEGRATION_SUITES,
-          pool: 'forks',
+          name: half.name,
+          include: [...half.include],
+          exclude: [...half.exclude],
+          pool: 'forks' as const,
           execArgv: WORKER_EXEC_ARGV,
           // Explicit because native grammar memory is released only when the
           // per-file fork exits; do not let a future default change reuse it.
@@ -200,6 +293,7 @@ export default defineConfig({
           // Keep integration files sequential while retaining the shared
           // project-level worker cap required for parallel project groups.
           fileParallelism: false,
+          sequence: { groupOrder: half.groupOrder },
           // The default 5s budget — and the previous 10s override — are below
           // the full-suite tail for real service/git subprocess work even
           // though the tests pass alone. Hooks need the same headroom because
@@ -208,17 +302,15 @@ export default defineConfig({
           testTimeout: 30_000,
           hookTimeout: 30_000,
         },
-      },
+      })),
       {
         extends: true,
         test: {
           name: 'unit',
           include: ['src/**/*.test.ts'],
-          exclude: [...INTEGRATION_SUITES, ...FS_EVENT_SUITES],
+          exclude: [...CHAT_INTEGRATION_SUITES, ...INTEGRATION_SUITES, ...FS_EVENT_SUITES],
           pool: 'forks',
           execArgv: WORKER_EXEC_ARGV,
-          // One worker is already occupied by the concurrent integration
-          // project; keep the combined project total inside MAX_WORKERS.
           maxWorkers: UNIT_WORKERS,
         },
       },
@@ -230,9 +322,8 @@ export default defineConfig({
           pool: 'forks',
           execArgv: WORKER_EXEC_ARGV,
           // Vitest runs groups one after another: the unit files (group 0),
-          // then this one, then the integration files, which it always runs
-          // last because they are isolated with a single worker. One file at
-          // a time, so neither adds churn to the other's watcher.
+          // then this one, then the two integration halves (groups 2 and 3).
+          // One file at a time, so neither adds churn to the other's watcher.
           sequence: { groupOrder: 1 },
           fileParallelism: false,
         },

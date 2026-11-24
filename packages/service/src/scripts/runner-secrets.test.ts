@@ -9,8 +9,14 @@ import { ChatManager } from '../chat/manager.js';
 import { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { MockProvider } from '../providers/mock.js';
+import { denyNetBoundaryAvailable } from '../sandbox/runner.js';
 import { FileSecretStore } from '../secrets/file-store.js';
 import { ScriptRunner } from './runner.js';
+
+// Deny-net script runs need an OS network boundary: Seatbelt on macOS, a
+// systemd unit or the sandbox helper on Linux, the MXC container on Windows.
+// These suites ran only on macOS until 2026-11-23, so CI never executed them.
+const DENY_NET_BOUNDARY = await denyNetBoundaryAvailable();
 
 /**
  * Slice A regressions — the "scripts never hold secrets" property and
@@ -68,7 +74,7 @@ async function writeScript(name: string, source: string): Promise<void> {
 
 // These regressions require an executing denyNet child. Today only macOS
 // Seatbelt provides the OS boundary required to start one.
-describe.runIf(process.platform === 'darwin')('ScriptRunner — secret-isolation regressions', () => {
+describe.runIf(DENY_NET_BOUNDARY)('ScriptRunner — secret-isolation regressions', () => {
   it('sandbox env contains no SecretStore values (env scrub)', async () => {
     // Plant a recognizable sentinel in every SecretStore kind and
     // confirm none of those values appear anywhere in a run's env,

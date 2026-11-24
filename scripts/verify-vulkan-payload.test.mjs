@@ -8,6 +8,12 @@ import { fileURLToPath } from 'node:url';
 
 const verifier = fileURLToPath(new URL('./verify-vulkan-payload.mjs', import.meta.url));
 
+// The fake ldd below is a shebang script on a colon-separated PATH, which a
+// Windows host can neither find nor run. The verifier itself is Linux-only.
+const posixOnly = {
+  skip: process.platform === 'win32' ? 'the fake ldd needs a POSIX host' : false,
+};
+
 // Exercise the CLI and real filesystem without needing Linux ELF execution
 // on developer Macs. ldd is the sole platform seam; its output represents the
 // bundled, host-resolved, and unresolved cases the Linux CI check must reject.
@@ -51,37 +57,37 @@ ${missingPeer ? 'console.log("libggml-base.so.0 => not found");\n' : ''}`,
   });
 }
 
-test('accepts a bundled Vulkan loader with the build SDK path cleared', (t) => {
+test('accepts a bundled Vulkan loader with the build SDK path cleared', posixOnly, (t) => {
   const result = fixture(t);
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /verified bundled loader/);
 });
 
-test('rejects the missing-loader archive even when the host has a loader', (t) => {
+test('rejects the missing-loader archive even when the host has a loader', posixOnly, (t) => {
   const result = fixture(t, { loader: false, hostLoader: true });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /libvulkan\.so\.1/);
 });
 
-test('rejects resolution to the host even when a bundled loader is present', (t) => {
+test('rejects resolution to the host even when a bundled loader is present', posixOnly, (t) => {
   const result = fixture(t, { hostLoader: true });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /resolves outside the bundle/);
 });
 
-test('rejects unresolved dependencies of the dynamically loaded Vulkan plugin', (t) => {
+test('rejects unresolved dependencies of the dynamically loaded Vulkan plugin', posixOnly, (t) => {
   const result = fixture(t, { missingPeer: true });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /unresolved dependencies/);
 });
 
-test('rejects a consumer in a sibling directory sharing the bundle prefix', (t) => {
+test('rejects a consumer in a sibling directory sharing the bundle prefix', posixOnly, (t) => {
   const result = fixture(t, { consumerLocation: 'sibling' });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Vulkan consumer is outside the bundle/);
 });
 
-test('rejects a consumer symlink escaping the bundle', (t) => {
+test('rejects a consumer symlink escaping the bundle', posixOnly, (t) => {
   const result = fixture(t, { consumerLocation: 'symlink' });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /Vulkan consumer is outside the bundle/);

@@ -2023,6 +2023,7 @@ export async function startProductService(
     pinnedProjects: () => (sharedProject ? [sharedProject.id] : []),
     holdsRefresh: async (projectId) =>
       indexingHold.holds(await store.getProject(projectId).catch(() => null)),
+    ...opts.workspaceWatch,
   });
 
   // Connectors: mail, calendar, and wiki natives plus the generic drivers,

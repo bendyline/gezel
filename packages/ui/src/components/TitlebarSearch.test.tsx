@@ -43,11 +43,15 @@ function optionTexts(): string[] {
 
 async function typeQuery(value: string) {
   const input = screen.getByTestId('titlebar-search-input');
-  fireEvent.change(input, { target: { value } });
-  // Flush the 150ms debounce + the resolved fetch.
-  await act(async () => {
-    await new Promise((r) => setTimeout(r, 200));
-  });
+  // Run the 150ms debounce on a fake clock; the resolved fetches settle as it
+  // runs, because an async advance yields to real tasks between timers.
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    fireEvent.change(input, { target: { value } });
+    await act(() => vi.advanceTimersByTimeAsync(200));
+  } finally {
+    vi.useRealTimers();
+  }
   return input;
 }
 
@@ -250,7 +254,6 @@ describe('TitlebarSearch', () => {
 
     await act(async () => {
       releaseQuick?.({ results: RESULTS, truncated: false });
-      await new Promise((r) => setTimeout(r, 50));
     });
     await waitFor(() => expect(screen.getByRole('listbox')).toBeTruthy());
   });
@@ -275,7 +278,6 @@ describe('TitlebarSearch', () => {
 
     await act(async () => {
       releaseFull?.({ results: RESULTS, truncated: false });
-      await new Promise((r) => setTimeout(r, 50));
     });
     await waitFor(() =>
       expect(optionTexts()).toEqual([

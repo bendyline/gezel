@@ -25,7 +25,8 @@ const packageThresholds = {
   'app-sdk': 50,
   'plugin-sdk': 33.3,
   'connectors-spectral': 25,
-  vscode: 57.1,
+  // 6 of 13 once type-only imports stopped counting (2026-11-23).
+  vscode: 40,
   'eval-viewer': 12.5,
 };
 
@@ -169,7 +170,12 @@ async function inspectPackage(name, minimumPercent) {
       if (sourceFile.replace(/\.[cm]?[jt]sx?$/, '') === testStem) covered.add(sourceFile);
     }
 
-    const source = await readFile(testFile, 'utf8');
+    // A type-only import runs nothing: `import type` credited vscode's
+    // chat-view.ts and log.ts as tested while coverage showed both at 0%.
+    const source = (await readFile(testFile, 'utf8')).replace(
+      /^\s*(?:import|export)\s+type\s[^;]*?from\s*(['"])[^'"]+\1;?/gms,
+      '',
+    );
     const imports = source.matchAll(/(?:from\s+|import\s*\()(['"])([^'"]+)\1/g);
     for (const match of imports) {
       const resolved = await resolveSourceImport(testFile, match[2]);

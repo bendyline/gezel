@@ -677,6 +677,91 @@ describe('McpBridge', () => {
     expect(readBack).toContain('This belongs to the project workspace.');
   });
 
+  /**
+   * `write_artifact` refuses a path a workspace file already holds, so a model
+   * does not mistake a side-drawer copy for an update to the project. A Gemma 4
+   * E4B owner wrote its report into the workspace by mistake and was then
+   * refused the drawer its task reads, three times, until the turn aborted with
+   * nothing delivered (review re-measurement, 2026-11-12). Here the session is
+   * bound to a task whose step checks the report in the drawer.
+   */
+  describe('write_artifact beside a workspace file at the same path', () => {
+    let deliverableProjectId: string;
+    let taskBridge: McpBridge;
+
+    beforeAll(async () => {
+      const { store, tasks } = svc.context;
+      deliverableProjectId = (await store.createProject({ name: 'research' })).id;
+      const task = await tasks.create(deliverableProjectId, {
+        title: 'Cited report',
+        description: 'Write the cited report.',
+        assignee: { kind: 'user' },
+        createdBy: { kind: 'user' },
+        steps: [
+          {
+            id: 'outcome',
+            name: 'Write the report',
+            prompt: 'Write tasks/eval/report.md in the artifacts drawer.',
+            terminal: true,
+            gate: {
+              checks: [
+                { kind: 'minBytes', file: 'tasks/eval/report.md', artifact: true, bytes: 10 },
+              ],
+            },
+          },
+        ],
+        entryStepId: 'outcome',
+      } as never);
+      await store.writeProjectWorkspaceFile(
+        deliverableProjectId,
+        'tasks/eval/report.md',
+        'written here by mistake',
+      );
+      await store.writeProjectWorkspaceFile(
+        deliverableProjectId,
+        'notes/plan.md',
+        'a project file',
+      );
+      taskBridge = new McpBridge();
+      await taskBridge.start({
+        command: 'node',
+        args: [mcpPath],
+        env: { ...bridgeEnv, GEZEL_PROJECT_ID: deliverableProjectId, GEZEL_TASK_REF: task.ref },
+      });
+    }, 30_000);
+
+    afterAll(async () => {
+      await taskBridge?.stop();
+    });
+
+    async function text(tool: string, args: Record<string, unknown>) {
+      const res = await taskBridge.callTool(tool, args);
+      return typeof res === 'string' ? res : JSON.stringify(res);
+    }
+
+    it('writes the deliverable the task reads from the drawer, and says the workspace copy stays', async () => {
+      const out = await text('write_artifact', {
+        path: 'tasks/eval/report.md',
+        content: '# Report\n\nThe answer, with its sources.\n',
+      });
+      expect(out).toContain('Wrote tasks/eval/report.md');
+      expect(out).toContain('The task reads tasks/eval/report.md from the artifacts drawer');
+      expect(out).not.toContain('Refusing write_artifact');
+      const { store } = svc.context;
+      expect(
+        await store.readProjectArtifact(deliverableProjectId, 'tasks/eval/report.md'),
+      ).toContain('The answer, with its sources.');
+      expect(
+        await store.readProjectWorkspaceFile(deliverableProjectId, 'tasks/eval/report.md'),
+      ).toBe('written here by mistake');
+    });
+
+    it('still refuses a side-drawer copy of a project file the task does not read', async () => {
+      const out = await text('write_artifact', { path: 'notes/plan.md', content: 'a copy' });
+      expect(out).toContain('Refusing write_artifact');
+    });
+  });
+
   it('does not cross pool authorization when workspace grep is registered but hidden', async () => {
     const restricted = new McpBridge();
     await restricted.start({

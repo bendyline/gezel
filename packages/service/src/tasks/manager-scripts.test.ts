@@ -8,9 +8,15 @@ import { ChatManager } from '../chat/manager.js';
 import { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { MockProvider } from '../providers/mock.js';
+import { denyNetBoundaryAvailable } from '../sandbox/runner.js';
 import { ScriptRunner } from '../scripts/runner.js';
 import { FileSecretStore } from '../secrets/file-store.js';
 import { TaskManager } from './manager.js';
+
+// Deny-net script runs need an OS network boundary: Seatbelt on macOS, a
+// systemd unit or the sandbox helper on Linux, the MXC container on Windows.
+// These suites ran only on macOS until 2026-11-23, so CI never executed them.
+const DENY_NET_BOUNDARY = await denyNetBoundaryAvailable();
 
 const noopMemory = {
   search: async () => [],
@@ -185,12 +191,10 @@ describe('TaskManager phase hooks — onEnter with autoAdvanceOnSuccess', () => 
     expect(notes.at(-1)?.text).toContain('corpus preparation failed');
   });
 
-  it.runIf(process.platform === 'darwin')(
-    'cascades through consecutive auto-advance phases',
-    async () => {
-      await writeScript(
-        'always-ok',
-        `
+  it.runIf(DENY_NET_BOUNDARY)('cascades through consecutive auto-advance phases', async () => {
+    await writeScript(
+      'always-ok',
+      `
         import { gezel, defineScript } from '@bendyline/gezel-sdk';
         export const meta = defineScript({
           name: 'always-ok',
@@ -199,36 +203,35 @@ describe('TaskManager phase hooks — onEnter with autoAdvanceOnSuccess', () => 
         });
         gezel.output({ ok: true });
       `,
-      );
+    );
 
-      const task = await tasks.create('default', {
-        title: 'Cascade',
-        description: 'three phases in a row that all auto-advance on success.',
-        assignee: { kind: 'user' },
-        steps: [
-          { name: 'A', assignee: { kind: 'user' } },
-          {
-            name: 'B',
-            assignee: { kind: 'user' },
-            onEnter: { name: 'always-ok', autoAdvanceOnSuccess: true },
-          },
-          {
-            name: 'C',
-            assignee: { kind: 'user' },
-            onEnter: { name: 'always-ok', autoAdvanceOnSuccess: true },
-          },
-          { name: 'D', assignee: { kind: 'user' } },
-        ],
-      });
+    const task = await tasks.create('default', {
+      title: 'Cascade',
+      description: 'three phases in a row that all auto-advance on success.',
+      assignee: { kind: 'user' },
+      steps: [
+        { name: 'A', assignee: { kind: 'user' } },
+        {
+          name: 'B',
+          assignee: { kind: 'user' },
+          onEnter: { name: 'always-ok', autoAdvanceOnSuccess: true },
+        },
+        {
+          name: 'C',
+          assignee: { kind: 'user' },
+          onEnter: { name: 'always-ok', autoAdvanceOnSuccess: true },
+        },
+        { name: 'D', assignee: { kind: 'user' } },
+      ],
+    });
 
-      // Completing A should run B's onEnter (ok) → advance to C → run
-      // C's onEnter (ok) → advance to D. D has no onEnter so it sticks.
-      const result = await tasks.completeStep('default', task.num, task.craftbook.steps[0]!.id);
-      expect(result.activeStepId).toBe(task.craftbook.steps[3]!.id);
-    },
-  );
+    // Completing A should run B's onEnter (ok) → advance to C → run
+    // C's onEnter (ok) → advance to D. D has no onEnter so it sticks.
+    const result = await tasks.completeStep('default', task.num, task.craftbook.steps[0]!.id);
+    expect(result.activeStepId).toBe(task.craftbook.steps[3]!.id);
+  });
 
-  it.runIf(process.platform === 'darwin')(
+  it.runIf(DENY_NET_BOUNDARY)(
     'honors autoAdvanceWhen predicates over the raw success flag',
     async () => {
       await writeScript(
@@ -287,7 +290,7 @@ describe('TaskManager phase hooks — onEnter with autoAdvanceOnSuccess', () => 
     },
   );
 
-  it.runIf(process.platform === 'darwin')('advances after a successful onExit script', async () => {
+  it.runIf(DENY_NET_BOUNDARY)('advances after a successful onExit script', async () => {
     await writeScript(
       'write-note',
       `

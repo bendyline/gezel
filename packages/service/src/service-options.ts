@@ -144,6 +144,16 @@ export interface StartServiceOptions {
   officeDir?: string;
   /** Test seam: the Night Shift's clock, so a test can run a whole night. Production passes none. */
   nightShiftNow?: () => Date;
+  /**
+   * Test seam for the workspace watcher: the wait before it first attaches
+   * (5 s), how long a burst of changes settles before a refresh (2 s), and a
+   * hook told each project it starts watching. Production passes none.
+   */
+  workspaceWatch?: {
+    startupDelayMs?: number;
+    debounceMs?: number;
+    onWatching?: (projectId: string) => void;
+  };
 }
 
 /**

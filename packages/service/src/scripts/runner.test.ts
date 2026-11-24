@@ -13,6 +13,11 @@ import { denyNetBoundaryAvailable } from '../sandbox/runner.js';
 import { FileSecretStore } from '../secrets/file-store.js';
 import { ScriptRunner, extractScriptFailureFromStderr } from './runner.js';
 
+// Deny-net script runs need an OS network boundary: Seatbelt on macOS, a
+// systemd unit or the sandbox helper on Linux, the MXC container on Windows.
+// These suites ran only on macOS until 2026-11-23, so CI never executed them.
+const DENY_NET_BOUNDARY = await denyNetBoundaryAvailable();
+
 const noopMemory = {
   search: async () => [],
   searchAll: async () => [],
@@ -88,10 +93,9 @@ describe('extractScriptFailureFromStderr', () => {
   });
 });
 
-it.runIf(process.platform !== 'darwin')(
+it.runIf(!DENY_NET_BOUNDARY)(
   'fails closed with an actionable error when denyNet has no OS boundary',
   async () => {
-    if (await denyNetBoundaryAvailable()) return;
     await writeScript(
       'no-boundary',
       `
@@ -147,10 +151,9 @@ describe('ScriptRunner — provenance-trusted sandbox lane', () => {
     );
   }, 60_000);
 
-  it.runIf(process.platform !== 'darwin')(
+  it.runIf(!DENY_NET_BOUNDARY)(
     'a tampered copy of the shipped script fails closed again',
     async () => {
-      if (await denyNetBoundaryAvailable()) return;
       const catalog = new CatalogService();
       const trustedRunner = new ScriptRunner({ store, chat: manager, catalog });
       await installShippedScript(catalog, true);
@@ -166,10 +169,9 @@ describe('ScriptRunner — provenance-trusted sandbox lane', () => {
     30_000,
   );
 
-  it.runIf(process.platform !== 'darwin')(
+  it.runIf(!DENY_NET_BOUNDARY)(
     'without a catalog the same bytes stay fail-closed',
     async () => {
-      if (await denyNetBoundaryAvailable()) return;
       const catalog = new CatalogService();
       await installShippedScript(catalog);
       const run = await runner.run({
@@ -185,10 +187,9 @@ describe('ScriptRunner — provenance-trusted sandbox lane', () => {
   );
 });
 
-// Successful denyNet execution is currently supported only by macOS
-// Seatbelt. Do not weaken production confinement merely to exercise these
-// end-to-end semantics on Windows/Linux.
-describe.runIf(process.platform === 'darwin')('ScriptRunner — end-to-end', () => {
+// Runs wherever the host has a deny-net boundary (see DENY_NET_BOUNDARY). Do
+// not weaken production confinement merely to make these run somewhere.
+describe.runIf(DENY_NET_BOUNDARY)('ScriptRunner — end-to-end', () => {
   it('runs a trivial script and stamps its output', async () => {
     await writeScript(
       'noop',
@@ -382,7 +383,7 @@ describe('ScriptRunner — inline sources', () => {
     gezel.output({ ok: true });
   `;
 
-  it.runIf(process.platform === 'darwin')(
+  it.runIf(DENY_NET_BOUNDARY)(
     'executes an inline source without any on-disk script file',
     async () => {
       const run = await runner.run({
@@ -416,7 +417,7 @@ describe('ScriptRunner — inline sources', () => {
 // through the late-bound index access (the same setIndexAccess seam
 // service.ts wires), and lands the readiness report in the artifacts drawer
 // where the consuming craftbook step reads it.
-describe.runIf(process.platform === 'darwin')('stdlib ensureIndexFresh — end-to-end', () => {
+describe.runIf(DENY_NET_BOUNDARY)('stdlib ensureIndexFresh — end-to-end', () => {
   it('publishes the readiness report artifact through the sandbox', async () => {
     const report = {
       version: 1,

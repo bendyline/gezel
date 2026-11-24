@@ -7,6 +7,7 @@ import {
   type CraftbookSummary,
   type ProjectCraftbookProvenance,
   ProjectCraftbookProvenanceSchema,
+  findPathRuleViolation,
   newestVersionFirst,
   nowIso,
 } from '@bendyline/gezel';
@@ -20,11 +21,44 @@ import {
   projectLocalCraftbookDir,
   projectLocalCraftbooksRoot,
 } from '@bendyline/gezel/paths';
+import { HttpStatusError } from '@bendyline/gezel/runtime';
 import { WorkspaceWriteDeniedError, type WorkspaceWriteDeniedReason } from '../workspace/errors.js';
 import {
   readProjectCraftbookDocument,
   updateProjectCraftbookDocument,
 } from './project-craftbook-document.js';
+
+/**
+ * Whether a craftbook id or version can be used as ONE folder name. Both reach
+ * the disk from a URL or a request body, and neither was checked: a client
+ * sends the id through `encodeURIComponent`, so `../..` arrived as one URL
+ * segment and decoded back for the handler, and `DELETE /api/craftbooks/:id`
+ * removed the folder holding the home (craftbook-containment.test.ts).
+ */
+export function isCraftbookPathSegment(value: string): boolean {
+  if (typeof value !== 'string' || value.includes('/') || value.includes('\\')) return false;
+  return (
+    findPathRuleViolation(value, {
+      separators: 'slash',
+      forbidColon: true,
+      forbidControlChars: true,
+      maxSegmentBytes: 200,
+    }) === null
+  );
+}
+
+/** Refuse, as a 422, an id or version that is not one folder name. */
+export function assertCraftbookPathSegment(
+  value: string,
+  what: 'craftbook id' | 'craftbook version',
+): void {
+  if (!isCraftbookPathSegment(value)) {
+    throw new HttpStatusError(
+      `${what} ${JSON.stringify(value)} is not allowed: use a single name without slashes, colons or "..".`,
+      422,
+    );
+  }
+}
 
 export interface CraftbookStoreOptions {
   home: string;
@@ -245,6 +279,7 @@ export class CraftbookStore {
    * templates have a single `1.0.0` version edited in place).
    */
   async getLocalCraftbookTemplate(id: string, version?: string): Promise<Craftbook | null> {
+    if (!isCraftbookPathSegment(id)) return null;
     const prefix = craftbookShardPrefix(id);
     const identityFile = craftbookTemplateManifestFile(this.home, prefix, id);
     let identity: { id?: string; name?: string; description?: string } = {};
@@ -317,8 +352,10 @@ export class CraftbookStore {
    * overwrite that version rather than minting a new one.
    */
   async writeLocalCraftbookTemplate(book: Craftbook): Promise<void> {
-    const prefix = craftbookShardPrefix(book.id);
     const version = book.version ?? '1.0.0';
+    assertCraftbookPathSegment(book.id, 'craftbook id');
+    assertCraftbookPathSegment(version, 'craftbook version');
+    const prefix = craftbookShardPrefix(book.id);
     const identityFile = craftbookTemplateManifestFile(this.home, prefix, book.id);
     const versionDir = craftbookTemplateVersionDir(this.home, prefix, book.id, version);
     const versionFile = craftbookTemplateVersionManifestFile(this.home, prefix, book.id, version);
@@ -358,6 +395,7 @@ export class CraftbookStore {
    * references it — the Store doesn't cross-check that itself.
    */
   async deleteLocalCraftbookTemplate(id: string): Promise<void> {
+    assertCraftbookPathSegment(id, 'craftbook id');
     const prefix = craftbookShardPrefix(id);
     const dir = craftbookTemplateDir(this.home, prefix, id);
     try {
@@ -414,6 +452,7 @@ export class CraftbookStore {
     version?: string,
     options: { throwOnInvalid?: boolean } = {},
   ): Promise<Craftbook | null> {
+    if (!isCraftbookPathSegment(id)) return null;
     let ws: string;
     try {
       ws = await this.projectWorkspaceDir(projectId);
@@ -487,13 +526,15 @@ export class CraftbookStore {
     book: Craftbook,
     opts?: { userInitiated?: boolean },
   ): Promise<void> {
+    const version = book.version ?? '1.0.0';
+    assertCraftbookPathSegment(book.id, 'craftbook id');
+    assertCraftbookPathSegment(version, 'craftbook version');
     const gate = await this.assertWorkspaceWritable(
       projectId,
       opts?.userInitiated ? { userInitiated: true } : undefined,
     );
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
     const dir = projectLocalCraftbookDir(gate.workspaceDir, book.id);
-    const version = book.version ?? '1.0.0';
     const versionDir = join(dir, 'versions', version);
     await mkdir(versionDir, { recursive: true });
     if (await updateProjectCraftbookDocument(versionDir, book)) return;
@@ -531,6 +572,7 @@ export class CraftbookStore {
 
   /** Remove a project-local craftbook from the workspace. */
   async deleteProjectCraftbook(projectId: string, id: string): Promise<void> {
+    assertCraftbookPathSegment(id, 'craftbook id');
     const gate = await this.assertWorkspaceWritable(projectId);
     if (!gate.ok) throw new WorkspaceWriteDeniedError(gate);
     const dir = projectLocalCraftbookDir(gate.workspaceDir, id);
@@ -550,6 +592,7 @@ export class CraftbookStore {
     projectId: string,
     id: string,
   ): Promise<ProjectCraftbookProvenance | null> {
+    if (!isCraftbookPathSegment(id)) return null;
     let ws: string;
     try {
       ws = await this.projectWorkspaceDir(projectId);
@@ -571,6 +614,7 @@ export class CraftbookStore {
     prov: ProjectCraftbookProvenance,
     opts?: { userInitiated?: boolean },
   ): Promise<void> {
+    assertCraftbookPathSegment(id, 'craftbook id');
     const gate = await this.assertWorkspaceWritable(
       projectId,
       opts?.userInitiated ? { userInitiated: true } : undefined,

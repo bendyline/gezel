@@ -39,6 +39,8 @@ export const GRANDFATHERED = new Map([
   ['packages/core/src/local-loop/local-tool-call-salvage.ts', 3_585],
   ['packages/service/src/index-store/index-store.ts', 3_473],
   ['packages/app/src/main.ts', 3_188],
+  // Crossed the threshold with kept-local enforcement (2026-11-24).
+  ['packages/service/src/http/routes/projects.ts', 3_066],
   ['packages/service/src/tasks/manager.test.ts', 3_015],
 ]);
 

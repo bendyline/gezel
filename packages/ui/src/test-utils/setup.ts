@@ -3,7 +3,10 @@ import { cleanup, configure } from '@testing-library/react';
 import { afterEach } from 'vitest';
 import { resetChatThreadMemory } from '../components/chat-thread-memory.js';
 import { resetComposerDrafts } from '../components/composer-drafts.js';
-import { resetReads } from '../data/api-reads.js';
+// Not `resetReads` from data/api-reads.ts: that module imports nav-timing.ts,
+// which pulls in core's whole main entry for its logger, and loading it here
+// cost every test file ~0.3 s whether or not it touched the cache.
+import { queryClient } from '../data/query-client.js';
 
 // View tests routinely wait on a chain of effects (load projects -> pick a
 // default -> load that project's scripts), each of which needs its own render
@@ -25,8 +28,9 @@ afterEach(() => {
   resetComposerDrafts();
   resetChatThreadMemory();
   // Server answers are module-level too: one test's mocked config would
-  // otherwise paint the next test's first frame.
-  resetReads();
+  // otherwise paint the next test's first frame. Same reset as `resetReads()`.
+  queryClient.cancelQueries().catch(() => {});
+  queryClient.clear();
 });
 
 // jsdom implements getClientRects/getBoundingClientRect on Element but not on

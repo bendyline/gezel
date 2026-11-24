@@ -10,9 +10,15 @@ import { Store } from '../fs/store.js';
 import { HistoryManager } from '../history/manager.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { MockProvider } from '../providers/mock.js';
+import { denyNetBoundaryAvailable } from '../sandbox/runner.js';
 import { ScriptRunner } from '../scripts/runner.js';
 import { FileSecretStore } from '../secrets/file-store.js';
 import { GateRejectionError, TaskManager } from './manager.js';
+
+// Deny-net script runs need an OS network boundary: Seatbelt on macOS, a
+// systemd unit or the sandbox helper on Linux, the MXC container on Windows.
+// These suites ran only on macOS until 2026-11-23, so CI never executed them.
+const DENY_NET_BOUNDARY = await denyNetBoundaryAvailable();
 
 const noopMemory = {
   search: async () => [],
@@ -622,7 +628,7 @@ describe('completion gates — script verdicts', () => {
     expect(notes.some((n) => n.text.includes('node: bad option: --permission'))).toBe(true);
   });
 
-  it.runIf(process.platform === 'darwin')(
+  it.runIf(DENY_NET_BOUNDARY)(
     'a gate script reject holds with the script message; approve advances with handoff',
     async () => {
       await writeScript(
@@ -686,7 +692,7 @@ describe('completion gates — script verdicts', () => {
     60_000,
   );
 
-  it.runIf(process.platform === 'darwin')(
+  it.runIf(DENY_NET_BOUNDARY)(
     'onExit runs only after an approved completion (finally semantics)',
     async () => {
       await writeScript(
@@ -861,7 +867,7 @@ describe('completion gates — inline craftbook scripts', () => {
     );
   `;
 
-  it.runIf(process.platform === 'darwin')(
+  it.runIf(DENY_NET_BOUNDARY)(
     'a scope:craftbook gate script runs from the task snapshot with no installed copy',
     async () => {
       // No project-installed script exists — resolution must come from the
@@ -1026,7 +1032,7 @@ describe('gate hardening — code-class deliverables', () => {
     expect(advanced.status).toBe('advanced');
   });
 
-  it.runIf(process.platform === 'darwin')(
+  it.runIf(DENY_NET_BOUNDARY)(
     'execute:true runs the deliverable in the sandbox — failing asserts hold, passing exits advance',
     async () => {
       const task = await tasks.create('default', {

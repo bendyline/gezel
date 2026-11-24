@@ -18,7 +18,6 @@
     "packages/ui/src/components/LlamaCppModelManager.tsx": 1,
     "packages/ui/src/components/lookouts/ProjectLookoutsSection.tsx": 1,
     "packages/ui/src/components/ModelPicker.tsx": 1,
-    "packages/ui/src/components/NeedsInputPanel.tsx": 1,
     "packages/ui/src/components/OllamaModelManager.tsx": 1,
     "packages/ui/src/components/PageChat.tsx": 2,
     "packages/ui/src/components/PendingQuestionCard.tsx": 2,
@@ -118,7 +117,6 @@
     "packages/ui/src/components/HealthStrip.tsx": 2,
     "packages/ui/src/components/lookouts/LookoutAlertToast.tsx": 1,
     "packages/ui/src/components/lookouts/ProjectLookoutsSection.tsx": 1,
-    "packages/ui/src/components/NeedsInputPanel.tsx": 1,
     "packages/ui/src/components/SessionSwitcher.tsx": 1
   },
   "loading-text": {

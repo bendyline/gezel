@@ -7,7 +7,23 @@ import {
   type DownloadResult,
   downloadWithRetry,
 } from '@bendyline/gezel-inference/internal/utils/download-with-retry';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// Retries wait out the real 1-8 s backoff schedule, which cost ~13 s of CI
+// sleep here. Nothing below asserts how long a retry waited, only which
+// attempts ran and what reached the disk, so each wait is cut to a bare timer
+// turn and keeps its abort answer.
+vi.mock('@bendyline/gezel-inference/internal/utils/download-common', async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import('@bendyline/gezel-inference/internal/utils/download-common')
+    >();
+  return {
+    ...actual,
+    sleepRespectingAbort: (_ms: number, signal: AbortSignal | undefined) =>
+      actual.sleepRespectingAbort(0, signal),
+  };
+});
 
 function sha256(buf: Buffer): string {
   return createHash('sha256').update(buf).digest('hex');

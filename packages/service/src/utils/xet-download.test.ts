@@ -7,7 +7,25 @@ import {
   downloadWithRetry,
 } from '@bendyline/gezel-inference/internal/utils/download-with-retry';
 import { downloadXet } from '@bendyline/gezel-inference/internal/utils/xet-download';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// Both the whole-file retry and the in-place segment retry wait out real
+// backoff schedules (1-8 s and 0.4-2.5 s), which cost ~11 s of CI sleep here.
+// Nothing below asserts how long a retry waited, only which requests ran and
+// what reached the disk, so each wait is cut to `backoff.capMs` (a bare timer
+// turn by default) and keeps its abort answer.
+const backoff = vi.hoisted(() => ({ capMs: 0 }));
+vi.mock('@bendyline/gezel-inference/internal/utils/download-common', async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import('@bendyline/gezel-inference/internal/utils/download-common')
+    >();
+  return {
+    ...actual,
+    sleepRespectingAbort: (ms: number, signal: AbortSignal | undefined) =>
+      actual.sleepRespectingAbort(Math.min(ms, backoff.capMs), signal),
+  };
+});
 
 // A scheme-0 (uncompressed) Xet chunk: 8-byte header + raw payload.
 function noneChunk(payload: Buffer): Buffer {
@@ -354,7 +372,8 @@ describe('downloadWithRetry — Xet path', () => {
         url: RESOLVE,
         destPath,
         approxSizeBytes: 12_000,
-        fetchImpl: segmentedXetFetch({ parts, requested: [], slowAt: 0, slowMs: 1_300 }),
+        // Long enough for one 500 ms progress tick to land before term 0 does.
+        fetchImpl: segmentedXetFetch({ parts, requested: [], slowAt: 0, slowMs: 800 }),
       }),
     );
 
@@ -661,6 +680,10 @@ describe('downloadXet — a bad connection', () => {
   it('keeps what an attempt received, and never moves progress back, when the file is retried', async () => {
     const requests: RangedRequest[] = [];
     const destPath = join(dir, 'retried-whole.bin');
+    // The reading before the retry comes from the 500 ms progress tick while
+    // the writer waits on term 1, so its three segment retries together must
+    // outlast one tick.
+    backoff.capMs = 300;
     // Term 1 gets half-way, then the host fails it three times in a row: the
     // segment gives up and the whole-file attempt is retried.
     const { events, result } = await run(
@@ -676,7 +699,9 @@ describe('downloadXet — a bad connection', () => {
           },
         }),
       }),
-    );
+    ).finally(() => {
+      backoff.capMs = 0;
+    });
 
     expect(result.kind).toBe('ok');
     expect(sameBytes(`${destPath}.partial`, full)).toBe(true);

@@ -18,11 +18,23 @@ let baseUrl: string;
 let token: string;
 let httpFetch: typeof fetch;
 let home: string;
+/** Projects the workspace watcher reports it has attached to. */
+const watchedProjects = new Set<string>();
 
 beforeAll(async () => {
   process.env.GEZEL_MOCK_PROVIDER = '1';
   home = await mkdtemp(join(tmpdir(), 'gezel-library-e2e-'));
-  svc = await startService({ home });
+  svc = await startService({
+    home,
+    // Production attaches watchers 5 s after boot and refreshes 2 s after a
+    // change. Neither wait is under test here, and together they were ten
+    // seconds of every run.
+    workspaceWatch: {
+      startupDelayMs: 0,
+      debounceMs: 50,
+      onWatching: (projectId) => watchedProjects.add(projectId),
+    },
+  });
   const scheme = svc.cert ? 'https' : 'http';
   baseUrl = `${scheme}://127.0.0.1:${svc.port}`;
   token = svc.context.token;
@@ -85,7 +97,11 @@ describe('shared document library, end to end', () => {
     // The watcher attaches on a startup-delayed reconcile, so wait for it
     // rather than racing it — a file written before any watcher exists is
     // the poll's job, on a cadence no test should sit through.
-    await new Promise((r) => setTimeout(r, 8_000));
+    const libraryId = await svc.context.store.sharedProjectId();
+    const deadline = Date.now() + 15_000;
+    while (libraryId && !watchedProjects.has(libraryId) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
 
     // What a cloud-sync client does when another device adds a document:
     // it writes the file directly, with no API call to tell us.

@@ -27,7 +27,6 @@ vi.mock('./components/GrantConsentDialog.js', () => ({ GrantConsentDialog: () =>
 vi.mock('./components/ModelBundleControls.js', () => ({
   ModelBundleImportController: () => null,
 }));
-vi.mock('./components/NeedsInputPanel.js', () => ({ NeedsInputPanel: () => null }));
 vi.mock('./components/Sidebar.js', () => ({
   Sidebar: ({
     activeProjectIds,
