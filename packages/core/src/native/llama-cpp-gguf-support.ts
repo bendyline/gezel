@@ -238,3 +238,29 @@ export const LLAMA_CPP_REMOVED_TENSOR_TYPES: Readonly<Record<number, string>> = 
   37: 'IQ4_NL_4_8',
   38: 'IQ4_NL_8_8',
 };
+
+export interface LlamaCppUnloadableRevision {
+  /** The `general.architecture` the file declares, one the engine lists. */
+  architecture: string;
+  /** The metadata key only the newer revision carries. */
+  key: string;
+  /** What people call the newer revision. */
+  model: string;
+  /** Where its support is landing upstream. */
+  upstream: string;
+}
+
+/**
+ * Newer revisions of a listed design that the pinned engine's loader can't
+ * read yet: the file passes the design check but fails at load. Each drops
+ * out on the native bump whose loader reads its key (LLAMA_REVISIONS in
+ * scripts/sync-engine-model-support.mjs).
+ */
+export const LLAMA_CPP_UNLOADABLE_REVISIONS: readonly LlamaCppUnloadableRevision[] = [
+  {
+    architecture: 'kolibri1',
+    key: 'kolibri1.attention.indexer.top_k',
+    model: 'Kolibri 1.1',
+    upstream: 'https://github.com/ggml-org/llama.cpp/pull/32891',
+  },
+];

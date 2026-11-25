@@ -61,7 +61,11 @@ import {
 } from './devices.js';
 import { type PlannerOffloadDecision, buildLlamaCppEngineArgs } from './engine-flags.js';
 import { readGgufSummaryAsync } from './gguf-metadata-async.js';
-import { type GgufSummary, effectiveLazyTensorBytes } from './gguf-metadata.js';
+import {
+  type GgufSummary,
+  effectiveLazyTensorBytes,
+  ggufRequiresUnifiedKv,
+} from './gguf-metadata.js';
 import { GpuStartupWatch } from './gpu-startup-watch.js';
 import {
   type LlamaCppKvCacheType,
@@ -964,6 +968,8 @@ export async function buildLlamaCppProvider(opts: {
   // Whether the model's GGUF ships MTP (`nextn`) layers — a safety
   // cross-check for an explicit draft-mtp request.
   let ggufHasMtp = false;
+  // Whether the model's attention needs one unified KV cache across slots.
+  let ggufNeedsUnifiedKv = false;
   let mtpLayerCount = 0;
   let llamaGpuDevice: import('./devices.js').LlamaDevice | null = null;
   let nvidiaRuntimeDevice: import('./devices.js').NvidiaRuntimeDevice | undefined;
@@ -987,6 +993,7 @@ export async function buildLlamaCppProvider(opts: {
       offloadBlockCount = summary.blockCount;
       mtpLayerCount = summary.nextnPredictLayers ?? 0;
       ggufHasMtp = mtpLayerCount > 0;
+      ggufNeedsUnifiedKv = ggufRequiresUnifiedKv(summary);
       // Only a companion this launch loads can supply the head: one left out
       // for memory would turn MTP on with nothing to run it.
       if (!ggufHasMtp && drafterInUse) {
@@ -1793,6 +1800,7 @@ export async function buildLlamaCppProvider(opts: {
         kvCacheType,
         slots,
         ggufHasMtp,
+        ggufRequiresUnifiedKv: ggufNeedsUnifiedKv,
         installedDraftModelPath: drafterInUse,
         // Opt-in A/B lever: `GEZEL_LLAMA_REASONING_FORMAT=none`
         // disables llama-server's chat-template output parsing so mangled

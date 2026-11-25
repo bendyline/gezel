@@ -286,6 +286,19 @@ describe('buildLlamaCppEngineArgs — precedence (global > perModel > planner)',
   });
 });
 
+describe('buildLlamaCppEngineArgs — unified KV cache', () => {
+  it('unifies the cache for a model that needs it once there are several slots', () => {
+    const args = buildLlamaCppEngineArgs({ config: {}, slots: 2, ggufRequiresUnifiedKv: true });
+    expect(has(args, '--kv-unified')).toBe(true);
+  });
+
+  it('leaves the cache alone for one slot or for any other model', () => {
+    const one = buildLlamaCppEngineArgs({ config: {}, slots: 1, ggufRequiresUnifiedKv: true });
+    expect(has(one, '--kv-unified')).toBe(false);
+    expect(has(buildLlamaCppEngineArgs({ config: {}, slots: 4 }), '--kv-unified')).toBe(false);
+  });
+});
+
 describe('buildLlamaCppEngineArgs — speculative decoding', () => {
   it('keeps upstream greedy sampling by default for automatic MTP', () => {
     const args = buildLlamaCppEngineArgs({ config: {}, ggufHasMtp: true });

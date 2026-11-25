@@ -80,7 +80,7 @@ Any `fail` blocks the model.
 | Readable file / model | the GGUF header or MLX config does not parse | |
 | Chat model (GGUF) | a LoRA adapter, a vision projector, an embedding model, or no tokenizer | |
 | No code inside (MLX) | a config names code to run (`auto_map`, `model_file`) | |
-| Engine support | the design is not in the pinned engine's list | |
+| Engine support | the design is not in the pinned engine's list, or the file is a newer revision of a listed design that the pinned loader can't read yet | |
 | Number formats (GGUF) | a tensor type llama.cpp removed, or one newer than the pin | the backend runs it badly (NVFP4 on Metal) |
 | Conversation format | no chat template | |
 | Tool use | | the template never renders tools |
@@ -92,7 +92,11 @@ The engine tables come from the pinned upstream source.
 `node scripts/sync-engine-model-support.mjs` regenerates both:
 
 - [llama-cpp-gguf-support.ts](../packages/core/src/native/llama-cpp-gguf-support.ts),
-  from llama.cpp's `LLM_ARCH_NAMES` and `enum ggml_type`;
+  from llama.cpp's `LLM_ARCH_NAMES` and `enum ggml_type`. Its unloadable
+  revisions come from `LLAMA_REVISIONS` in the script: a revision that keeps
+  its design's name (Kolibri 1.1 declares `kolibri1`) is marked by a metadata
+  key, and stays listed only while the pinned loader for that design never
+  reads the key, so the native bump that brings support drops it;
 - [mlx-model-support.ts](../packages/core/src/native/mlx-model-support.ts),
   from mlx-vlm's model packages and `MODEL_REMAPPING`. Gezel's MLX sidecar
   loads every model through mlx-vlm.

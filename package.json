@@ -74,7 +74,7 @@
     "check:packages": "node --test scripts/npm-consumer-audit.test.mjs scripts/npm-consumer-install.test.mjs scripts/npm-consumer-cache.test.mjs && node scripts/check-package-consumers.mjs",
     "check:npm-release-candidate": "pnpm build && pnpm check:npm-release-candidate:unbuilt",
     "check:npm-release-candidate:unbuilt": "node scripts/rehearse-npm-release.mjs",
-    "test:scripts": "node --test scripts/run-test-lane.test.mjs scripts/guard-pnpm-install.test.mjs scripts/import-scorecard-campaigns.test.mjs scripts/windows-dependency-locks.test.mjs scripts/rocm-lgpl-sources.test.mjs scripts/smoke-native-help.test.mjs scripts/trim-rocm-kpack.test.mjs scripts/verify-rocm-payload.test.mjs scripts/verify-vulkan-payload.test.mjs",
+    "test:scripts": "node --test scripts/run-test-lane.test.mjs scripts/sync-engine-model-support.test.mjs scripts/guard-pnpm-install.test.mjs scripts/import-scorecard-campaigns.test.mjs scripts/windows-dependency-locks.test.mjs scripts/rocm-lgpl-sources.test.mjs scripts/smoke-native-help.test.mjs scripts/trim-rocm-kpack.test.mjs scripts/verify-rocm-payload.test.mjs scripts/verify-vulkan-payload.test.mjs",
     "check:release-toolchain": "node --test scripts/npm-consumer-audit.test.mjs scripts/verify-published-npm-release.test.mjs scripts/assert-arm64-baseline.test.mjs scripts/check-npm-bootstrap.test.mjs scripts/rehearse-npm-release.test.mjs scripts/npm-consumer-install.test.mjs scripts/npm-consumer-cache.test.mjs scripts/stage-capacitor-native.test.mjs scripts/compare-npm-release-content.test.mjs && node scripts/check-release-toolchain.mjs",
     "check:workspace-deps": "node scripts/check-workspace-dependencies.mjs",
     "scorecard:barrel": "node scripts/gen-scorecard-barrel.mjs",

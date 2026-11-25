@@ -114,6 +114,13 @@ export interface EngineFlagInput {
    */
   ggufHasMtp?: boolean | undefined;
   /**
+   * Whether the model's GGUF needs one unified KV cache across slots
+   * (`ggufRequiresUnifiedKv`). llama-server refuses to load such a model
+   * with several partitioned slots, so `--kv-unified` is emitted whenever
+   * `slots` is above 1. `--kv-unified-per-slot` still caps each slot.
+   */
+  ggufRequiresUnifiedKv?: boolean | undefined;
+  /**
    * Absolute path to a catalog-installed speculative draft sidecar.
    * Separate MTP assistants (Gemma) and other draft algorithms need this;
    * combined MTP GGUFs (Qwen) leave it unset, even with a DFlash drafter on
@@ -248,6 +255,7 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
     kvCacheType,
     slots,
     ggufHasMtp,
+    ggufRequiresUnifiedKv,
     installedDraftModelPath,
     reasoningFormat,
     reasoningPreserve,
@@ -344,6 +352,12 @@ export function buildLlamaCppEngineArgs(input: EngineFlagInput): string[] {
   const explicitCacheReuse = config.llamaCppCacheReuse ?? perModel?.cacheReuse;
   const cacheReuse = explicitCacheReuse ?? DEFAULT_CACHE_REUSE;
   if (cacheReuse > 0) args.push('--cache-reuse', String(cacheReuse));
+
+  // ── Unified KV cache (`--kv-unified`) ─────────────────────────────
+  // A model whose attention reads one stream of cells (Kolibri 1.1's sparse
+  // layers) fails to load with several partitioned slots. One slot is a
+  // single stream already, so the flag only goes on when there are more.
+  if (ggufRequiresUnifiedKv && (slots ?? 1) > 1) args.push('--kv-unified');
 
   // ── SWA full cache (`--swa-full`) ─────────────────────────────────
   // Opt-in only: an explicit config/manifest `swaFull`. Gemma used to get

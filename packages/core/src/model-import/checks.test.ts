@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { LLAMA_CPP_UNLOADABLE_REVISIONS } from '../native/llama-cpp-gguf-support.js';
 import { type ModelImportEvidence, buildModelImportChecks, modelImportBlocked } from './checks.js';
 import type { GgufHeaderFacts } from './gguf-header.js';
 
@@ -87,6 +88,29 @@ describe('buildModelImportChecks', () => {
     expect(arch?.status).toBe('fail');
     expect(arch?.detail).toContain('not-a-real-design');
   });
+
+  // Uses the generated table, which empties as native bumps bring support.
+  it.skipIf(LLAMA_CPP_UNLOADABLE_REVISIONS.length === 0)(
+    'blocks a newer revision of a listed design the engine cannot load yet',
+    () => {
+      const revision = LLAMA_CPP_UNLOADABLE_REVISIONS[0]!;
+      const newer = header({
+        architecture: revision.architecture,
+        metadataKeys: [`${revision.architecture}.block_count`, revision.key],
+      });
+      const arch = buildModelImportChecks(evidence({ header: newer })).find(
+        (item) => item.id === 'architecture',
+      );
+      expect(arch?.status).toBe('fail');
+      expect(arch?.detail).toContain(revision.model);
+
+      const original = header({
+        architecture: revision.architecture,
+        metadataKeys: [`${revision.architecture}.block_count`],
+      });
+      expect(statusOf(evidence({ header: original }), 'architecture')).toBe('pass');
+    },
+  );
 
   it('blocks removed and unknown tensor formats', () => {
     expect(

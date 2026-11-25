@@ -5,6 +5,7 @@ import {
   LLAMA_CPP_LAZY_AUTO_MIN_BYTES,
   effectiveLazyTensorBytes,
   ggufQuantizationTag,
+  ggufRequiresUnifiedKv,
   readGgufSummary,
 } from '@bendyline/gezel-inference/internal/providers/llama-cpp/gguf-metadata';
 import { readGgufSummaryAsync } from '@bendyline/gezel-inference/internal/providers/llama-cpp/gguf-metadata-async';
@@ -471,6 +472,44 @@ describe('readGgufSummary', () => {
     expect(s.slidingWindowPattern).toBeUndefined();
     expect(s.headCountKvPerLayer).toBeUndefined();
     expect(s.keyLength).toBe(128);
+  });
+
+  it('lists every metadata key in file order only when asked', () => {
+    const blob = new GgufBuilder()
+      .header(3, 0n)
+      .metaString('general.architecture', 'kolibri1')
+      .metaU32('kolibri1.block_count', 50)
+      .metaStringArray('tokenizer.ggml.tokens', ['a', 'b'])
+      .metaU32('kolibri1.attention.indexer.top_k', 2048)
+      .finish();
+    const path = join(dir, 'keys.gguf');
+    writeFileSync(path, blob);
+
+    expect(readGgufSummary(path).metadataKeys).toBeUndefined();
+    expect(readGgufSummary(path, { includeMetadataKeys: true }).metadataKeys).toEqual([
+      'general.architecture',
+      'kolibri1.block_count',
+      'tokenizer.ggml.tokens',
+      'kolibri1.attention.indexer.top_k',
+    ]);
+  });
+
+  it('needs a unified KV cache only for kolibri1 with sparse attention', () => {
+    const write = (name: string, arch: string, indexer: boolean) => {
+      const builder = new GgufBuilder()
+        .header(3, 0n)
+        .metaString('general.architecture', arch)
+        .metaU32(`${arch}.block_count`, 50);
+      if (indexer) builder.metaU32(`${arch}.attention.indexer.top_k`, 2048);
+      const path = join(dir, name);
+      writeFileSync(path, builder.finish());
+      return readGgufSummary(path);
+    };
+    const kolibri11 = write('kolibri11.gguf', 'kolibri1', true);
+    expect(kolibri11.indexerTopK).toBe(2048);
+    expect(ggufRequiresUnifiedKv(kolibri11)).toBe(true);
+    expect(ggufRequiresUnifiedKv(write('kolibri1.gguf', 'kolibri1', false))).toBe(false);
+    expect(ggufRequiresUnifiedKv(write('other.gguf', 'glm-dsa', true))).toBe(false);
   });
 });
 

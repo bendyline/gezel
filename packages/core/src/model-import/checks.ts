@@ -19,6 +19,7 @@ import {
   ggufNonChatKind,
   ggufTensorTypeNames,
   isSupportedGgufArchitecture,
+  unloadableGgufRevision,
   unreadableGgufTensorTypes,
 } from './gguf-header.js';
 import { type MlxConfigFacts, isSupportedMlxModelType } from './mlx.js';
@@ -180,6 +181,15 @@ function architectureCheck(header: GgufHeaderFacts): ModelImportCheck {
       'fail',
       title,
       `This model uses the "${arch}" design, which the engine in this version of Gezel (llama.cpp ${LLAMA_CPP_GGUF_SUPPORT_TAG}) can't load. A later version of Gezel may.`,
+    );
+  }
+  const revision = unloadableGgufRevision(header);
+  if (revision) {
+    return check(
+      'architecture',
+      'fail',
+      title,
+      `This is ${revision.model}, a newer revision of the "${arch}" design that the engine in this version of Gezel (llama.cpp ${LLAMA_CPP_GGUF_SUPPORT_TAG}) can't load yet. A later version of Gezel will.`,
     );
   }
   return check(
