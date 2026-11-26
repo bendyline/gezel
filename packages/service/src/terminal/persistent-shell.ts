@@ -37,16 +37,14 @@ const PROMPT_YESNO_RE =
 const PROMPT_GENERIC_RE = /[:?]\s*$/;
 
 /**
- * Windows ConPTY opens by asking its terminal for Primary Device
- * Attributes (DA1, `ESC [ c`) and its `WaitForDA1` holds the console
- * until a reply arrives. Inbox conhost before microsoft/terminal#18681
- * counted a reply only when its first parameter is >= 61 and at least one
- * attribute follows, so xterm's classic `ESC [ ? 1 ; 2 c` is not enough.
- * Without a reply, shell init never completed on the windows-2025 and
- * windows-11-arm64 runners (build 26100) from 2026-11-24, at every cap
- * the test had; this missing reply is the diagnosed cause. We claim
- * VT500-family conformance with ANSI color (22) and nothing that would
- * change how conhost paints text we parse.
+ * Newer Windows ConPTY can ask its terminal for Primary Device Attributes
+ * (DA1, `ESC [ c`), and its `WaitForDA1` holds the console until a reply
+ * arrives. A real terminal always answers; a headless host must too.
+ * Inbox conhost before microsoft/terminal#18681 counted a reply only when
+ * its first parameter is >= 61 and at least one attribute follows, so
+ * xterm's classic `ESC [ ? 1 ; 2 c` is not enough. We claim VT500-family
+ * conformance with ANSI color (22) and nothing that would change how
+ * conhost paints text we parse.
  */
 const DA1_REPLY = '\x1b[?61;22c';
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching control chars is the point
@@ -430,7 +428,12 @@ export class PersistentShell {
             // Capture `$?` before the prompt body itself changes it. Reset
             // `$LASTEXITCODE` after every prompt so a later failing cmdlet
             // cannot inherit the exit code of an older native executable.
-            `function global:prompt { $gezelSuccess = $?; $gezelLastExit = $global:LASTEXITCODE; $gezelExit = if ($gezelSuccess) { 0 } elseif ($null -ne $gezelLastExit -and $gezelLastExit -ne 0) { [int]$gezelLastExit } else { 1 }; $global:LASTEXITCODE = 0; [Console]::Write("\`n${shellSentinel}|$gezelExit|$((Get-Location).Path)\`n"); return '' }`,
+            // The cwd comes from the engine, never a cmdlet: in Windows
+            // PowerShell `Get-Location` autoloads its module, and that search
+            // analyzes every module installed before the built-in ones. On
+            // the hosted CI images (AWSPowershell, Microsoft.Graph, SqlServer)
+            // the first prompt never arrived within 10 s (2026-11-26).
+            `function global:prompt { $gezelSuccess = $?; $gezelLastExit = $global:LASTEXITCODE; $gezelExit = if ($gezelSuccess) { 0 } elseif ($null -ne $gezelLastExit -and $gezelLastExit -ne 0) { [int]$gezelLastExit } else { 1 }; $global:LASTEXITCODE = 0; [Console]::Write("\`n${shellSentinel}|$gezelExit|$($ExecutionContext.SessionState.Path.CurrentLocation.Path)\`n"); return '' }`,
             '$global:LASTEXITCODE = 0',
           ].join('; ');
 
@@ -644,11 +647,15 @@ export class PersistentShell {
         const { text } = this.currentRun.ring.value();
         this.currentRun = null;
         // Raw and escaped, so a stuck terminal handshake shows its escape
-        // sequences. An init timeout prints nothing else to go on.
+        // sequences. An init timeout prints nothing else to go on. The head
+        // holds what the terminal sent before our input; the tail, where the
+        // shell stopped.
+        const head =
+          text.length > 600 ? ` First output: ${JSON.stringify(text.slice(0, 200))}.` : '';
         log.warn(
           `${opts.discardOutput ? 'shell initialization' : 'command'} timed out after ${
             this.commandTimeoutMs
-          }ms; killing shell. Last output (${text.length} chars): ${JSON.stringify(
+          }ms; killing shell.${head} Last output (${text.length} chars): ${JSON.stringify(
             text.slice(-400),
           )}`,
         );
@@ -1000,6 +1007,10 @@ function pickPlatformShell(): {
         '$ErrorActionPreference = "Continue"',
         '$OutputEncoding = [System.Text.Encoding]::UTF8',
         '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
+        // Load the cmdlets nearly every command uses by name, which finds
+        // their folder directly. Left to autoloading, the first `Write-Output`
+        // would analyze every installed module first (see the prompt).
+        'Import-Module Microsoft.PowerShell.Management, Microsoft.PowerShell.Utility -ErrorAction SilentlyContinue',
       ],
       platform: 'win32',
     };

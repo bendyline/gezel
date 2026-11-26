@@ -322,7 +322,8 @@ describe('PersistentShell (POSIX)', () => {
 
 describe('PersistentShell (Windows)', () => {
   // Both Windows CI runners hung here at every cap (5 s, then 10 s) from
-  // 2026-11-24, diagnosed as conhost waiting for a DA1 reply we never sent.
+  // 2026-11-24. The init line ran; the first prompt then stalled in
+  // `Get-Location` autoloading across the image's large module set.
   // Init and the command each have the 10 s command timeout below, so a
   // real hang fails with its own message and logs what the PTY printed.
   itWindows(
