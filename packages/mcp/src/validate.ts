@@ -27,6 +27,7 @@
  * `file-non-empty` check and nothing else.
  */
 
+import { type MolenCheckResponse, molenNoticeLines } from '@bendyline/gezel';
 import type ts from 'typescript';
 import { locateUnterminatedConstruct } from './source-validation.js';
 import { typescript } from './typescript-lazy.js';
@@ -182,6 +183,32 @@ export function pageLibrariesToValidateCheck(needs: {
     ? `; ${needs.unknown.map((entry) => entry.spelling).join(', ')} load${needs.unknown.length === 1 ? 's' : ''} from the internet`
     : '';
   return { ok: true, name: 'page-libraries', detail: `${ready || 'no shelf libraries'}${remote}` };
+}
+
+/**
+ * A Molen film, game or scene document, checked by the daemon's compiler.
+ * The failure is Molen's own numbered block (JSON paths, did-you-mean), which
+ * a model acts on without reading the file again.
+ */
+export function molenCheckToValidateCheck(
+  check: MolenCheckResponse | { unavailable: string },
+): ValidateCheck {
+  if ('unavailable' in check)
+    return { ok: null, name: 'molen-document', detail: check.unavailable };
+  if (check.ok) {
+    const notices = molenNoticeLines(check.notices);
+    return {
+      ok: true,
+      name: 'molen-document',
+      detail: `plays: ${check.summary ?? `a ${check.kind} document`}${notices ? `\n  Worth fixing:\n${notices.replace(/^/gm, '  ')}` : ''}`,
+    };
+  }
+  return {
+    ok: false,
+    name: 'molen-document',
+    message: `does not play yet\n${check.formatted ?? check.issues.map((i) => `${i.path}: ${i.message}`).join('\n')}`,
+    fixHint: 'fix each issue at the JSON path it names, then call `validate` again.',
+  };
 }
 
 export function runtimePageCheckToValidateCheck(check: {

@@ -1,5 +1,5 @@
 diff --git a/common/parsers/muse-glimmer.cpp b/common/parsers/muse-glimmer.cpp
-index 78ff5072..0f5aff66 100644
+index a1ee40f..424195a 100644
 --- a/common/parsers/muse-glimmer.cpp
 +++ b/common/parsers/muse-glimmer.cpp
 @@ -16,6 +16,13 @@ common_chat_params common_chat_params_init_muse_glimmer(const common_chat_templa
@@ -14,33 +14,33 @@ index 78ff5072..0f5aff66 100644
 +    data.thinking_end_tags  = {"<|eom|><|start|>assistant to=", "<|eom|>"};
 +
      data.preserved_tokens = {
-         "<|start|>", "<|message|>", "<|eom|>", "<|eot|>",
+         "<|start|>", "<|message|>", "<|eom|>",
          // ATEM tool-call markup emitted on " to=<tool>" turns.
 diff --git a/common/reasoning-budget.cpp b/common/reasoning-budget.cpp
-index 81b7c3e5..64b19f44 100644
+index ac2cd26..00a5439 100644
 --- a/common/reasoning-budget.cpp
 +++ b/common/reasoning-budget.cpp
-@@ -37,10 +37,10 @@ struct token_matcher {
+@@ -41,10 +41,10 @@ struct token_matcher {
      }
  
      // returns the index into seqs of the longest sequence ending at this token, or -1
 -    int32_t advance(llama_token token) {
 +    int32_t advance(llama_token token, bool reset_on_match = true) {
-         state = ac.next(state, (uint32_t) token);
+         state = ac.next(state, common_trie::symbol::token(token));
          const int32_t p = ac.match_pattern(state);
 -        if (p >= 0) {
 +        if (p >= 0 && reset_on_match) {
              state = 0;
          }
          return p;
-@@ -134,10 +134,16 @@ static void common_reasoning_budget_accept(struct llama_sampler * smpl, llama_to
+@@ -138,10 +138,16 @@ static void common_reasoning_budget_accept(struct llama_sampler * smpl, llama_to
          case REASONING_BUDGET_FORCING:
          {
              // track the end sequence within forced_tokens so it is also reported on DONE
 -            const int32_t match = ctx->end_matcher.advance(token);
 +            // A shorter natural end may prefix the forced header. Retain trie
-+            // state through that match so the complete header is replayed to
-+            // the lazy grammar when forcing finishes.
++            // state through that match so the complete header is forced (and,
++            // for a lazy grammar, replayed when forcing finishes).
 +            const bool on_forced = ctx->force_pos < ctx->forced_tokens.size() &&
 +                                   token == ctx->forced_tokens[ctx->force_pos];
 +            const int32_t match = ctx->end_matcher.advance(token, false);
@@ -54,12 +54,12 @@ index 81b7c3e5..64b19f44 100644
                  ctx->end_match = match;
                  COM_TRC("%s", "forced sequence complete, done\n");
 diff --git a/tests/test-chat.cpp b/tests/test-chat.cpp
-index 4d10815e..1a60ccbc 100644
+index 83c11cc..52601dc 100644
 --- a/tests/test-chat.cpp
 +++ b/tests/test-chat.cpp
-@@ -6819,6 +6819,17 @@ static void test_template_output_peg_parsers(bool detailed_debug) {
-     {
+@@ -7516,6 +7516,17 @@ static void test_template_output_peg_parsers(bool detailed_debug) {
          auto tst = peg_tester("models/templates/muse-glimmer.jinja", detailed_debug);
+         tst.specials({ "<|start|>", "<|message|>", "<|eom|>" });
  
 +        // A JSON-valued argument is one value, even when its first property
 +        // is itself a string and later properties contain arrays/objects.
@@ -75,7 +75,7 @@ index 4d10815e..1a60ccbc 100644
          const std::string call_markup =
              "<atem:function_calls>\n"
              "<atem:invoke name=\"special_function\">\n"
-@@ -8270,34 +8281,68 @@ static void test_chat_json_depth() {
+@@ -9247,34 +9258,54 @@ static void test_chat_json_depth() {
  
  static void test_reasoning_budget_tokens_per_request() {
      LOG_DBG("%s\n", __func__);
@@ -142,35 +142,21 @@ index 4d10815e..1a60ccbc 100644
 +            }});
 +            common_chat_session tool_session;
 +            oaicompat_chat_params_parse(nullptr, body, opt, out_files, tool_session);
-+            // The session owns the lazy-grammar triggers and hands them to the
-+            // sampler; read them where the server does.
++            // Muse tool turns are constrained from the first generated token,
++            // so the grammar sees the forced recipient header as it is emitted.
++            // A lazy grammar would need that header replayed and would never
++            // see the generation prompt: revisit the forcing hunk if this fails.
 +            common_params_sampling sampling;
 +            tool_session.apply_sampling(sampling);
-+            if (sampling.grammar_triggers.empty()) {
-+                throw std::runtime_error("Muse tool call produced no lazy-grammar trigger");
-+            }
-+            const std::regex trigger(sampling.grammar_triggers.at(0).value);
-+            // The sampler does NOT feed generation-prompt tokens into lazy
-+            // grammars. Test actual generated text, not prompt + generated text.
-+            for (const std::string text : {" to=write_artifact<|message|>",
-+                                          " to=self<|message|><|eom|><|start|>assistant to=write_artifact<|message|>"}) {
-+                std::smatch match;
-+                if (!std::regex_search(text, match, trigger) || match[1] != " to=write_artifact<|message|>") {
-+                    throw std::runtime_error("Muse lazy grammar missed a generated tool header");
-+                }
-+            }
-+            for (const std::string text : {" to=self<|message|>", " to=user<|message|>",
-+                                          " to=user<|message|>Quoted to=write_artifact<|message|>"}) {
-+                if (std::regex_search(text, trigger)) {
-+                    throw std::runtime_error("Muse lazy grammar activated outside a tool header");
-+                }
++            if (sampling.grammar.grammar.empty() || sampling.grammar_lazy) {
++                throw std::runtime_error("Muse tool grammar must constrain from the first token");
 +            }
 +        }
      }
  }
  
 diff --git a/tests/test-reasoning-budget.cpp b/tests/test-reasoning-budget.cpp
-index a50a1082..d49a8fbc 100644
+index a50a108..d49a8fb 100644
 --- a/tests/test-reasoning-budget.cpp
 +++ b/tests/test-reasoning-budget.cpp
 @@ -333,6 +333,23 @@ static void test_reasoning_budget_end_match() {

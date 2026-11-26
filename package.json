@@ -160,6 +160,8 @@
     "unlink:squisq": "node scripts/squisq-link.mjs unlink",
     "link:gilde": "node scripts/gilde-link.mjs link",
     "unlink:gilde": "node scripts/gilde-link.mjs unlink",
+    "link:molen": "node scripts/molen-link.mjs link",
+    "unlink:molen": "node scripts/molen-link.mjs unlink",
     "gilde:update": "node scripts/update-gilde.mjs",
     "deps:status": "node scripts/pnpm-install.mjs --status",
     "deps:install": "node scripts/pnpm-install.mjs",

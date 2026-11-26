@@ -14,6 +14,7 @@ import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
+import { loadMolenStage } from '../molen/documents.js';
 import { MockImageProvider } from '../providers/image/mock.js';
 import type { ImageProvider } from '../providers/image/types.js';
 import { MockProvider } from '../providers/mock.js';
@@ -26,6 +27,8 @@ import { ChatManager } from './manager.js';
 // systemd unit or the sandbox helper on Linux, the MXC container on Windows.
 // These suites ran only on macOS until 2026-11-23, so CI never executed them.
 const DENY_NET_BOUNDARY = await denyNetBoundaryAvailable();
+// @bendyline/molen-stage is optional until its first npm release (pnpm link:molen).
+const MOLEN_STAGE_INSTALLED = (await loadMolenStage()) !== null;
 
 const require = createRequire(import.meta.url);
 
@@ -609,6 +612,50 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     expect(assistantMsg!.toolCalls![0]!.resultTruncated).not.toBe(true);
     expect(assistantMsg!.toolCalls![0]!.deliveredResultTruncated).toBe(false);
   }, 30_000);
+
+  it.runIf(MOLEN_STAGE_INSTALLED)(
+    'checks a Molen film in the write result, through the session token',
+    async () => {
+      const session = await manager.createSession({ gezelId: 'ada' });
+      const film = {
+        format: 'molen/film@1',
+        name: 'Pier',
+        cast: [
+          { id: 'ana', preset: 'human.adult', at: [-4, 0] },
+          { id: 'ben', preset: 'human.adult', at: [4, 0] },
+        ],
+        beats: [{ at: 1, who: 'anna', do: 'walk-to', target: 'ben' }],
+        shots: [{ at: 0, kind: 'wide', on: ['ana', 'ben'] }],
+      };
+      mock.scriptToolCalls([
+        { name: 'write_artifact', arguments: { path: 'pier.json', jsonContent: film } },
+        {
+          name: 'write_artifact',
+          arguments: {
+            path: 'pier-fixed.json',
+            jsonContent: { ...film, beats: [{ at: 1, who: 'ana', do: 'walk-to', target: 'ben' }] },
+          },
+        },
+      ]);
+      mock.script('Wrote the film.');
+      await manager.send(session.id, 'write a short film about two friends on a pier');
+
+      const outputs = Object.fromEntries(
+        mock.toolCallOutputs
+          .filter((o) => o.name === 'write_artifact')
+          .map((o) => [o.output.split('\n')[0], o.output]),
+      );
+      expect(outputs['Wrote pier.json']).toContain('[Molen check] pier.json does not play yet:');
+      expect(outputs['Wrote pier.json']).toContain('did you mean "ana"?');
+      expect(outputs['Wrote pier.json']).toContain(
+        'write the whole document again with write_artifact',
+      );
+      expect(outputs['Wrote pier-fixed.json']).toMatch(
+        /\[Molen check\] pier-fixed\.json plays: a film "Pier" [\d.]+ s long/,
+      );
+    },
+    30_000,
+  );
 
   it('stamps each tool call with its offset into the turn reasoning trace', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });

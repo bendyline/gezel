@@ -88,10 +88,13 @@ static bool contains_trigger(const json & triggers, const std::string & value) {
 static void render_tests(gezel_llama_engine * engine, const std::string & templates) {
     // Llama 3.2 goes through upstream's generic autoparser, which arms no
     // grammar for its template; desktop's llama-server behaves the same.
+    // Since llama.cpp v1.1.0 the Qwen3 and Gemma 4 parsers keep their tool
+    // triggers inside the grammar and run it from the first token, so they
+    // report no lazy triggers; LFM2.5 still arms a lazy one.
     struct family { const char * file; const char * trigger; bool grammar; };
     const family families[] = {
-        {"Qwen3.5-4B.jinja", "<tool_call>", true},
-        {"google-gemma-4-31B-it.jinja", "<|tool_call>", true},
+        {"Qwen3.5-4B.jinja", nullptr, true},
+        {"google-gemma-4-31B-it.jinja", nullptr, true},
         {"LFM2.5-Instruct.jinja", "<|tool_call_start|>", true},
         {"openbmb-MiniCPM5-1B.jinja", nullptr, true},
         {"meta-llama-Llama-3.2-3B-Instruct.jinja", nullptr, false},
@@ -121,6 +124,15 @@ static void render_tests(gezel_llama_engine * engine, const std::string & templa
         auto replayed = chat(engine, replay, GEZEL_LLAMA_CHAT_RENDER_ONLY);
         CHECK(replayed.status == GEZEL_LLAMA_OK);
         CHECK(replayed.events[0].at("prompt").get<std::string>().find("buy milk") != std::string::npos);
+    }
+    // Qwen and Gemma 4 constrain from the first token even under tool_choice
+    // "auto": the grammar lets content through until it reaches a tool call.
+    for (const char * file : {"Qwen3.5-4B.jinja", "google-gemma-4-31B-it.jinja"}) {
+        configure(engine, json{{"chat_template", read_file(templates + "/" + file)}});
+        auto automatic = chat(engine, tool_request(), GEZEL_LLAMA_CHAT_RENDER_ONLY);
+        CHECK(automatic.status == GEZEL_LLAMA_OK);
+        CHECK(!automatic.events[0].at("grammar_lazy").get<bool>());
+        CHECK(!automatic.events[0].at("grammar").get<std::string>().empty());
     }
     // tool_choice "required" holds the whole reply to a call (Qwen: not lazy).
     configure(engine, json{{"chat_template", read_file(templates + "/Qwen3.5-4B.jinja")}});

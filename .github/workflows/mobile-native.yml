@@ -280,13 +280,7 @@ jobs:
           retention-days: 14
 
   ios-simulator:
-    # Temporarily skipped on pull requests: the speech build fetches the pinned
-    # iOS ONNX Runtime archive from download.onnxruntime.ai, whose TLS
-    # certificate broke by 2026-11-21 (microsoft/onnxruntime left GitHub about
-    # 11-18), and every later step needs speech. Tagged and manual native builds
-    # still run it, so no release ships without iOS speech. Drop the
-    # event_name check once the archive downloads again.
-    if: inputs.platform != 'android' && github.event_name != 'pull_request'
+    if: inputs.platform != 'android'
     name: iOS simulator product and native bridge tests
     needs: bridge
     runs-on: xcode-27

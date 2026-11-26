@@ -89,7 +89,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.113.0",
     "@atproto/api": "0.20.38",
-    "@bendyline/docblocks-cli": "2.7.16",
+    "@bendyline/docblocks-cli": "2.8.5",
     "@bendyline/gezel": "workspace:*",
     "@bendyline/gezel-catalog": "workspace:*",
     "@bendyline/gezel-client": "workspace:*",
@@ -102,9 +102,9 @@
     "@bendyline/gezel-script-stdlib": "workspace:*",
     "@bendyline/gezel-sdk": "workspace:*",
     "@bendyline/gilde": "0.3.14",
-    "@bendyline/squisq": "2.14.1",
-    "@bendyline/squisq-cli": "2.9.39",
-    "@bendyline/squisq-formats": "2.8.24",
+    "@bendyline/squisq": "2.14.2",
+    "@bendyline/squisq-cli": "2.9.40",
+    "@bendyline/squisq-formats": "2.8.25",
     "@hono/node-server": "2.1.6",
     "@modelcontextprotocol/sdk": "1.32.2",
     "@mozilla/readability": "0.6.0",
@@ -136,6 +136,9 @@
     "yauzl": "^3.4.0",
     "yazl": "^3.3.1",
     "zod": "4.6.7"
+  },
+  "optionalDependencies": {
+    "@bendyline/molen-stage": "0.0.1"
   },
   "peerDependencies": {
     "@huggingface/transformers": "^4.3.1",

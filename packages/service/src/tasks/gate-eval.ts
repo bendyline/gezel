@@ -40,6 +40,7 @@ import {
 } from '@bendyline/gezel/checks';
 import ts from 'typescript';
 import { parseFrontmatter } from '../index-store/frontmatter.js';
+import { MOLEN_CHECK_UNAVAILABLE, checkMolenDocument } from '../molen/documents.js';
 import { lineReviewVerdictOutcome } from './review-verdict.js';
 
 /**
@@ -391,6 +392,56 @@ export async function evaluateGate(
   return { pass: failures.length === 0, failures, checks: outcomes };
 }
 
+/** Issues named in a failed Molen check before the rest are counted. */
+const MOLEN_GATE_ISSUES_SHOWN = 4;
+
+/**
+ * One line a model can act on: each issue with its JSON path and hint, as
+ * Molen words it. A gate verdict prints one bullet per failing check, so the
+ * numbered block `validate` shows is folded here.
+ */
+async function molenDocumentOutcome(
+  file: string,
+  content: string,
+  as: 'film' | 'game' | 'scene' | undefined,
+): Promise<InnerOutcome> {
+  const r = await checkMolenDocument(content);
+  // Fail-closed: a gate that passed an unchecked document would let a film
+  // that cannot play reach the person as finished.
+  if (!r)
+    return { ok: false, detail: `${file}: ${MOLEN_CHECK_UNAVAILABLE}, so this check cannot pass.` };
+  if (as && r.kind !== as) {
+    return {
+      ok: false,
+      detail: `${file} must be a Molen ${as} document ("format": "molen/${as}@…"), but ${r.kind ? `it is a ${r.kind}` : 'it names no Molen format'}.`,
+      evidence: { kind: r.kind },
+    };
+  }
+  if (!r.ok) {
+    const shown = r.issues.slice(0, MOLEN_GATE_ISSUES_SHOWN).map((issue) => {
+      const at = issue.path ? `${issue.path}: ` : '';
+      return `${at}${issue.message}${issue.hint ? ` (${issue.hint})` : ''}`;
+    });
+    const more = r.issues.length - shown.length;
+    return {
+      ok: false,
+      detail: `${file} does not play yet: ${shown.join('; ')}${more > 0 ? `; and ${more} more` : ''}.`,
+      evidence: { kind: r.kind, issues: capList(r.issues.map((issue) => issue.code)) },
+    };
+  }
+  const notices = r.notices.length
+    ? ` Worth fixing: ${r.notices
+        .slice(0, 2)
+        .map((n) => n.message)
+        .join('; ')}${r.notices.length > 2 ? `; and ${r.notices.length - 2} more` : ''}.`
+    : '';
+  return {
+    ok: true,
+    detail: `${file} plays: ${r.summary}.${notices}`,
+    evidence: { kind: r.kind, notices: r.notices.length },
+  };
+}
+
 const NODE_RUNS_DEFAULT_TIMEOUT_MS = 20_000;
 
 /** Cap for evidence arrays carried on a GateCheckOutcome. */
@@ -602,6 +653,13 @@ async function evalCheckInner(
       }
       const r = esmImports(content, c.file);
       return { ok: r.ok, detail: r.detail };
+    }
+    case 'molenDocument': {
+      const content = await reader.read(c.file);
+      if (content === null) {
+        return { ok: false, detail: `${c.file} not found (needed for the Molen document check)` };
+      }
+      return molenDocumentOutcome(c.file, content, c.as);
     }
     case 'sourceParses': {
       const content = await reader.read(c.file);

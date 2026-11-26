@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const scriptsDir = dirname(fileURLToPath(import.meta.url));
-const checks = ['check-no-squisq-link.mjs', 'check-no-gilde-link.mjs'];
+const checks = ['check-no-squisq-link.mjs', 'check-no-gilde-link.mjs', 'check-no-molen-link.mjs'];
 let failed = false;
 
 for (const check of checks) {

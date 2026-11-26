@@ -317,6 +317,8 @@ import type {
   ModelImportConfirmResponse,
   ModelImportReview,
   ModelImportReviewRequest,
+  MolenCheckRequest,
+  MolenCheckResponse,
   NativeEngineName,
   NativeEngineResolveEvent,
   NativeEngineStatusResponse,
@@ -2058,6 +2060,17 @@ export class GezelClient {
     return this.request('POST', `/api/projects/${encodeURIComponent(projectId)}/page-check`, {
       path: relativePath,
     } satisfies PageCheckRequest);
+  }
+
+  /**
+   * Check a Molen document (film, game or data-only scene): whether it plays,
+   * what it is, and Molen's own issues when it does not. Pass the parsed
+   * document, or its text exactly as written so a broken file is reported.
+   */
+  checkMolenDocument(projectId: string, document: unknown): Promise<MolenCheckResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(projectId)}/molen/check`, {
+      document,
+    } satisfies MolenCheckRequest);
   }
 
   /**

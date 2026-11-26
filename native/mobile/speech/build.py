@@ -78,6 +78,19 @@ def extract(archive, destination):
                 if not member.isfile(): continue
                 with packed.extractfile(member) as src, output(member.name).open('wb') as dst: shutil.copyfileobj(src, dst)
 
+def unpack(name, archive, destination):
+    # A pin with a member names one archive inside a larger one. The iOS
+    # framework is a zip inside Microsoft's NuGet package, which carries every
+    # platform; download.onnxruntime.ai, which served it alone, broke in
+    # November 2026.
+    member = PINS[name].get('member')
+    if not member: return extract(archive, destination)
+    inner = destination.parent / (name + '-member.zip')
+    with zipfile.ZipFile(archive) as packed, packed.open(member) as src, inner.open('wb') as dst:
+        shutil.copyfileobj(src, dst)
+    try: extract(inner, destination)
+    finally: inner.unlink()
+
 def run(argv):
     subprocess.run([str(value) for value in argv], check=True)
 
@@ -95,7 +108,7 @@ def main():
         archive = source(name, args.fetch)
         destination = staging / name
         if destination.exists(): shutil.rmtree(destination)
-        extract(archive, destination)
+        unpack(name, archive, destination)
     whisper = next((staging / 'whisper-source').glob('whisper.cpp-*'))
     # Kokoro runs on ONNX Runtime directly. sherpa-onnx used to supply it, but
     # its TTS build links eSpeak NG (GPL-3) whether or not anything calls it,

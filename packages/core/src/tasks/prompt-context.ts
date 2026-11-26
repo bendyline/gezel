@@ -25,7 +25,7 @@ import type { TaskInputRecord } from '../schemas/task-inputs.js';
 import type { Task, TaskCraftbookStep, TaskReferences } from '../schemas/task.js';
 import { isOutcomeTask, taskContractMode } from '../task-strategy.js';
 import { stepCheckedArtifactPaths } from '../tools/results.js';
-import { squisqAuthoringNote } from '../transform/squisq-dialect.js';
+import { authoringNote } from '../transform/authoring-notes.js';
 import { renderGateHandoffBlock } from './gate-handoff.js';
 import { earlierStepProducts, inferredStepInputs } from './inferred-step-inputs.js';
 
@@ -397,7 +397,7 @@ export function renderTaskContextBlock(
       );
     }
     // The format notes live in one place in core, not in each book.
-    if (step.authoring) lines.push(squisqAuthoringNote(step.authoring));
+    if (step.authoring) lines.push(authoringNote(step.authoring));
     const stepLibraries = (step.libraries ?? []).filter((id) => options.pageLibraries?.has(id));
     if (stepLibraries.length) {
       lines.push(

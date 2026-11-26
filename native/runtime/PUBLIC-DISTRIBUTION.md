@@ -31,8 +31,9 @@ own `PrivacyInfo.xcprivacy`; embed and sign it with the app. On Android it is
 a folder Maven repository with `com.bendyline.gezel:gezel-speech:<version>`,
 whose POM requires `gezel-llama` of the same version for the shared C++ runtime,
 so add both archives' `maven/` folders as repositories. ONNX Runtime is
-Microsoft's own build (the Maven Central AAR and the iOS pod archive), linked in
-unchanged. `@bendyline/gezel-capacitor` stages these runtimes beside the SDKs.
+Microsoft's own build (the Maven Central AAR, and the iOS framework from the
+NuGet package), linked in unchanged. `@bendyline/gezel-capacitor` stages these
+runtimes beside the SDKs.
 The speech models are not included: the app supplies or downloads them.
 
 These packages exclude Gezel's web app, Capacitor, speech models, test models,

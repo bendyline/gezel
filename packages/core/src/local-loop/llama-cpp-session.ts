@@ -3356,11 +3356,10 @@ export class LlamaCppSession extends StreamingSessionBase implements LLMSession 
             toolGrammarFallback,
           );
         }
-        // llama-server accepts the string choices `auto`, `none`, and
-        // `required`. Its OpenAI-compatible endpoint currently rejects the
-        // named-object form, even when the constrained surface has one tool.
-        // Keep `required` as a string; the compact one-tool surface already
-        // determines which function can be called.
+        // llama-server accepts the named-object form only since v1.1.0, and
+        // the other engines this session drives may not, so keep `required`
+        // as a string; the compact one-tool surface already determines which
+        // function can be called.
         // Cache reuse extras come from the engine's cache adapter (Phase
         // 1+). Without an adapter (no controller wired, e.g. in tests),
         // fall back to the unconditional `cache_prompt: true` we shipped

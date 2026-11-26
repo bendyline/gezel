@@ -52,6 +52,7 @@ const FILE_PRESENCE_CHECK_KINDS: ReadonlySet<GateCheck['kind']> = new Set([
   'htmlLint',
   'jsonPathEquals',
   'csvShape',
+  'molenDocument',
 ]);
 
 /**

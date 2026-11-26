@@ -631,6 +631,7 @@
   "POST /api/projects/:id/lookouts/:lookoutId/test": "owner container",
   "POST /api/projects/:id/lookouts/firings/:firingId/feedback": "owner container",
   "POST /api/projects/:id/lookouts/proposals": "owner worker coordinator container",
+  "POST /api/projects/:id/molen/check": "owner worker coordinator container",
   "POST /api/projects/:id/night-work": "owner worker coordinator container",
   "POST /api/projects/:id/npm-install": "owner container",
   "POST /api/projects/:id/page-check": "owner worker coordinator container",

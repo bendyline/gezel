@@ -13,22 +13,27 @@ provider. `VERSION` is the source of truth for the upstream revision.
 The build applies `patches/muse-runtime.patch` to the pinned source and
 removes it on exit. v0.4.0 parses Muse's analysis channel but omits its thinking
 delimiters from the reasoning-budget sampler configuration, so both launch and
-request budgets are silently dropped. The patch registers those delimiters,
-preserves the next recipient header at forced cutoffs, and replays that full
-header into the lazy tool grammar when a shorter natural terminator is its
-prefix. v0.9.0 (#31374) also ends forcing when an end tag arrives that the
-forced sequence did not supply (the prompt already closed the block); the patch
-keeps that, but a shorter end matched *inside* the forced header no longer cuts
-the header short. Direct tool responses also activate the grammar without requiring the
-generation prompt, which lazy samplers do not receive. Regression tests cover
-both transitions. It also carries a regression test for unconstrained nested
-JSON values (`additionalProperties: {}` and `items: {}`), which were once
-restricted to objects and forced structured reports into extra wrappers; upstream
-handles that case itself, so the patch has no grammar hunk. Revalidate/remove
-this patch when bumping upstream; a mismatch fails the build. At v1.0.0 it
-applies unchanged (only test-file offsets moved) and upstream's `test-chat`,
-`test-reasoning-budget` and `test-json-schema-to-grammar` pass with it. It
-changes inference executables and does not require a desktop installer.
+request budgets are silently dropped. The patch registers those delimiters and
+preserves the next recipient header at forced cutoffs. v0.9.0 (#31374) also
+ends forcing when an end tag arrives that the forced sequence did not supply
+(the prompt already closed the block); the patch keeps that, but a shorter end
+matched *inside* the forced header no longer cuts the header short. It also
+carries a regression test for unconstrained nested JSON values
+(`additionalProperties: {}` and `items: {}`), which were once restricted to
+objects and forced structured reports into extra wrappers; upstream handles
+that case itself, so the patch has no grammar hunk. Revalidate/remove this
+patch when bumping upstream; a mismatch fails the build.
+
+v1.1.0 rewrote the Muse parser on token-aware parsing (#29307) and made its
+tool grammar constrain from the first generated token instead of waiting for a
+lazy trigger. The patch used to replay the forced header into that lazy grammar
+and test the trigger regex; both are gone. Its test now asserts the grammar is
+present and not lazy, so a return to a lazy grammar fails the build and sends
+you back to the forcing hunk. The `reasoning-budget.cpp` hunk was rebased onto
+the new `common_trie::symbol` matcher. Upstream's `test-chat`,
+`test-reasoning-budget` and `test-json-schema-to-grammar` pass with it at
+v1.1.0. It changes inference executables and does not require a desktop
+installer.
 
 ## Upstream versioning
 

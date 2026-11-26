@@ -75,6 +75,7 @@ export * from './page-bridge.js';
 export * from './page-chat.js';
 export * from './page-tables.js';
 export * from './preview.js';
+export * from './molen.js';
 export * from './render.js';
 export * from './image.js';
 export * from './recognition.js';

@@ -9,6 +9,7 @@
     "ignoreUnknown": true,
     "ignore": [
       "packages/knowledge/conformance/**",
+      "packages/core/src/transform/molen-primers.generated.ts",
       "**/dist/**",
       "**/dist-embedded/**",
       "**/dist-office/**",
