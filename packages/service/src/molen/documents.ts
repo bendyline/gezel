@@ -9,11 +9,11 @@ import {
 const log = createLogger('molen');
 
 /**
- * Optional until its first npm release: the service names it in
- * `optionalDependencies`, so an install without it (no `pnpm link:molen`, or
- * a registry install before the release) still installs and boots, and only
- * the Molen document checks are missing. The specifier is a variable so
- * neither the typecheck nor the bundler needs the package present.
+ * Optional until its first npm release: the service declares it only while
+ * `pnpm link:molen` is active (an unpublished version in package.json breaks
+ * every frozen-lockfile install), so an install without it still installs and
+ * boots, and only the Molen document checks are missing. The specifier is a
+ * variable so neither the typecheck nor the bundler needs the package present.
  */
 const MOLEN_STAGE_PACKAGE = '@bendyline/molen-stage';
 
