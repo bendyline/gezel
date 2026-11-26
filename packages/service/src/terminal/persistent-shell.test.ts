@@ -1,7 +1,12 @@
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { describe, expect, it, vi } from 'vitest';
-import { NodePtyUnavailableError, PersistentShell, loadNodePty } from './persistent-shell.js';
+import {
+  NodePtyUnavailableError,
+  PersistentShell,
+  loadNodePty,
+  scanDeviceAttributeRequests,
+} from './persistent-shell.js';
 
 const bashAvailable = process.platform !== 'win32' && existsSync('/bin/bash');
 const itPosix = bashAvailable ? it : it.skip;
@@ -30,6 +35,31 @@ describe('optional node-pty runtime', () => {
     const importer = vi.fn(async () => Promise.reject(unavailable));
 
     await expect(loadNodePty(importer)).rejects.toBe(unavailable);
+  });
+});
+
+describe('ConPTY device-attribute handshake', () => {
+  it('counts each DA1 request, with or without its default parameter', () => {
+    expect(scanDeviceAttributeRequests('', '\x1b[?9001h\x1b[?1004h\x1b[c')).toEqual({
+      requests: 1,
+      carry: '',
+    });
+    expect(scanDeviceAttributeRequests('', '\x1b[0cPS C:\\> \x1b[c').requests).toBe(2);
+  });
+
+  it('answers a request split across reads exactly once', () => {
+    const first = scanDeviceAttributeRequests('', 'banner\x1b[');
+    expect(first).toEqual({ requests: 0, carry: '\x1b[' });
+    expect(scanDeviceAttributeRequests(first.carry, 'c rest')).toEqual({ requests: 1, carry: '' });
+
+    const escOnly = scanDeviceAttributeRequests('', 'x\x1b');
+    expect(scanDeviceAttributeRequests(escOnly.carry, '[0c').requests).toBe(1);
+  });
+
+  it('ignores DA1 replies, DA2 requests, and colors that share the prefix', () => {
+    expect(scanDeviceAttributeRequests('', '\x1b[?61;22c\x1b[>c\x1b[?1;2c').requests).toBe(0);
+    const sgr = scanDeviceAttributeRequests('', 'red\x1b[0');
+    expect(scanDeviceAttributeRequests(sgr.carry, 'm plain')).toEqual({ requests: 0, carry: '' });
   });
 });
 
@@ -291,10 +321,10 @@ describe('PersistentShell (POSIX)', () => {
 });
 
 describe('PersistentShell (Windows)', () => {
-  // A cold powershell.exe under ConPTY takes ~1.3 s on a workstation but ran
-  // past Vitest's default 5 s on both Windows CI runners, beside the other
-  // portability suites (2026-11-24). Init and the command each have the 10 s
-  // command timeout below, so a real hang still fails with its own message.
+  // Both Windows CI runners hung here at every cap (5 s, then 10 s) from
+  // 2026-11-24, diagnosed as conhost waiting for a DA1 reply we never sent.
+  // Init and the command each have the 10 s command timeout below, so a
+  // real hang fails with its own message and logs what the PTY printed.
   itWindows(
     'finishes initialization before accepting and streaming the first command',
     async () => {
