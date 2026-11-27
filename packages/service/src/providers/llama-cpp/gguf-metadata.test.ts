@@ -443,6 +443,41 @@ describe('readGgufSummary', () => {
     expect(s.loopCount).toBe(2);
   });
 
+  it('reads a looped core span (Inkling 2 Mini)', () => {
+    // 24 blocks; blocks [6, 18) run three times, so llama.cpp allocates
+    // 24 + 2 * 12 = 48 cache slots. This is a span, not `num_loops`.
+    const blob = new GgufBuilder()
+      .header(3, 0n)
+      .metaString('general.architecture', 'inkling2_loop')
+      .metaU32('inkling2_loop.block_count', 24)
+      .metaU32('inkling2_loop.loop.start', 6)
+      .metaU32('inkling2_loop.loop.end', 18)
+      .metaU32('inkling2_loop.loop.count', 3)
+      .metaU32('inkling2_loop.loop.gate_rank', 64)
+      .finish();
+    const path = join(dir, 'loop-span.gguf');
+    writeFileSync(path, blob);
+
+    const s = readGgufSummary(path);
+    expect(s.blockCount).toBe(24);
+    expect(s.loopSpan).toEqual({ start: 6, end: 18, count: 3 });
+    expect(s.loopCount).toBeUndefined();
+  });
+
+  it('leaves loopSpan absent when a loop key is missing', () => {
+    const blob = new GgufBuilder()
+      .header(3, 0n)
+      .metaString('general.architecture', 'inkling2_loop')
+      .metaU32('inkling2_loop.block_count', 24)
+      .metaU32('inkling2_loop.loop.start', 6)
+      .metaU32('inkling2_loop.loop.count', 3)
+      .finish();
+    const path = join(dir, 'loop-span-partial.gguf');
+    writeFileSync(path, blob);
+
+    expect(readGgufSummary(path).loopSpan).toBeUndefined();
+  });
+
   it('leaves loopCount absent on an ordinary header', () => {
     const blob = new GgufBuilder()
       .header(3, 0n)

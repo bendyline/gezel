@@ -1819,8 +1819,72 @@ describe('LlamaCppSession text streaming (external baseUrl)', () => {
     });
   });
 
+  it('turns Inkling reasoning off with reasoning_effort=none on constrained turns', async () => {
+    // Inkling's template has no enable_thinking; its `low` is effort 0.2 and
+    // still thinks, so only `none` reaches a tool call inside the limit.
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
+      return sseResponse([
+        {
+          choices: [
+            {
+              index: 0,
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'call_write',
+                    type: 'function',
+                    function: {
+                      name: 'write_file',
+                      arguments: '{"path":"index.html","content":"<!doctype html>"}',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+        { choices: [{ index: 0, finish_reason: 'tool_calls' }] },
+        '[DONE]',
+      ]);
+    }) as typeof fetch;
+
+    const provider = new ExternalLlamaServer({ baseUrl: 'http://inkling.test' });
+    const session = await provider.createSession({
+      systemMessage: 'sys',
+      model: 'inkling2-mini-26b-nvfp4',
+      tuning: {
+        sampling: { maxTokens: 16384 },
+        reasoning: { templateKwargs: { reasoning_effort: 'medium' } },
+        output: {},
+        promptTags: {},
+        wasThinking: false,
+      },
+      externalTools: [
+        {
+          name: 'write_file',
+          description: 'Write a file.',
+          parameters: { type: 'object', additionalProperties: true },
+        },
+      ],
+    });
+
+    await session.sendAndWait(
+      'First move: create the workspace deliverable at workspace/index.html',
+    );
+
+    expect(bodies).toHaveLength(1);
+    expect(bodies[0]?.chat_template_kwargs).toEqual({
+      enable_thinking: false,
+      reasoning_effort: 'none',
+    });
+  });
+
   it.each([
     { model: 'lfm2.5-24b-a2b-q4', expected: 1024 },
+    { model: 'inkling2-mini-26b-nvfp4', expected: 1024 },
     { model: 'lfm2.5-2.6b-q4', expected: 4096 },
   ])(
     'caps the engine reasoning budget on constrained turns for $model',
@@ -9898,6 +9962,11 @@ describe('constrained-turn reasoning allowance', () => {
     }
     expect(constrainedToolReasoningCharLimitForModel('lfm2.5-1.2b-q4')).toBe(1_024);
     expect(constrainedToolNoSignalMsForModel('lfm2.5-1.2b-q4')).toBe(45_000);
+  });
+
+  it('gives Inkling the engine-budgeted allowance: even reasoning_effort=none writes analysis before a hard repair', () => {
+    expect(constrainedToolReasoningCharLimitForModel('inkling2-mini-26b-nvfp4')).toBe(6_144);
+    expect(constrainedToolNoSignalMsForModel('inkling2-mini-26b-nvfp4')).toBe(90_000);
   });
 
   it('gives Muse Glimmer the expanded allowance — its template has no no-think mode, so even reasoning_strength=low overruns the strict budget on whole-file deliverables', () => {

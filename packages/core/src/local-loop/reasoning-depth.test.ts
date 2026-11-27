@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CONSTRAINED_TURN_REASONING_DEPTH,
   REASONING_DEPTH_TEMPLATE_KWARGS,
+  constrainedTurnReasoningDepth,
   downgradeReasoningDepthKwargs,
 } from './reasoning-depth.js';
 
@@ -43,6 +44,33 @@ describe('downgradeReasoningDepthKwargs', () => {
   it('reports nothing when the dial is already low, so logs do not claim a no-op change', () => {
     const body: Record<string, unknown> = { chat_template_kwargs: { reasoning_effort: 'low' } };
     expect(downgradeReasoningDepthKwargs(body)).toEqual([]);
+  });
+
+  it('pins Inkling to its off value, read from body.model', () => {
+    // Inkling's template has no enable_thinking and maps `low` to effort 0.2,
+    // which still reasons; `none` is its only off.
+    const body: Record<string, unknown> = {
+      model: 'inkling2-mini-26b-nvfp4',
+      chat_template_kwargs: { enable_thinking: false, reasoning_effort: 'medium' },
+    };
+    expect(downgradeReasoningDepthKwargs(body)).toEqual(['reasoning_effort']);
+    expect(body.chat_template_kwargs).toEqual({ enable_thinking: false, reasoning_effort: 'none' });
+  });
+
+  it('lets an explicit model win over body.model', () => {
+    const body: Record<string, unknown> = {
+      model: 'qwen3.8-27b-q4',
+      chat_template_kwargs: { reasoning_effort: 'xhigh' },
+    };
+    downgradeReasoningDepthKwargs(body, 'inkling2-mini-26b-q8');
+    expect(body.chat_template_kwargs).toEqual({ reasoning_effort: 'none' });
+  });
+
+  it('keeps every other model at low', () => {
+    expect(constrainedTurnReasoningDepth('qwen3.8-27b-q4')).toBe('low');
+    expect(constrainedTurnReasoningDepth('muse-glimmer-30b-q4')).toBe('low');
+    expect(constrainedTurnReasoningDepth(undefined)).toBe('low');
+    expect(constrainedTurnReasoningDepth('inkling2-mini-26b-nvfp4')).toBe('none');
   });
 
   it('tolerates a body with no chat_template_kwargs at all', () => {

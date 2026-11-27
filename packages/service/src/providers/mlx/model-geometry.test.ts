@@ -161,3 +161,37 @@ describe('readMlxModelGeometry', () => {
     ).toBeUndefined();
   });
 });
+
+describe('readMlxModelGeometry — Inkling 2 Mini', () => {
+  it('reads local_layer_ids, the swa head shape and the looped core', () => {
+    // Shape of thinkingmachines/Inkling-2-Mini text_config (and the
+    // mlx-community 4-bit conversion): no layer_types, local layers by index.
+    const local = [0, 1, 2, 3, 4, 6, 7, 8, 9, 10, 12, 13, 14, 15, 16, 18, 19, 20, 21, 22];
+    const geometry = readMlxModelGeometry(
+      writeConfig({
+        model_type: 'inkling2_loop',
+        text_config: {
+          model_type: 'inkling2_loop_text',
+          num_hidden_layers: 24,
+          hidden_size: 2304,
+          num_attention_heads: 24,
+          num_key_value_heads: 8,
+          head_dim: 128,
+          local_layer_ids: local,
+          swa_head_dim: 128,
+          swa_num_key_value_heads: 8,
+          sliding_window_size: 1024,
+          loop_config: { core_start: 6, core_end: 18, num_passes: 3, gate_rank: 64 },
+        },
+      }),
+    );
+    expect(geometry?.slidingWindow).toBe(1024);
+    expect(geometry?.slidingWindowPattern?.filter((swa) => !swa)).toHaveLength(4);
+    expect(geometry?.loopSpan).toEqual({ start: 6, end: 18, count: 3 });
+    // 8 global slots after the loop, plus 40 window-bounded ones.
+    const perSlotToken = 8 * 256 * 2;
+    expect(estimateExactPerSlotKvBytesF16(geometry ?? { blockCount: 0 }, 4096)).toBe(
+      8 * perSlotToken * 4096 + 40 * perSlotToken * (1024 + 2048),
+    );
+  });
+});

@@ -75,6 +75,15 @@ export function mlxModelGeometryFromConfig(
       : undefined);
   if (!headCountKv || !headDim) return undefined;
 
+  const localLayerIds = Array.isArray(cfg.local_layer_ids)
+    ? (cfg.local_layer_ids as unknown[]).filter(
+        (id): id is number => Number.isInteger(id) && (id as number) >= 0,
+      )
+    : undefined;
+  if (localLayerIds?.length && !Array.isArray(cfg.layer_types)) {
+    return inklingGeometry(cfg, blockCount, headCountKv, headDim, new Set(localLayerIds), num);
+  }
+
   const layerTypes = Array.isArray(cfg.layer_types) ? (cfg.layer_types as unknown[]) : undefined;
   if (!layerTypes || layerTypes.length !== blockCount) {
     // Uniform full attention: every layer scales with context.
@@ -135,5 +144,50 @@ export function mlxModelGeometryFromConfig(
     valueLength: globalHeadDim,
     keyLengthSwa: headDim,
     valueLengthSwa: headDim,
+  };
+}
+
+/**
+ * Inkling 2: local (sliding-window) layers are listed by index in
+ * `local_layer_ids` with their own `swa_*` head shape, and `loop_config`
+ * loops the core blocks `[core_start, core_end)` `num_passes` times. mlx-vlm
+ * gives every layer visit its own cache (window-bounded on local layers), so
+ * Mini's 24 blocks hold 48 caches: 8 global, 40 windowed.
+ */
+function inklingGeometry(
+  cfg: Record<string, unknown>,
+  blockCount: number,
+  headCountKv: number,
+  headDim: number,
+  localLayerIds: Set<number>,
+  num: (key: string) => number | undefined,
+): Omit<WindowedKvInput, 'kvCacheType'> {
+  const swaKvHeads = num('swa_num_key_value_heads') ?? headCountKv;
+  const swaHeadDim = num('swa_head_dim') ?? headDim;
+  const pattern = Array.from({ length: blockCount }, (_, layer) => localLayerIds.has(layer));
+  const loop =
+    typeof cfg.loop_config === 'object' && cfg.loop_config !== null
+      ? (cfg.loop_config as Record<string, unknown>)
+      : undefined;
+  const loopInt = (key: string): number | undefined => {
+    const v = loop?.[key];
+    return Number.isInteger(v) ? (v as number) : undefined;
+  };
+  const start = loopInt('core_start');
+  const end = loopInt('core_end');
+  const count = loopInt('num_passes');
+  return {
+    blockCount,
+    headCountKv,
+    headCountKvPerLayer: pattern.map((local) => (local ? swaKvHeads : headCountKv)),
+    slidingWindow: num('sliding_window_size') ?? num('sliding_window') ?? 1024,
+    slidingWindowPattern: pattern,
+    ...(start !== undefined && end !== undefined && count !== undefined
+      ? { loopSpan: { start, end, count } }
+      : {}),
+    keyLength: headDim,
+    valueLength: headDim,
+    keyLengthSwa: swaHeadDim,
+    valueLengthSwa: swaHeadDim,
   };
 }
