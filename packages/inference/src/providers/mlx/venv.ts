@@ -97,9 +97,28 @@
  * at 50k (7.3 -> 14.8 tok/s), now level with the mlx_lm tower; mlx_lm tower
  * 0.94x at 0-10k, within run-to-run noise.
  *
+ * 0.8.1 (2026-11-26): adds only httpx (0.28.1 already present), so an
+ * existing venv swaps one wheel. Every private `speculative` helper
+ * spec_decode.py imports keeps its signature. Two upstream changes reach the
+ * sidecar. Generation steps and upstream `_mtp_rounds` now run on one shared
+ * per-thread stream, while `assisted_rounds` still drafts on the caller's.
+ * And mlx_vlm's `apply_chat_template` no longer forces `enable_thinking`
+ * off, so the vlm tower's no-kwargs render (the text-only fallback in
+ * `_build_prompt`) now follows the template default like the mlx_lm tower:
+ * on Qwen 3.5 that is thinking on (35 -> 71 prompt tokens); on Gemma 4 nothing
+ * changes. Verified on an M5 Max against 0.7.12 with identical other packages:
+ * gemma4-e4b, gemma4-12b, qwen3.8-27b (both towers, with and without the MTP
+ * drafter, with and without vision) and ornith1.5-9b produce byte-identical
+ * greedy output, prompt token counts, tool calls, JSON and vision answers,
+ * two-row waves included. The only difference is the Qwen no-kwargs render
+ * above. 0.7.12-written disk caches load and extend. Decode A/B/B/A plus
+ * B/A/A/B: every config within -0.2% to +2.6%; Qwen 27B + MTP at 12k goes
+ * 33.2 -> 33.6 tok/s once each pass's first launch is dropped (it reads
+ * 10-20% fast whichever version it is).
+ *
  * Keep upgrades explicit and re-sweep the MLX catalog whenever this pin
  * moves. */
-export const MLX_DEFAULT_PACKAGE_SPEC = 'mlx-vlm==0.7.12';
+export const MLX_DEFAULT_PACKAGE_SPEC = 'mlx-vlm==0.8.1';
 
 /** Venv name passed to `UvRuntime.ensureVenv` (and its dir basename). */
 export const MLX_VENV_NAME = 'mlx';
@@ -121,7 +140,7 @@ export function mlxVenvPackages(packageSpec?: string): string[] {
   // a dependency (0.6.6 did, which is the only reason the old list
   // worked). Dropping this pin kills the batch engine at import time.
   // 0.31.3 is also the combination used for the 0.7.1 Qwen4-Exp batch
-  // compatibility check and the 0.7.12 verification above; keep it
+  // compatibility check and the 0.7.12 and 0.8.1 verifications above; keep it
   // independent of mlx-vlm's deps.
   return [
     packageSpec ?? MLX_DEFAULT_PACKAGE_SPEC,

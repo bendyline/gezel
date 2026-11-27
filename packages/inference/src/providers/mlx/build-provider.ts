@@ -23,6 +23,7 @@ import { pickFreePort } from '../native/port.js';
 import { NativeEngineSupervisor } from '../native/supervisor.js';
 import { patientFetch } from '../patient-fetch.js';
 import { nativeVisionPreferenceFor } from '../vision-capability.js';
+import { modelUsesInklingMessages } from './inkling-messages.js';
 import { readMlxModelGeometry } from './model-geometry.js';
 import { MlxProvider } from './provider.js';
 import { templateOpensReasoning } from './reasoning-stream.js';
@@ -446,6 +447,7 @@ export async function buildMlxProvider(opts: {
   // Read once per provider build: whether the chat template leaves a reasoning
   // block open, so a streamed turn starts mid-thought.
   const opensReasoning = modelDir ? templateOpensReasoning(modelDir) : undefined;
+  const inklingMessages = modelDir ? modelUsesInklingMessages(modelDir) : false;
   const mlxExactPerSlotKvF16 = mlxGeometry
     ? estimateExactPerSlotKvBytesF16(mlxGeometry, effectiveNumCtx)
     : undefined;
@@ -808,6 +810,7 @@ export async function buildMlxProvider(opts: {
     defaultModel: modelDir,
     numCtx: effectiveNumCtx,
     ...(opensReasoning ? { templateOpensReasoning: opensReasoning } : {}),
+    ...(inklingMessages ? { inklingMessages: true } : {}),
     ...(opts.mlxModels ? { modelManager: opts.mlxModels } : {}),
     ...(modelCatalogInfo ? { modelDisplayName: modelCatalogInfo.name } : {}),
     // Catalog id, distinct from `defaultModel` (the on-disk path).

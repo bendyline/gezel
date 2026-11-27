@@ -135,6 +135,7 @@ import { type EngineRequestPriority, MlxEngineGate } from './engine-gate.js';
 import { EngineHold, type EngineQueueMarker, engineHoldLabelFor } from './engine-hold.js';
 import { EngineLogRouter } from './engine-log-router.js';
 import { MlxEngineStatsSampler } from './engine-stats-sampler.js';
+import { InklingMessageStream } from './inkling-messages.js';
 import {
   REASONING_OPEN_HEADER,
   StreamingReasoningSplit,
@@ -314,6 +315,8 @@ export class MlxProvider implements LLMProvider {
   private readonly catalogModelId?: string;
   /** See the constructor option of the same name. */
   private readonly templateOpensReasoning?: TemplateReasoningOpen;
+  /** See the constructor option of the same name. */
+  private readonly inklingMessages: boolean = false;
   private readonly activeSessions = new Set<MlxSession>();
   /**
    * Engine stdout → per-session phase events, plus the "is this line fatal?"
@@ -415,6 +418,12 @@ export class MlxProvider implements LLMProvider {
      * from the model directory at build time — see {@link templateOpensReasoning}.
      */
     templateOpensReasoning?: TemplateReasoningOpen;
+    /**
+     * Whether the model writes Inkling's message format, which the engine
+     * streams as text. Detected once from the chat template at build time —
+     * see `modelUsesInklingMessages`.
+     */
+    inklingMessages?: boolean;
   }) {
     if (!opts.supervisor && !opts.baseUrl) {
       throw new Error('[mlx] need either a supervisor or baseUrl');
@@ -432,6 +441,7 @@ export class MlxProvider implements LLMProvider {
     if (opts.modelDisplayName) this.modelDisplayName = opts.modelDisplayName;
     if (opts.catalogModelId) this.catalogModelId = opts.catalogModelId;
     if (opts.templateOpensReasoning) this.templateOpensReasoning = opts.templateOpensReasoning;
+    if (opts.inklingMessages) this.inklingMessages = true;
     const batchMax = Math.max(1, opts.batchMaxConcurrency ?? 1);
     this.batchMaxConcurrency = batchMax;
     this.speculativeDrafter = opts.speculativeDrafter === true;
@@ -639,6 +649,7 @@ export class MlxProvider implements LLMProvider {
       ...(this.templateOpensReasoning
         ? { templateOpensReasoning: this.templateOpensReasoning }
         : {}),
+      ...(this.inklingMessages ? { inklingMessages: true } : {}),
       ...(opts.activeCraftbookStep ? { activeCraftbookStep: opts.activeCraftbookStep } : {}),
       ...(opts.tuning ? { tuning: opts.tuning } : {}),
       ...(opts.forceDirectFileWork ? { forceDirectFileWork: true } : {}),
@@ -772,6 +783,8 @@ interface MlxSessionDeps {
    * opens nothing when the request turns thinking off.
    */
   templateOpensReasoning?: TemplateReasoningOpen;
+  /** The model writes Inkling's message format; see {@link InklingMessageStream}. */
+  inklingMessages?: boolean;
   /** Active craftbook step — passed to anti-spin abort messages. */
   activeCraftbookStep?: NonNullable<SessionOpts['activeCraftbookStep']>;
   /**
@@ -2112,6 +2125,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // version is just noise). Streaming-safe: holds back fragments
         // that could be a partial marker prefix until disambiguated.
         const stripper = new LeakyToolCallStripper();
+        // Inkling's message format, rewritten ahead of the stripper into the
+        // `<think>` and `<|tool_call|>` shapes everything below already reads.
+        const inkling = this.deps.inklingMessages ? new InklingMessageStream() : undefined;
         // MLX inlines chain-of-thought in the same content deltas as the
         // reply; only the end-of-turn `extractReasoningWithProfile` pass below
         // separates them. Everything reading live deltas — the chat bubble and
@@ -2120,7 +2136,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // reasoning channel llama.cpp and ds4 get from their engines.
         const reasoningSplit = new StreamingReasoningSplit({
           opensInReasoning,
-          enabled: this.deps.profile?.style.reasoningFormat !== 'none',
+          // The translated thinking must never stream as the reply, whatever
+          // the catalog says about the model's reasoning format.
+          enabled: inkling !== undefined || this.deps.profile?.style.reasoningFormat !== 'none',
         });
         // Throttle live phase emissions during generation so we don't
         // saturate the SSE fanout with one phase event per token —
@@ -2225,7 +2243,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
               // "user sees content" signal — so leaked-marker chunks
               // still tick the engine pill correctly even when the
               // visible output is empty.
-              const safeContent = stripper.push(delta!.content!);
+              const safeContent = stripper.push(
+                inkling ? inkling.push(delta!.content!) : delta!.content!,
+              );
               if (safeContent.length > 0) turnContent += safeContent;
               {
                 // Watchdog heartbeat to the daemon log (see decl above).
@@ -2489,7 +2509,9 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // the model never closed an open marker `flush()` returns ''
         // (treats it as truncated noise) — the alternative is leaking
         // a half-marker into the saved transcript.
-        const tail = stripper.flush();
+        // The translator drains first: a tool call it emits without a closer
+        // is what the stripper records as cut off at end of stream.
+        const tail = (inkling ? stripper.push(inkling.flush()) : '') + stripper.flush();
         if (tail.length > 0) {
           turnContent += tail;
           const live = reasoningSplit.push(tail);
@@ -2868,9 +2890,10 @@ class MlxSession extends StreamingSessionBase implements LLMSession {
         // Annotating every Qwen/etc. turn with a warning trained users
         // to ignore them. Keep the console log for ops; drop the toast.
         if (repairedCalls.length > 0) {
+          // Inkling's calls always arrive this way; for it this is not a repair.
           log.info(
-            `turn#${seq}.${turn} repaired ${repairedCalls.length} ` +
-              `malformed tool call(s): ${repairedCalls.map((c) => c.function.name).join(', ')}`,
+            `turn#${seq}.${turn} ${inkling ? 'read' : 'repaired'} ${repairedCalls.length} ` +
+              `${inkling ? 'Inkling' : 'malformed'} tool call(s): ${repairedCalls.map((c) => c.function.name).join(', ')}`,
           );
         }
         if (proseRepaired.length > 0) {

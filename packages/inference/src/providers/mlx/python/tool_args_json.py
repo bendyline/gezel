@@ -22,7 +22,7 @@ chunk by chunk. Everything else (ints, floats, bools, objects, arrays) is
 small and needs the whole value for `_convert_param_value`-style coercion, so
 those are buffered per-parameter and emitted when their `</parameter>` lands.
 
-Semantics are copied from mlx_vlm 0.7.12 `tools/parsers/qwen3_coder.py` and
+Semantics are copied from mlx_vlm 0.7.12 `tools/parsers/qwen3_coder.py` (unchanged in 0.8.1) and
 must stay identical; `tool_args_json_test.py` asserts that by differential-
 testing every case against the reference parser. In particular:
 
