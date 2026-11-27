@@ -1,3 +1,5 @@
+import { existsSync, globSync } from 'node:fs';
+import { join } from 'node:path';
 import { type Plugin, searchForWorkspaceRoot } from 'vite';
 import { configDefaults, defineConfig } from 'vitest/config';
 import { projectPageTypographyPlugin } from '../../scripts/project-page-typography.mjs';
@@ -26,15 +28,67 @@ function emptyPhonePageLibraries(): Plugin {
 }
 
 /**
- * Vitest config for the UI package.
+ * `.test.ts` files under src that need a DOM. Every other `src/**\/*.test.ts`
+ * runs in the `node` project. A DOM test misfiled there fails loudly with
+ * `window is not defined` or `document is not defined`: list it here, or make
+ * it a `.test.tsx`.
+ */
+const DOM_TS_TESTS: readonly string[] = [
+  'src/components/DocumentExport/export-options.test.ts',
+  'src/components/HealthStrip.test.ts',
+  'src/components/IndexingReceipt.test.ts',
+  'src/components/ProjectOutputPane.test.ts',
+  'src/components/SquisqIntegration/document-view.test.ts',
+  'src/components/SquisqIntegration/editor-host.test.ts',
+  'src/components/SquisqIntegration/proofing.test.ts',
+  'src/components/SquisqIntegration/useProofingCapability.test.ts',
+  'src/components/WorkspaceIssueFixDialog.test.ts',
+  'src/components/chat-bubbles.debug-bundle.test.ts',
+  'src/components/chat-bubbles.test.ts',
+  'src/components/composer-prefill.test.ts',
+  'src/components/document-quick-list.test.ts',
+  'src/components/grounding-flags.test.ts',
+  'src/components/header-density.test.ts',
+  'src/components/horizontal-wheel.test.ts',
+  'src/components/indexing-live-sweep.test.ts',
+  'src/components/monaco-base.test.ts',
+  'src/components/output-pane-maximize.test.ts',
+  'src/components/useChatThreadPills.test.ts',
+  'src/components/useCompactLayout.test.ts',
+  'src/components/useComposerImageSettings.test.ts',
+  'src/data/api-reads.test.ts',
+  'src/nav-timing.test.ts',
+  'src/navigation/KeepAliveHost.test.ts',
+  'src/navigation/destinations.test.ts',
+  'src/sidebar-side.test.ts',
+  'src/startup/screen.test.ts',
+  'src/theme.test.ts',
+  'src/visible-interval.test.ts',
+];
+
+for (const file of DOM_TS_TESTS) {
+  if (!existsSync(join(import.meta.dirname, file))) {
+    throw new Error(`vitest.config.ts: DOM_TS_TESTS names ${file}, which does not exist`);
+  }
+}
+
+const NODE_TESTS = globSync('src/**/*.test.ts', { cwd: import.meta.dirname })
+  .map((file) => file.replaceAll('\\', '/'))
+  .filter((file) => !DOM_TS_TESTS.includes(file));
+
+/**
+ * Vitest config for the UI package, as two projects that together run every
+ * test file once.
  *
- * The suite mixes pure UI logic with components and top-level views that
- * mount real React trees through `@testing-library/react`. jsdom is fast
- * enough that one environment is simpler than maintaining file-by-file
- * environment splits as the suite grows.
+ * - `node`: pure logic (`.test.ts` outside DOM_TS_TESTS), in Node with no
+ *   setup file. A jsdom environment and the setup file each cost about a
+ *   second per file, which was most of the suite's time for these.
+ * - `dom`: components, views and everything else, in jsdom with
+ *   `src/test-utils/setup.ts` (jest-dom matchers, per-test cleanup and the
+ *   resets of module-level stores). Tests mock `../api.js` themselves.
  *
- * setupFiles loads `@testing-library/jest-dom`'s matchers and a global
- * mock of `../api.js` so view tests don't accidentally hit fetch.
+ * Both projects extend this file, so the plugins (React Compiler included)
+ * and the shared test options apply to each.
  */
 export default defineConfig({
   // The compiler runs here too, so the suite tests the memoized code that ships.
@@ -60,9 +114,32 @@ export default defineConfig({
     },
   },
   test: {
-    // Host integration tests live outside src so native-shell imports do not
-    // become production UI TypeScript inputs. Preserve all existing tests.
-    include: [...configDefaults.include, 'tests/**/*.test.tsx'],
+    // Projects extend this file and Vite concatenates arrays when it merges
+    // them, so `include`, `exclude`, `environment` and `setupFiles` are set
+    // per project only.
+    projects: [
+      {
+        extends: true,
+        test: {
+          name: 'node',
+          environment: 'node',
+          include: NODE_TESTS,
+          exclude: [...configDefaults.exclude],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'dom',
+          environment: 'jsdom',
+          setupFiles: ['./src/test-utils/setup.ts'],
+          // Host integration tests live outside src so native-shell imports
+          // do not become production UI TypeScript inputs.
+          include: [...configDefaults.include, 'tests/**/*.test.tsx'],
+          exclude: [...configDefaults.exclude, ...NODE_TESTS],
+        },
+      },
+    ],
     // Dedupe only applies to modules vite PROCESSES. Vitest externalizes
     // node_modules by default, and under `pnpm link:squisq` the linked
     // dist chunks then node-resolve `react` from the sibling checkout's
@@ -75,13 +152,18 @@ export default defineConfig({
         inline: [/@bendyline[\\/]squisq/, /@tiptap[\\/]/],
       },
     },
-    environment: 'jsdom',
-    setupFiles: ['./src/test-utils/setup.ts'],
+    // Every file gets a fresh module graph: module-level stores (drafts,
+    // thread memory, the read cache) never leak between files.
+    isolate: true,
     // setup.ts lets each waitFor/findBy take 5 s under a contended CI host.
     // A view test chains several of them, so the default 5 s test budget let
     // one slow wait time out the whole test with no message: ScriptsView's
     // project switch took 5009 ms in CI on 2026-11-12, its other tests <150 ms.
     testTimeout: 15_000,
+    // Hooks get the same budget. Set here because Vitest forwards only some
+    // command-line options to projects: `--testTimeout` reaches them,
+    // `--hookTimeout` (which the coverage run passes) does not.
+    hookTimeout: 15_000,
     globals: false,
     css: false,
     // `clearMocks` resets call history between tests so each one starts

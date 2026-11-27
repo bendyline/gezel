@@ -1,5 +1,5 @@
 import type { ClientPerfReport } from '@bendyline/gezel';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   asBackground,
   beginNavigation,
@@ -22,14 +22,25 @@ function fakeFetch(delayMs: number, serverTiming?: string): typeof fetch {
   }) as typeof fetch;
 }
 
+/** Run the fake clock on until `read` returns a value. */
 async function waitFor<T>(read: () => T | undefined, timeoutMs = 3_000): Promise<T> {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
+  for (let waited = 0; ; waited += 25) {
     const value = read();
     if (value !== undefined) return value;
-    if (Date.now() > deadline) throw new Error('timed out waiting');
-    await sleep(25);
+    if (waited > timeoutMs) throw new Error('timed out waiting');
+    await vi.advanceTimersByTimeAsync(25);
   }
+}
+
+/** Await `promise` while the fake clock runs on, as real time would. */
+async function advancing<T>(promise: Promise<T>): Promise<T> {
+  let settled = false;
+  const done = () => {
+    settled = true;
+  };
+  promise.then(done, done);
+  while (!settled) await vi.advanceTimersByTimeAsync(5);
+  return promise;
 }
 
 afterEach(() => setPerfReportSink(null));
@@ -44,13 +55,23 @@ describe('parseServerTiming', () => {
 });
 
 describe('navigation timing', () => {
+  // One fake clock (performance.now and frames included) for the whole block:
+  // the module keeps requests and input times between tests, so they must all
+  // read one clock that only moves forward.
+  beforeAll(() => {
+    vi.useFakeTimers();
+  });
+  afterAll(() => {
+    vi.useRealTimers();
+  });
+
   it('hands a slow navigation to the daemon with its slowest request', async () => {
     const sent: ClientPerfReport[] = [];
     setPerfReportSink((r) => sent.push(r));
     const timedFetch = instrumentFetch(fakeFetch(1_050, 'app;dur=31'));
 
     beginNavigation('area:settings');
-    await timedFetch('/api/config?x=1');
+    await advancing(timedFetch('/api/config?x=1'));
 
     const report = await waitFor(() => sent[0]);
     expect(report).toMatchObject({
@@ -71,7 +92,7 @@ describe('navigation timing', () => {
     const before = recentPerfReports().length;
 
     beginNavigation('project:fast');
-    await timedFetch('/api/projects/fast');
+    await advancing(timedFetch('/api/projects/fast'));
 
     await waitFor(() => (recentPerfReports().length > before ? true : undefined));
     expect(recentPerfReports().at(-1)).toMatchObject({ view: 'project:fast', requests: 1 });
@@ -81,8 +102,8 @@ describe('navigation timing', () => {
   it('leaves polling out of the view and counts it apart', async () => {
     const timedFetch = instrumentFetch(fakeFetch(5));
     beginNavigation('area:tasks');
-    await asBackground(() => timedFetch('/api/activity'));
-    await timedFetch('/api/tasks');
+    await advancing(asBackground(() => timedFetch('/api/activity')));
+    await advancing(timedFetch('/api/tasks'));
     const report = await waitFor(() => {
       const last = recentPerfReports().at(-1);
       return last?.view === 'area:tasks' ? last : undefined;
@@ -98,7 +119,7 @@ describe('navigation timing', () => {
     // The tab mounts and fetches before its parent reports the move.
     const early = timedFetch('/api/projects/p/tasks');
     beginNavigation('project:p/tab:tasks', { scope: 'part' });
-    await early;
+    await advancing(early);
     const report = await waitFor(() => {
       const last = recentPerfReports().at(-1);
       return last?.view === 'project:p/tab:tasks' ? last : undefined;
@@ -111,7 +132,7 @@ describe('navigation timing', () => {
     window.dispatchEvent(new MouseEvent('click'));
     beginNavigation('project:q');
     beginNavigation('project:q/tab:chat', { scope: 'part' });
-    await timedFetch('/api/projects/q');
+    await advancing(timedFetch('/api/projects/q'));
     const report = await waitFor(() => {
       const last = recentPerfReports().at(-1);
       return last?.view.startsWith('project:q') ? last : undefined;
@@ -132,7 +153,7 @@ describe('navigation timing', () => {
     beginNavigation('area:history');
     const res = await timedFetch('/api/history');
     const body = res.json();
-    await sleep(600);
+    await vi.advanceTimersByTimeAsync(600);
     expect(recentPerfReports().at(-1)?.view).not.toBe('area:history');
     resolveBody({ entries: [] });
     await body;
@@ -179,7 +200,7 @@ describe('navigation timing', () => {
   it('never times its own reports', async () => {
     const timedFetch = instrumentFetch(fakeFetch(1));
     beginNavigation('home');
-    await timedFetch('/api/system/perf/client', { method: 'POST' });
+    await advancing(timedFetch('/api/system/perf/client', { method: 'POST' }));
     const report = await waitFor(() => {
       const last = recentPerfReports().at(-1);
       return last?.view === 'home' ? last : undefined;

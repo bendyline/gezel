@@ -99,6 +99,7 @@ import { modelFitnessRoutes } from './routes/model-fitness.js';
 import { modelImportRoutes } from './routes/model-imports.js';
 import { modelMigrationRoutes } from './routes/model-migrations.js';
 import { modelsRoutes } from './routes/models.js';
+import { molenRoutes } from './routes/molen.js';
 import { nightShiftRoutes } from './routes/night-shift.js';
 import { oauthClientRoutes } from './routes/oauth-clients.js';
 import { ollamaCompatRoutes } from './routes/ollama-compat.js';
@@ -614,6 +615,7 @@ export function buildApp(baseCtx: ServiceContext, options: BuildAppOptions = {})
     previewCapabilityRoutes(ctx, previewCapabilities, options.previewBrowserOrigin ?? (() => null)),
   );
   app.route('/api/projects', pageCheckRoutes(ctx, previewCapabilities));
+  app.route('/api/projects', molenRoutes(ctx));
   app.route('/api/projects', projectPageLibraryRoutes(ctx));
   app.route('/api/projects', projectPageExportRoutes(ctx));
   app.route('/api/projects', previewLogRoutes(ctx));

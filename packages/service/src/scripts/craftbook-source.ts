@@ -12,6 +12,7 @@ import {
   craftbookTemplateScriptFile,
   craftbookTemplateScriptsDir,
 } from '@bendyline/gezel/paths';
+import { assertCraftbookPathSegment, isCraftbookPathSegment } from '../fs/craftbook-store.js';
 import { parseScriptMeta } from './meta.js';
 import { scriptSourceHash } from './source.js';
 
@@ -36,6 +37,7 @@ async function latestVersion(home: string, id: string): Promise<string> {
 }
 
 export async function listCraftbookScripts(home: string, id: string): Promise<{ name: string }[]> {
+  if (!isCraftbookPathSegment(id)) return [];
   const prefix = craftbookShardPrefix(id);
   const version = await latestVersion(home, id);
   const dir = craftbookTemplateScriptsDir(home, prefix, id, version);
@@ -53,6 +55,7 @@ export async function readCraftbookScriptSource(
   name: string,
 ): Promise<GetScriptSourceResponse | null> {
   ScriptNameSchema.parse(name);
+  if (!isCraftbookPathSegment(id)) return null;
   const prefix = craftbookShardPrefix(id);
   const version = await latestVersion(home, id);
   const file = craftbookTemplateScriptFile(home, prefix, id, version, name);
@@ -80,6 +83,7 @@ export async function writeCraftbookScriptSource(
   source: string,
 ): Promise<{ hash: string }> {
   ScriptNameSchema.parse(name);
+  assertCraftbookPathSegment(id, 'craftbook id');
   const prefix = craftbookShardPrefix(id);
   const version = await latestVersion(home, id);
   const dir = craftbookTemplateScriptsDir(home, prefix, id, version);
@@ -95,6 +99,7 @@ export async function deleteCraftbookScriptSource(
   name: string,
 ): Promise<boolean> {
   ScriptNameSchema.parse(name);
+  assertCraftbookPathSegment(id, 'craftbook id');
   const prefix = craftbookShardPrefix(id);
   const version = await latestVersion(home, id);
   const file = craftbookTemplateScriptFile(home, prefix, id, version, name);

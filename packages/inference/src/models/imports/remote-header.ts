@@ -77,13 +77,16 @@ export function headerFactsFromSummary(summary: GgufSummary): GgufHeaderFacts {
       : {}),
     ...(summary.tensorTypeCounts ? { tensorTypeCounts: summary.tensorTypeCounts } : {}),
     ...(summary.splitCount !== undefined ? { splitCount: summary.splitCount } : {}),
+    ...(summary.metadataKeys ? { metadataKeys: summary.metadataKeys } : {}),
     ...(kv ? kv : {}),
   };
 }
 
 /** The header facts of a GGUF already on this computer (a local import's staged copy). */
 export function readLocalGgufHeader(path: string): GgufHeaderFacts {
-  return headerFactsFromSummary(readGgufSummary(path, { includeTensorTypes: true }));
+  return headerFactsFromSummary(
+    readGgufSummary(path, { includeTensorTypes: true, includeMetadataKeys: true }),
+  );
 }
 
 /**
@@ -110,6 +113,7 @@ export async function readRemoteGgufHeader(opts: {
     try {
       const summary = readGgufSummaryFromPrefix(prefix, opts.sizeBytes, {
         includeTensorTypes: true,
+        includeMetadataKeys: true,
       });
       return headerFactsFromSummary(summary);
     } catch (err) {

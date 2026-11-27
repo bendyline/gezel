@@ -30,6 +30,10 @@ vi.mock('../views/projects/NewProjectDialog.js', () => ({
 }));
 
 const { DeepLinkHost } = await import('./DeepLinkHost.js');
+// The dialogs are lazy(). Loaded cold inside a test, their module graph is
+// transformed while findBy's clock runs, which passed its 5 s in the full
+// suite. Collection has no clock; the lazy() then resolves from the cache.
+await import('./DeepLinkDialogs.js');
 
 let deliver: ((link: GezelDeepLink) => void) | null = null;
 

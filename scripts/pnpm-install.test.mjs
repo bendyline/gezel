@@ -1352,7 +1352,12 @@ test('a release phase refuses a chain it cannot split before running any step', 
 });
 
 test('link and release-update workflows lock config edits and prepare installs safely', async () => {
-  for (const script of ['gilde-link.mjs', 'squisq-link.mjs', 'update-gilde.mjs']) {
+  for (const script of [
+    'gilde-link.mjs',
+    'molen-link.mjs',
+    'squisq-link.mjs',
+    'update-gilde.mjs',
+  ]) {
     const source = await readFile(new URL(script, import.meta.url), 'utf8');
     const lockStart = source.indexOf('withPnpmInstallLock(');
     const lockedWorkspaceRead = source.indexOf("readFile(workspacePath, 'utf8')", lockStart);

@@ -2,6 +2,7 @@ import {
   type ChatSession,
   type GezelConfig,
   createLogger,
+  isLocalProvider,
   memoryNoteLine,
   renderMemoryNotes,
 } from '@bendyline/gezel';
@@ -247,6 +248,7 @@ export async function runAutoRecall(args: RecallArgs): Promise<RecallHit[] | nul
   const hits: RecallHit[] = [];
   for (const r of ranked) {
     if (r.effective < minScore) continue;
+    if (r.source?.kept && !isLocalProvider(args.providerName)) continue;
     if (seen.has(r.text)) continue;
     seen.add(r.text);
     hits.push({

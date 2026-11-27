@@ -31,7 +31,7 @@ export async function connectOAuth(
   type: string,
   config: Record<string, unknown>,
   displayName?: string,
-  opts?: { redirectPort?: number; signal?: AbortSignal },
+  opts?: { redirectPort?: number; allowCloudModels?: boolean; signal?: AbortSignal },
 ): Promise<{ id: string } | undefined> {
   const shell = window.__GEZEL__;
   if (!shell?.mailOAuthListen || !shell.mailOAuthAwait) {
@@ -53,6 +53,7 @@ export async function connectOAuth(
       redirectUri,
       config,
       ...(displayName ? { displayName } : {}),
+      ...(opts?.allowCloudModels ? { allowCloudModels: true } : {}),
     });
     if (signal?.aborted) throw new OAuthCancelledError();
     const result = await shell.mailOAuthAwait(requestId, authUrl);

@@ -476,6 +476,70 @@ describe('/api/projects/:id/connectors', () => {
     }
   });
 
+  // A Google account's data stays on models on this computer until the person
+  // says otherwise, connection by connection, and each answer is dated.
+  describe('cloud AI for a Google connection', () => {
+    const google = async (extra: Record<string, unknown> = {}) =>
+      bind({ type: 'calendar-google', displayName: 'Work', config: {}, ...extra });
+    const view = async (id: string) =>
+      (
+        await call<{ bindings: { id: string; allowCloudModels?: boolean }[] }>('GET', '/connectors')
+      ).body.bindings.find((b) => b.id === id);
+    const patch = (id: string, body: unknown) =>
+      call('PATCH', `/connectors/${encodeURIComponent(id)}`, body);
+    const logged = async () =>
+      (await svc.context.history.listEvents({ projectId: PROJECT, limit: 50 }))
+        .filter((e) => e.kind.startsWith('project.connector.cloud.'))
+        .map((e) => e.summary);
+
+    it('is off until the person turns it on, and can be turned off again', async () => {
+      const { id } = await google();
+      expect((await view(id))?.allowCloudModels).toBe(false);
+      const before = (await logged()).length;
+
+      expect((await patch(id, { allowCloudModels: true })).status).toBe(200);
+      expect((await view(id))?.allowCloudModels).toBe(true);
+      expect((await patch(id, { allowCloudModels: true })).status).toBe(200);
+      expect((await patch(id, { allowCloudModels: false })).status).toBe(200);
+      expect((await view(id))?.allowCloudModels).toBe(false);
+
+      const events = (await logged()).slice(0, (await logged()).length - before);
+      expect([...events].sort()).toEqual([
+        'Cloud AI may read Work',
+        'Work is kept on models on this computer',
+      ]);
+    });
+
+    it('is kept when the person ticks it while connecting', async () => {
+      const { id } = await google({ allowCloudModels: true });
+      expect((await view(id))?.allowCloudModels).toBe(true);
+    });
+
+    it('is not offered for a connection that does not ask', async () => {
+      const { id } = await bind({ allowCloudModels: true });
+      expect(await view(id)).not.toHaveProperty('allowCloudModels');
+      expect((await patch(id, { allowCloudModels: true })).status).toBe(400);
+    });
+
+    it("is only the person's own app to change", async () => {
+      const { id } = await google();
+      const project = (await svc.context.store.getProject(PROJECT))!;
+      await expect(
+        svc.context.connectors.patchBinding(project, id, { allowCloudModels: true }),
+      ).rejects.toThrow(/Only the Gezel app/);
+      expect((await view(id))?.allowCloudModels).toBe(false);
+    });
+
+    it('still holds for what a removed connection leaves behind', async () => {
+      const { id } = await google();
+      await call('DELETE', `/connectors/${encodeURIComponent(id)}`);
+      expect(await svc.context.store.readKeptLocal(PROJECT)).toContainEqual({
+        path: 'data/work',
+        source: { projectId: PROJECT, bindingId: id, name: 'Work' },
+      });
+    });
+  });
+
   it('discarding a draft removes it; committing a missing draft is a 400', async () => {
     const binding = await bind();
     const draft = await call<{ draftId: string }>(

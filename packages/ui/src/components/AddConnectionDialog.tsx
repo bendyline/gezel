@@ -1,10 +1,16 @@
-import { CONNECTOR_FAMILIES, type ConnectorFamily, connectorTypeFamily } from '@bendyline/gezel';
+import {
+  CONNECTOR_FAMILIES,
+  type ConnectorFamily,
+  connectorAsksBeforeCloud,
+  connectorTypeFamily,
+} from '@bendyline/gezel';
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { apiErrorMessage } from '../api-error.js';
 import { api } from '../api.js';
 import { Dialog } from '../primitives/index.js';
 import { ProjectGlyph, type ProjectGlyphId } from '../views/projects/new-project-meta.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
+import { CONNECTION_PRIVACY_URL, ConnectionCloudSwitch } from './ConnectionCloudSwitch.js';
 import {
   ConnectorConfigFields,
   type ConnectorConfigValue,
@@ -149,6 +155,8 @@ export function AddConnectionDialog({
   const [imapPort, setImapPort] = useState('');
   const [imapSecure, setImapSecure] = useState(true);
   const [cameraForm, setCameraForm] = useState<CameraForm>(DEFAULT_CAMERA_FORM);
+  // The person's yes to cloud models, for a type that asks. Never pre-ticked.
+  const [allowCloud, setAllowCloud] = useState(false);
   // OAuth apps this install connects through, keyed by the manifest's
   // `clientIdEnv` name: saved ones and ones the daemon's environment sets. An
   // older daemon lists saved ones only, so an absent key never blocks Connect;
@@ -389,6 +397,8 @@ export function AddConnectionDialog({
       setError(`${selected.secretShape.label ?? 'API key / token'} is required.`);
       return;
     }
+    const cloud =
+      allowCloud && connectorAsksBeforeCloud(selected.id) ? { allowCloudModels: true } : {};
     setBusy('add');
     let added: { id: string } | undefined;
     try {
@@ -406,6 +416,7 @@ export function AddConnectionDialog({
               ...(oauthRequirement?.redirectPort !== undefined
                 ? { redirectPort: oauthRequirement.redirectPort }
                 : {}),
+              ...cloud,
               signal: signIn.signal,
             },
           );
@@ -430,6 +441,7 @@ export function AddConnectionDialog({
           ...(displayName.trim() ? { displayName: displayName.trim() } : {}),
           config: built,
           ...(cred !== undefined ? { credential: cred } : {}),
+          ...cloud,
         });
         added = bound?.binding;
       }
@@ -458,6 +470,7 @@ export function AddConnectionDialog({
     imapSecure,
     oauthRequirement,
     cameraForm,
+    allowCloud,
     onAdded,
   ]);
 
@@ -550,6 +563,7 @@ export function AddConnectionDialog({
       setImapPort('');
       setImapSecure(true);
       setCameraForm(DEFAULT_CAMERA_FORM);
+      setAllowCloud(false);
       setOauthSetupNudge(0);
     }
     setError('');
@@ -775,6 +789,21 @@ export function AddConnectionDialog({
                       onSave={handleOAuthAppSave}
                       onUseBuiltin={handleUseBuiltinApp}
                     />
+                  )}
+                  {connectorAsksBeforeCloud(selected.id) && (
+                    <ConnectionCloudSwitch
+                      checked={allowCloud}
+                      disabled={working}
+                      onChange={setAllowCloud}
+                    />
+                  )}
+                  {kind === 'oauth2' && (
+                    <p className="gz-npd-footnote gz-acd-privacy">
+                      Gezel keeps what it reads on this computer. Nothing goes to Bendyline.{' '}
+                      <a href={CONNECTION_PRIVACY_URL} target="_blank" rel="noreferrer">
+                        Privacy policy
+                      </a>
+                    </p>
                   )}
                 </section>
               </div>

@@ -235,6 +235,21 @@ const GateCheckVariants = [
     artifact: z.boolean().optional(),
   }),
   /**
+   * `file` is a Molen document that plays: a film (`molen/film@1`) or game
+   * (`molen/game@1`) compiles, or a scene (`molen/scene@3`) validates and
+   * carries no scripts. `as` additionally requires one document kind. The
+   * failure carries Molen's own numbered issues with JSON paths and
+   * did-you-mean hints. Lint notices (a subject hidden behind a prop) are
+   * reported but never fail the check. Desktop only: the daemon holds the
+   * compiler.
+   */
+  z.object({
+    kind: z.literal('molenDocument'),
+    file: z.string().min(1),
+    as: z.enum(['film', 'game', 'scene']).optional(),
+    artifact: z.boolean().optional(),
+  }),
+  /**
    * The first Markdown table in `file` has the required header set and
    * row floor. (CSV/JSON record data uses `csvShape`/`recordSchema`.)
    */

@@ -54,6 +54,7 @@ export const SINGLE_FILE_GATE_CHECK_KINDS: ReadonlySet<string> = new Set([
   'htmlLint',
   'jsParses',
   'jsonPathEquals',
+  'molenDocument',
   'planStructure',
   'recordSchema',
   'tableShape',

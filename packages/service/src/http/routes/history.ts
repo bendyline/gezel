@@ -1,7 +1,13 @@
-import { type HistoryEventKind, HistoryEventKindSchema } from '@bendyline/gezel';
+import {
+  type HistoryEntry,
+  type HistoryEvent,
+  type HistoryEventKind,
+  HistoryEventKindSchema,
+} from '@bendyline/gezel';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { ServiceContext } from '../context.js';
+import { withoutKeptLocalSessions } from '../kept-local-gate.js';
 
 export function historyRoutes(ctx: ServiceContext): Hono {
   const app = new Hono();
@@ -65,13 +71,28 @@ export function historyRoutes(ctx: ServiceContext): Hono {
     const include = c.req.query('include');
     if (include === 'events') {
       const events = await ctx.history.listEvents(filter);
-      return c.json({ events });
+      return c.json({ events: await withoutKeptLocalSessions(ctx, c, events, eventSessionId) });
     }
     const entries = await ctx.history.listEntries(filter);
-    return c.json({ entries });
+    return c.json({
+      entries: await withoutKeptLocalSessions(ctx, c, entries, entrySessionId),
+    });
   });
 
   return app;
+}
+
+/** The conversation an event happened in, when its details name one. */
+function eventSessionId(event: HistoryEvent): string | undefined {
+  for (const key of ['sessionId', 'fromSessionId', 'targetSessionId']) {
+    const id = event.details?.[key];
+    if (typeof id === 'string') return id;
+  }
+  return undefined;
+}
+
+function entrySessionId(entry: HistoryEntry): string | undefined {
+  return entry.entryType === 'session' ? entry.id : eventSessionId(entry);
 }
 
 function parseKinds(raw: string | undefined): HistoryEventKind[] | undefined {

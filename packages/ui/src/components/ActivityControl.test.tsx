@@ -64,11 +64,15 @@ async function mount() {
   await screen.findAllByRole('textbox');
   return screen.getByRole('dialog', { name: 'What’s going on' });
 }
+/** Announce a change and run Activity's 150ms coalescing delay on a fake clock. */
 async function refresh() {
-  act(() => window.dispatchEvent(new Event('gezel:config-changed')));
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 180));
-  });
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    act(() => window.dispatchEvent(new Event('gezel:config-changed')));
+    await act(() => vi.advanceTimersByTimeAsync(180));
+  } finally {
+    vi.useRealTimers();
+  }
 }
 
 beforeEach(() => {

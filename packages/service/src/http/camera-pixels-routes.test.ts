@@ -72,6 +72,7 @@ function harness(opts: {
     store: {
       getProject: async (id: string) => ({ id, connectors: [camera(opts.allowCloud ?? false)] }),
       projectArtifactsDir: () => artifacts,
+      readKeptLocal: async () => [],
       resolveProjectArtifactReadPath: async (_id: string, p: string) => resolve(artifacts, p),
       resolveProjectArtifact: async (_id: string, p: string) => ({
         kind: 'found',

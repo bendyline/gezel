@@ -47,6 +47,18 @@ export const CLAUDE_PROJECT_SETTINGS_DENY_RULES: readonly string[] = [
   'Edit(**/.claude/settings.local.json)',
 ];
 
+/**
+ * Files and folders a cloud model may not read: connector data the person
+ * keeps on models on this computer, in any project. A rule covers a folder
+ * and everything below it.
+ */
+export function claudeKeptLocalDenyRules(paths: readonly string[]): string[] {
+  return paths
+    .filter((path) => isAbsolute(path))
+    .map(claudeAbsoluteRulePath)
+    .flatMap((path) => [`Read(${path})`, `Read(${path}/**)`]);
+}
+
 export function claudeCredentialDenyRules(gezelHome: string | undefined): string[] {
   if (!gezelHome || !isAbsolute(gezelHome)) return [];
   const root = claudeAbsoluteRulePath(gezelHome);

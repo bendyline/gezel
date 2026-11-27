@@ -119,12 +119,12 @@ describe('runPageCheck (spawn seam)', () => {
   it('kills and reports no-signal on timeout', async () => {
     const outcome = await runPageCheck({
       ...BASE,
-      timeoutMs: 6_000,
+      timeoutMs: 50,
       spawnImpl: (() => fakeChild({ neverCloses: true })) as never,
     });
     expect(outcome.ran).toBe(false);
     expect(outcome.reason).toBe('timeout');
-  }, 10_000);
+  });
 
   it('reports spawn errors as no-signal', async () => {
     const outcome = await runPageCheck({

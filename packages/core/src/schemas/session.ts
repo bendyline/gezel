@@ -14,6 +14,7 @@ import {
   TaskDeliverableSchema,
 } from './gezel.js';
 import { ImageAspectRatioSchema, ImageQualitySchema, ImageSettingsSchema } from './image.js';
+import { KeptLocalSourceSchema } from './kept-local.js';
 import { SessionLinkSchema, SessionParentSchema } from './session-lineage.js';
 import { TaskLaunchSpecSchema } from './task-launch.js';
 import { TaskSchema } from './task.js';
@@ -268,6 +269,13 @@ export const ChatSessionSchema = z.object({
    * than a dropped turn.
    */
   turnStartedAt: z.string().optional(),
+  /**
+   * Connections whose data this conversation was shown and which keep it on
+   * models that run on this computer. While one still does, the session
+   * cannot move to a cloud provider and nothing it holds is sent to one
+   * (service `chat/kept-local-sessions.ts`).
+   */
+  keptLocal: z.array(KeptLocalSourceSchema).optional(),
   /** Optional task this session is scoped to, in `projectId/num` form. */
   taskRef: z.string().optional(),
   /** Optional specific step within the task. */

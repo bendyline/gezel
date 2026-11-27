@@ -2686,7 +2686,7 @@ button.machine-memory-unload-button {
 }
 
 /* A rendered document is previewable before it is editable. Keep that
-   boundary visible above the editor—the Write tab alone cannot communicate
+   boundary visible above the editor—the Write view alone cannot communicate
    that the Markdown companion is currently read-only. */
 .outside-in-readonly-banner {
   display: flex;

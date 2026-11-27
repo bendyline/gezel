@@ -48,6 +48,9 @@ test('Handboek navigation loads the newly selected article', async ({ page }) =>
   await openArea(page, 'knowledge');
   await openFirstHandboekArticle(page);
   await expectHandboekArticle(page);
+  // The welcome carries the brand image, painted from the UI bundle. The
+  // helper's every-image check passes vacuously on an article with none.
+  await expect(page.locator('.knowledge-reader-body img')).not.toHaveCount(0);
   const row = page.locator('.knowledge-doc-row:not([aria-current="true"])').first();
   const article = { title: (await row.locator('.knowledge-doc-title').innerText()).trim() };
   const previousBody = await page.locator('.knowledge-reader-body').innerText();

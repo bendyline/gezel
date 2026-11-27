@@ -62,6 +62,42 @@ export interface MemorySource {
   gezel?: string;
   /** An outside AI app that saved it through Gezel's tools (`claude-code`, `codex`, …). */
   app?: string;
+  /**
+   * It came from a conversation that read data kept on models on this
+   * computer, so cloud models never recall it: the connections, encoded by
+   * {@link keptMemoryTag}. It stays kept after the person allows cloud models
+   * for the connection, which applies from then on.
+   */
+  kept?: string;
+}
+
+const KEPT_SEPARATOR = '__';
+
+/** The `kept` tag for connections, from their binding ids. */
+export function keptMemoryTag(bindingIds: readonly string[]): string | undefined {
+  const ids = [...new Set(bindingIds)].map((id) => id.replace(/[^A-Za-z0-9.-]/g, '.'));
+  if (ids.length === 0) return undefined;
+  const tag = ids.join(KEPT_SEPARATOR);
+  // An over-long tag would be dropped on write, and the entry would read as free.
+  return tag.length <= 128 ? tag : 'several';
+}
+
+/** Whether a `kept` tag names this binding. */
+export function keptMemoryTagNames(tag: string, bindingId: string): boolean {
+  return tag.split(KEPT_SEPARATOR).includes(bindingId.replace(/[^A-Za-z0-9.-]/g, '.'));
+}
+
+/**
+ * A day file without the entries a cloud model may not read. Returned as is
+ * when there are none, so the file's own spacing survives.
+ */
+export function withoutKeptMemories(content: string): string {
+  const blocks = parseMemoryDay(content);
+  if (!blocks.some((block) => block.source?.kept)) return content;
+  return blocks
+    .filter((block) => !block.source?.kept)
+    .map((block) => formatMemoryBlock(block.time, block.text, block.kind, block.source))
+    .join('');
 }
 
 /** The source an entry keeps: only what its scope does not already say. */
@@ -72,8 +108,14 @@ export function memoryEntrySource(
   const project = scope === 'project' ? undefined : source?.project;
   const gezel = scope === 'gezel' ? undefined : source?.gezel;
   const app = source?.app;
-  return project || gezel || app
-    ? { ...(project ? { project } : {}), ...(gezel ? { gezel } : {}), ...(app ? { app } : {}) }
+  const kept = source?.kept;
+  return project || gezel || app || kept
+    ? {
+        ...(project ? { project } : {}),
+        ...(gezel ? { gezel } : {}),
+        ...(app ? { app } : {}),
+        ...(kept ? { kept } : {}),
+      }
     : undefined;
 }
 
@@ -98,7 +140,7 @@ export function sameProjectMemoryScore(
  */
 export const MEMORY_HEADING_RE = /^## (\d{2}:\d{2})(?:\s*\[([a-z]+)\])?(?:\s*\{([^{}\n]*)\})?\s*$/;
 
-const SOURCE_KEYS = ['project', 'gezel', 'app'] as const;
+const SOURCE_KEYS = ['project', 'gezel', 'app', 'kept'] as const;
 const SOURCE_VALUE_RE = /^[A-Za-z0-9._-]{1,128}$/;
 
 export function isMemoryKind(value: string | undefined | null): value is MemoryKind {
@@ -135,7 +177,7 @@ export function parseMemorySource(raw: string | undefined): MemorySource | undef
       source[key as (typeof SOURCE_KEYS)[number]] = value;
     }
   }
-  return source.project || source.gezel || source.app ? source : undefined;
+  return source.project || source.gezel || source.app || source.kept ? source : undefined;
 }
 
 export interface ParsedMemoryBlock {

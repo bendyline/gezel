@@ -8,9 +8,10 @@
 import type { Context } from 'hono';
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { ConnectorPolicyError } from '../../connectors/manager.js';
+import { ConnectorPolicyError, corpusDirFor } from '../../connectors/manager.js';
 import { isFirstPartyCaller } from '../auth.js';
 import type { ServiceContext } from '../context.js';
+import { keptLocalGate } from '../kept-local-gate.js';
 
 /**
  * Whether the person asked for this commit just now: they pressed Approve in
@@ -32,6 +33,8 @@ const BindRequestSchema = z.object({
   config: z.record(z.string(), z.unknown()).optional(),
   /** Credential to store in the SecretStore — object (stringified) or string. */
   credential: z.unknown().optional(),
+  /** Let cloud models read what it brings in. Read only from the person's app. */
+  allowCloudModels: z.boolean().optional(),
 });
 
 const OAuthStartSchema = z.object({
@@ -43,6 +46,8 @@ const OAuthStartSchema = z.object({
   loginHint: z.string().optional(),
   /** Re-link this existing connection in place instead of adding one. */
   relinkBindingId: z.string().optional(),
+  /** Let cloud models read what it brings in. Read only from the person's app. */
+  allowCloudModels: z.boolean().optional(),
 });
 
 const ReconnectSchema = z.object({
@@ -64,6 +69,7 @@ const PatchSchema = z.object({
   displayName: z.string().max(120).optional(),
   config: z.record(z.string(), z.unknown()).optional(),
   disabled: z.boolean().optional(),
+  allowCloudModels: z.boolean().optional(),
 });
 
 export function connectorRoutes(ctx: ServiceContext): Hono {
@@ -72,7 +78,16 @@ export function connectorRoutes(ctx: ServiceContext): Hono {
   app.get('/:id/connectors', async (c) => {
     const project = await ctx.store.getProject(c.req.param('id'));
     if (!project) return c.json({ error: 'not found' }, 404);
-    return c.json(await ctx.connectors.status(project));
+    const status = await ctx.connectors.status(project);
+    const gate = await keptLocalGate(ctx, c, project.id);
+    if (!gate?.withheld) return c.json(status);
+    // Whose account it is belongs to the data; that it exists does not.
+    return c.json({
+      ...status,
+      bindings: status.bindings.map((b) =>
+        b.allowCloudModels === false ? { ...b, account: undefined } : b,
+      ),
+    });
   });
 
   // What connecting a type fetches first (a published component), or why it
@@ -115,6 +130,7 @@ export function connectorRoutes(ctx: ServiceContext): Hono {
         ...(body.displayName ? { displayName: body.displayName } : {}),
         ...(body.config ? { config: body.config } : {}),
         ...(credential !== undefined ? { credential } : {}),
+        ...(body.allowCloudModels && isFirstPartyCaller(c) ? { allowCloudModels: true } : {}),
       });
       return c.json({ ok: true, binding });
     } catch (err) {
@@ -128,9 +144,12 @@ export function connectorRoutes(ctx: ServiceContext): Hono {
   app.post('/:id/connectors/oauth/start', async (c) => {
     const project = await ctx.store.getProject(c.req.param('id'));
     if (!project) return c.json({ error: 'not found' }, 404);
-    const body = OAuthStartSchema.parse(await c.req.json());
+    const { allowCloudModels, ...body } = OAuthStartSchema.parse(await c.req.json());
     try {
-      const result = await ctx.connectors.startOAuth(project, body);
+      const result = await ctx.connectors.startOAuth(project, {
+        ...body,
+        ...(allowCloudModels && isFirstPartyCaller(c) ? { allowCloudModels: true } : {}),
+      });
       return c.json({ ok: true, ...result });
     } catch (err) {
       return c.json({ error: err instanceof Error ? err.message : String(err) }, 400);
@@ -248,6 +267,9 @@ export function connectorRoutes(ctx: ServiceContext): Hono {
         ...(body.data.displayName !== undefined ? { displayName: body.data.displayName } : {}),
         ...(body.data.config ? { config: body.data.config } : {}),
         ...(body.data.disabled !== undefined ? { disabled: body.data.disabled } : {}),
+        ...(body.data.allowCloudModels !== undefined
+          ? { allowCloudModels: body.data.allowCloudModels }
+          : {}),
         firstParty: isFirstPartyCaller(c),
       });
       return c.json({ ok: true, binding });
@@ -322,7 +344,16 @@ export function connectorRoutes(ctx: ServiceContext): Hono {
   app.get('/:id/connectors/actions', async (c) => {
     const project = await ctx.store.getProject(c.req.param('id'));
     if (!project) return c.json({ error: 'not found' }, 404);
-    return c.json(await ctx.connectorActions.list(project));
+    const { pending } = await ctx.connectorActions.list(project);
+    const gate = await keptLocalGate(ctx, c, project.id);
+    if (!gate) return c.json({ pending });
+    // A draft can quote what it answers, so it is judged with the records.
+    const dirOf = new Map(
+      (project.connectors ?? []).map((b) => [b.id, corpusDirFor(project.connectors ?? [], b)]),
+    );
+    const shown = pending.filter((a) => !gate.hidesPath(dirOf.get(a.bindingId) ?? ''));
+    await gate.settle();
+    return c.json({ pending: shown });
   });
 
   // Stage a drafted action to the outbox (no network, no consent needed yet).

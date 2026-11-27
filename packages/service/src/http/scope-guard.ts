@@ -546,6 +546,23 @@ async function isSessionRouteAllowed(
     if (method !== 'GET' && /^\/prompt-drafts(?:\/|$)/.test(rest)) {
       return sessionDeny('message drafts belong to the person writing them');
     }
+    // The person's own buttons, which no gezel tool calls. This namespace
+    // allows by default, so every session token reached them until the route
+    // authority table (route-authority.test.ts) listed them.
+    if (
+      method === 'POST' &&
+      /^\/(?:reveal-reference|continue|index\/(?:refresh|enrich(?:\/stop)?)|reports\/generate|suggested-work\/dismiss|albums\/prepare|skills\/invoke)\/?$/.test(
+        rest,
+      )
+    ) {
+      return sessionDeny('this is the person’s action in Gezel, not a gezel tool');
+    }
+    if (
+      (method === 'POST' && /^\/people\/[^/]+\/rename\/?$/.test(rest)) ||
+      (method === 'DELETE' && /^\/people\/[^/]+\/?$/.test(rest))
+    ) {
+      return sessionDeny('naming or forgetting a person in photos is the person’s decision');
+    }
     // Schedules and night work run while nobody watches, so only the
     // person's own turn may switch them on. Switching them off stays open.
     if (method === 'POST' && /^\/suggested-work\/enable\/?$/.test(rest) && !personTurn()) {

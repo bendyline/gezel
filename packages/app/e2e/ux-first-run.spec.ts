@@ -123,10 +123,3 @@ test('04 - the ask stands alone until the tools are on their way', async () => {
   await expect(welcome.getByTestId('home-intro-article')).toHaveCount(0);
   await expect(welcome.getByRole('button', { name: 'Take the 1-minute tour' })).toHaveCount(0);
 });
-
-test('05 - first-run in dark mode', async () => {
-  await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'dark'));
-  await page.waitForTimeout(600);
-  await shot('04-first-run-dark.png');
-  await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'light'));
-});

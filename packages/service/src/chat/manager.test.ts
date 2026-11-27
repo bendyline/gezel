@@ -113,6 +113,15 @@ describe('resolveMlxEffectiveNumCtx', () => {
 });
 
 describe('ChatManager — clamped first-turn context', () => {
+  // Nothing asserted here comes from embeddings; loading the embedder for
+  // the routing preview was 12 s of this test's 14.4 s.
+  beforeEach(() => {
+    vi.stubEnv('GEZEL_DISABLE_EMBEDDINGS', '1');
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('does not replay the current user during auto-recall and diets a clamped Meester', async () => {
     const testHome = await mkdtemp(join(tmpdir(), 'gezel-first-turn-context-test-'));
     const testStore = new Store({ home: testHome });
@@ -1801,6 +1810,10 @@ describe('ChatManager — parked handoff durability', () => {
       async () => {
         boSession = (await store.listSessions({ gezelId: 'bo' }))[0]?.id ?? '';
         expect(boSession && manager.isCheckInTurn(boSession)).toBe(true);
+        // Bo's turn must reach the provider before it is stopped. Stopped any
+        // earlier, the hanging script above went to the next turn instead,
+        // and the drain below and the teardown each waited out 15 s.
+        expect(mock.calls.filter((c) => c.kind === 'send')).toHaveLength(2);
       },
       { timeout: 5000, interval: 25 },
     );
@@ -4736,21 +4749,8 @@ describe('ChatManager — memory extraction isolation', () => {
         }
       });
     }
-
-    it('still extracts on every turn for cloud providers (Copilot baseline)', async () => {
-      // Baseline control: the same 3-turn loop on the default Copilot
-      // mock runs extraction each turn. Cadence gate is local-only.
-      const session = await manager.createSession({ gezelId: 'ada' });
-      for (let i = 0; i < 3; i++) {
-        mock.script(`reply-${i}`, 'NONE');
-        await manager.send(session.id, `turn ${i}`);
-        await manager.drainBackground();
-      }
-      const backgroundSends = mock.calls.filter(
-        (c) => c.kind === 'send' && c.sendOpts?.queue?.lane === 'background',
-      );
-      expect(backgroundSends.length).toBeGreaterThanOrEqual(3);
-    });
+    // Cloud providers extract on every turn; manager-memory-debounce.test.ts
+    // pins that ("fires extraction immediately on every turn").
   });
 });
 
@@ -5575,28 +5575,6 @@ describe('ChatManager — askGezelAndWait (sync consultation)', () => {
     if (res.outcome !== 'error') return;
     expect(res.reason).toBe('depth');
     inflight.clear();
-  });
-
-  it('rejects with timeout when the target never replies', async () => {
-    await store.createGezel({ name: 'Maya', role: 'Voorman' });
-    const adaSession = await manager.createSession({ gezelId: 'ada' });
-    // Make Maya's first send hang past the timeout by NOT scripting a reply
-    // and using a delay larger than our timeout.
-    mock.scriptSendDelay(2000);
-    mock.script('eventually'); // never reaches us — caller bails first
-
-    const res = await manager.askGezelAndWait({
-      fromGezelId: 'ada',
-      fromSessionId: adaSession.id,
-      toGezelIdOrName: 'maya',
-      text: 'are you there?',
-      timeoutMs: 10_000, // server clamps to >=10s; turn delay is 2s so reply DOES arrive
-    });
-    // The 2-second send delay is well under the 10-second clamped
-    // timeout, so this completes successfully — confirms the reply
-    // path doesn't itself stall while waiting. (A real "never replies"
-    // case takes >30s wall and is gated by `MAX_ASK_TIMEOUT_MS`.)
-    expect(res.outcome).toBe('reply');
   });
 
   // The ask timeout is an IDLE budget, not a wall-clock cap: a

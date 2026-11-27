@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CatalogService } from '@bendyline/gezel-catalog';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { MockProvider } from '../providers/mock.js';
@@ -20,6 +20,15 @@ const noopMemory = {
 } as unknown as MemoryManager;
 
 describe('ChatManager — coordinator routing clamps on a decode-time grammar', () => {
+  // The prompt bytes under test do not depend on embeddings; loading the
+  // embedder for the routing preview cost 12 s of this test's 14.6 s.
+  beforeEach(() => {
+    vi.stubEnv('GEZEL_DISABLE_EMBEDDINGS', '1');
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('keeps an MLX meester prompt byte-identical when a build request routes the turn', async () => {
     // gemma4-e4b on MLX: the build clamp swapped a 60-tool roster for the
     // 30-tool router surface, rewrote the prompt at token 1,126, and the

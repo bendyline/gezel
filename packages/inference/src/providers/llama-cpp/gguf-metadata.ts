@@ -291,6 +291,13 @@ export interface GgufSummary {
   tensorTypeCounts?: Record<number, number>;
   /** Parameters in this file's tensor table, with `{ includeTensorTypes: true }`. */
   parameterCount?: number;
+  /**
+   * Every metadata key in the header, in file order (capped at
+   * {@link MAX_METADATA_KEYS}). Populated with `{ includeMetadataKeys: true }`.
+   */
+  metadataKeys?: string[];
+  /** `<arch>.attention.indexer.top_k` — keys a sparse-attention query attends to. */
+  indexerTopK?: number;
   /** Total on-disk size of the GGUF (a resident-footprint proxy for the planner). */
   fileSizeBytes: number;
   // Read stats — for confirming we really don't have to slurp the file.
@@ -662,11 +669,30 @@ export function effectiveLazyTensorBytes(
 /** GGUF default tensor-data alignment when `general.alignment` is absent. */
 const DEFAULT_ALIGNMENT = 32;
 
+/** Real headers carry tens of keys; the cap bounds what a hostile file can make us hold. */
+const MAX_METADATA_KEYS = 1024;
+const MAX_METADATA_KEY_LENGTH = 256;
+
 export interface ReadGgufSummaryOptions {
   includeTensors?: boolean;
   includeTensorSizes?: boolean;
   /** Count tensors per ggml type and parameters per the dims (model-import checks). */
   includeTensorTypes?: boolean;
+  /** List the header's metadata keys (model-import checks for design revisions). */
+  includeMetadataKeys?: boolean;
+}
+
+/**
+ * Whether llama-server must hold every slot in one unified KV cache for this
+ * model. Kolibri 1.1's sparse attention (`kolibri1` with an indexer) builds
+ * its selection inputs from the cells of a single stream, so its loader
+ * refuses several partitioned sequences: the same condition llama.cpp checks
+ * (ggml-org/llama.cpp#32891).
+ */
+export function ggufRequiresUnifiedKv(
+  summary: Pick<GgufSummary, 'architecture' | 'indexerTopK'>,
+): boolean {
+  return summary.architecture === 'kolibri1' && (summary.indexerTopK ?? 0) > 0;
 }
 
 export function readGgufSummary(path: string, opts?: ReadGgufSummaryOptions): GgufSummary {
@@ -755,10 +781,18 @@ function parseGgufSummary(source: GgufByteSource, opts?: ReadGgufSummaryOptions)
   };
 
   let alignment = DEFAULT_ALIGNMENT;
+  const metadataKeys: string[] | undefined = opts?.includeMetadataKeys ? [] : undefined;
 
   for (let i = 0n; i < metadataCount; i++) {
     const key = r.string();
     const type = r.u32() as GgufValueType;
+    if (
+      metadataKeys &&
+      metadataKeys.length < MAX_METADATA_KEYS &&
+      key.length <= MAX_METADATA_KEY_LENGTH
+    ) {
+      metadataKeys.push(key);
+    }
 
     // Read the scalar-valued keys we care about; skip everything
     // else. For arch-qualified keys like `llama.context_length` we
@@ -850,10 +884,13 @@ function parseGgufSummary(source: GgufByteSource, opts?: ReadGgufSummaryOptions)
       summary.ssmStateSize = readUintScalar(r, type);
     } else if (key.endsWith('.ssm.conv_kernel')) {
       summary.ssmConvKernel = readUintScalar(r, type);
+    } else if (key.endsWith('.attention.indexer.top_k')) {
+      summary.indexerTopK = readUintScalar(r, type);
     } else {
       r.skipValue(type);
     }
   }
+  if (metadataKeys) summary.metadataKeys = metadataKeys;
 
   // Tensor-info section follows the metadata. `includeTensors` reads
   // just the names — the ground-truth way to detect MoE (`*_exps`) and

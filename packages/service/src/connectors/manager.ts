@@ -31,6 +31,8 @@ import {
   type SpectralComponentSource,
   backoffDelayMs,
   compareSemver,
+  connectionKeepsLocal,
+  connectorAsksBeforeCloud,
   connectorSourceProblems,
   createLogger,
   isRateLimitStatus,
@@ -62,10 +64,12 @@ import { builtinOAuthClientFor, hasBuiltinOAuthClient } from './builtin-oauth-cl
 import { captureFetch } from './capture/capture-fetch.js';
 import { CassetteLeakError, scrubExchanges } from './capture/scrub.js';
 import { validateConnectorConfig } from './config-validate.js';
+import { corpusDirFor, resolveCorpusDir } from './corpus-path.js';
 import { McpConnectorAdapter } from './drivers/mcp.js';
 import { ScriptConnectorAdapter } from './drivers/script.js';
 import { SpectralComponentAdapter } from './drivers/spectral-component.js';
 import { SpectralConnectorAdapter } from './drivers/spectral.js';
+import { keptLocalSource } from './kept-local.js';
 import { ReconnectRequiredError } from './natives/oauth-session.js';
 import {
   AccountMismatchError,
@@ -132,7 +136,6 @@ import {
   writeRecord as defaultWriteRecord,
   pruneRecords,
   sha8,
-  slug,
   sweepRecords,
 } from './writer.js';
 
@@ -175,42 +178,7 @@ export function resolveDeclaredOrigins(
   return out;
 }
 
-/**
- * Corpus root for a binding: `data/<slug(displayName || type)>`, suffixed
- * `-2`/`-3`… on collision with another binding's persisted root. Resolved once
- * (at bind time, or lazily for pre-corpusDir bindings) and persisted — never
- * recomputed, so renames don't strand corpora.
- */
-export function resolveCorpusDir(
-  existing: Pick<ProjectConnectorBinding, 'corpusDir'>[],
-  type: string,
-  displayName?: string,
-): string {
-  const taken = new Set(existing.map((b) => b.corpusDir).filter(Boolean));
-  const base = `data/${displayName?.trim() ? slug(displayName) : slug(type)}`;
-  if (!taken.has(base)) return base;
-  for (let n = 2; ; n++) {
-    const candidate = `${base}-${n}`;
-    if (!taken.has(candidate)) return candidate;
-  }
-}
-
-/**
- * The corpus root to use for a binding right now: the persisted `corpusDir`,
- * or the deterministic resolution a future sync will persist. Shared with the
- * action manager so drafts and records always land in the same corpus.
- */
-export function corpusDirFor(
-  bindings: ProjectConnectorBinding[],
-  binding: ProjectConnectorBinding,
-): string {
-  if (binding.corpusDir) return binding.corpusDir;
-  return resolveCorpusDir(
-    bindings.filter((b) => b.id !== binding.id),
-    binding.type,
-    binding.displayName,
-  );
-}
+export { corpusDirFor, resolveCorpusDir };
 
 export interface SyncBindingOptions<Cur = unknown, Rec = NormalizedRecord> {
   /** Project artifacts root where this connector's corpus lands. */
@@ -899,9 +867,12 @@ export interface PatchConnectorInput {
   config?: Record<string, unknown>;
   /** Pause (true) or resume (false). Resuming clears an emergency stop. */
   disabled?: boolean;
+  /** Let cloud models read what it brings in, for a type that asks first. */
+  allowCloudModels?: boolean;
   /**
    * The person's own app made the request (`isFirstPartyCaller`). Only it may
-   * change a destination field (see {@link connectorDestinationKeys}).
+   * change a destination field (see {@link connectorDestinationKeys}) or the
+   * cloud switch.
    */
   firstParty?: boolean;
 }
@@ -951,6 +922,8 @@ export interface BindConnectorInput {
   version?: string;
   /** The account an OAuth sign-in reached, as the provider reported it. */
   account?: string;
+  /** The person let cloud models read what it brings in. */
+  allowCloudModels?: boolean;
 }
 
 export interface ConnectorStatus {
@@ -961,6 +934,11 @@ export interface ConnectorStatus {
     displayName?: string;
     /** The account the person signed in with (Google, Microsoft). */
     account?: string;
+    /**
+     * Present only for a type that asks before cloud models may read its data
+     * (a Google account's): whether the person allowed them.
+     */
+    allowCloudModels?: boolean;
     completeness?: string;
     lastSyncedAt?: string;
     lastError?: string;
@@ -1015,6 +993,7 @@ interface PendingConnectorOAuth {
   version: string;
   config: Record<string, unknown>;
   displayName?: string;
+  allowCloudModels?: boolean;
   clientId: string;
   clientSecret?: string;
   endpoints: OAuthEndpoints;
@@ -1355,6 +1334,9 @@ export class ConnectorManager {
         driver: type.driver,
         ...(input.displayName ? { displayName: input.displayName } : {}),
         ...(input.account ? { account: input.account } : {}),
+        ...(input.allowCloudModels === true && connectorAsksBeforeCloud(input.type)
+          ? { allowCloudModels: true }
+          : {}),
       };
       // A `script` connector's fetch script reaches its credential parent-side
       // via `gezel.http.authed` — grant the named credential on the project so
@@ -1388,6 +1370,7 @@ export class ConnectorManager {
           summary: `Connector bound: ${input.displayName ?? input.type}`,
         })
         .catch(() => {});
+      if (binding.allowCloudModels) await this.logCloudChoice(project.id, binding);
       this.opts.onBindingsChanged?.(project.id);
       return binding;
     });
@@ -1433,7 +1416,19 @@ export class ConnectorManager {
           `Only the Gezel app can change where ${binding.displayName ?? binding.type} sends its sign-in (${destinationsMoved.join(', ')}).`,
         );
       }
+      if (patch.allowCloudModels !== undefined) {
+        if (!connectorAsksBeforeCloud(binding.type)) {
+          throw new Error(`${binding.displayName ?? binding.type} has no cloud model setting.`);
+        }
+        if (!patch.firstParty) {
+          throw new ConnectorPolicyError(
+            `Only the Gezel app can let cloud models read ${binding.displayName ?? binding.type}.`,
+          );
+        }
+      }
       const updated: ProjectConnectorBinding = { ...binding };
+      if (patch.allowCloudModels === true) updated.allowCloudModels = true;
+      else if (patch.allowCloudModels === false) delete updated.allowCloudModels;
       if (patch.displayName !== undefined) {
         const name = patch.displayName.trim();
         if (name) updated.displayName = name;
@@ -1484,6 +1479,9 @@ export class ConnectorManager {
           })
           .catch(() => {});
       }
+      if (Boolean(updated.allowCloudModels) !== Boolean(binding.allowCloudModels)) {
+        await this.logCloudChoice(project.id, updated);
+      }
       if (patch.disabled !== undefined && patch.disabled !== Boolean(binding.disabled)) {
         await this.opts.store.historyManager
           ?.log({
@@ -1498,6 +1496,21 @@ export class ConnectorManager {
     if (patch.disabled === true) this.cancelPasses({ bindingId }, 'the connection was paused');
     this.opts.onBindingsChanged?.(project.id);
     return next;
+  }
+
+  /** The person's yes or no to cloud models, dated where they can find it. */
+  private async logCloudChoice(projectId: string, binding: ProjectConnectorBinding): Promise<void> {
+    const name = binding.displayName ?? binding.type;
+    const allowed = binding.allowCloudModels === true;
+    await this.opts.store.historyManager
+      ?.log({
+        kind: allowed ? 'project.connector.cloud.allowed' : 'project.connector.cloud.stopped',
+        projectId,
+        summary: allowed
+          ? `Cloud AI may read ${name}`
+          : `${name} is kept on models on this computer`,
+      })
+      .catch(() => {});
   }
 
   /**
@@ -1551,6 +1564,8 @@ export class ConnectorManager {
       loginHint?: string;
       /** Re-link this binding in place instead of adding a new one. */
       relinkBindingId?: string;
+      /** The person let cloud models read what it brings in. */
+      allowCloudModels?: boolean;
     },
   ): Promise<{ authUrl: string; state: string }> {
     let relinking: ProjectConnectorBinding | undefined;
@@ -1638,6 +1653,7 @@ export class ConnectorManager {
       version: type.version,
       config: input.config ?? {},
       ...(input.displayName ? { displayName: input.displayName } : {}),
+      ...(input.allowCloudModels ? { allowCloudModels: true } : {}),
       clientId,
       ...(clientSecret ? { clientSecret } : {}),
       endpoints,
@@ -1771,6 +1787,7 @@ export class ConnectorManager {
       credential: pending.completion.credential,
       bindingId: pending.completion.bindingId,
       ...(pending.completion.account ? { account: pending.completion.account } : {}),
+      ...(pending.allowCloudModels ? { allowCloudModels: true } : {}),
     });
     this.pendingOAuth.delete(args.state);
     return binding;
@@ -2021,6 +2038,19 @@ export class ConnectorManager {
           originsPatch = { credentialAllowedOrigins: rest };
         }
       }
+      // Records left behind stay on this computer until a connection that
+      // takes the folder again answers for them. Written first: a crash
+      // between the two leaves them kept.
+      if (binding && connectionKeepsLocal(binding) && !opts.deleteData) {
+        const entry = {
+          path: corpusDirFor(existing, binding),
+          source: keptLocalSource(project.id, binding),
+        };
+        await this.opts.store.updateKeptLocal(project.id, (entries) => [
+          ...entries.filter((e) => e.path !== entry.path),
+          entry,
+        ]);
+      }
       await this.opts.store.updateProject(project.id, {
         connectors: existing.filter((b) => b.id !== bindingId),
         ...originsPatch,
@@ -2201,6 +2231,9 @@ export class ConnectorManager {
           type: b.type,
           ...(b.displayName ? { displayName: b.displayName } : {}),
           ...(b.account ? { account: b.account } : {}),
+          ...(connectorAsksBeforeCloud(b.type)
+            ? { allowCloudModels: b.allowCloudModels === true }
+            : {}),
           ...(completeness ? { completeness } : {}),
           ...(b.lastSyncedAt ? { lastSyncedAt: b.lastSyncedAt } : {}),
           ...(b.lastError ? { lastError: b.lastError } : {}),

@@ -5,157 +5,42 @@
  * process as the test runner), this suite exercises the full cross-process
  * path — token file handshake, runtime-files discovery, HTTP transport,
  * auth middleware. If the Electron supervisor's spawn flow ever regresses
- * in a way the in-process tests miss, it'll surface here first.
+ * in a way the in-process tests miss, it'll surface here first. CLI commands
+ * against a live daemon are in daemon-commands.test.ts.
  */
-import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
-import { resolveSecurityPolicy } from '@bendyline/gezel';
 import {
-  type DiscoverOrSpawnResult,
   GezelClient,
   createTrustingFetch,
-  discoverOrSpawn,
   isProcessAlive,
   readRuntime,
-  resolveDaemonEntry,
-  stopOwnedDaemon,
   stopProcessByPid,
   systemServiceHome,
 } from '@bendyline/gezel-client/node';
 import { activeMachineSharedHome } from '@bendyline/gezel/paths';
-import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { connectForTui, spawnedDaemonNotice } from './connection.js';
+import {
+  childEnv,
+  cliEntry,
+  client,
+  daemonWorkspaceDirs,
+  execFileAsync,
+  gezelHome,
+  mkdtempHomeWithoutRetrieval,
+  registerSharedDaemon,
+  runCli,
+  runCliAtHome,
+  spawned,
+  workspaceCwd,
+} from './test-support/shared-daemon.js';
 
-let gezelHome: string;
-/**
- * The working directory every CLI child runs in. Commands that act on "the
- * current project" register it, and `env indexing on` indexes it. When this
- * was the checkout itself, the daemon indexed the whole monorepo (~5k files)
- * mid-suite; under V8 coverage that exhausted the runner and the daemon died
- * with a Zone OOM, failing every later case (2026-09-25).
- */
-let workspaceCwd: string;
-// The shared daemon can retain workspace handles after a CLI exits. Windows
-// cleanup must wait for daemon shutdown, including when a test fails.
-const daemonWorkspaceDirs: string[] = [];
-let spawned: DiscoverOrSpawnResult;
-let client: GezelClient;
-/** The daemon's recent output, printed when a case fails; its home is deleted afterwards. */
-const daemonLog: string[] = [];
-const execFileAsync = promisify(execFile);
-const cliEntry = fileURLToPath(new URL('../dist/bin/gezel.js', import.meta.url));
-
-async function runCli(...args: string[]): Promise<{ stdout: string; stderr: string }> {
-  return runCliAtHome(gezelHome, ...args);
-}
-
-/**
- * Env for a spawned CLI child, minus the vitest markers.
- *
- * These children run the real `dist` build, so `VITEST` in their environment
- * is a lie with teeth: the service reads it to pick the in-process fallbacks
- * that exist because worker entrypoints aren't built under vitest. A CLI run
- * that boots its own service then loads the embedding model on its main
- * thread and cannot exit until that load finishes — the whole reason this
- * suite used to hit its deadline.
- */
-function childEnv(extra: Record<string, string>): NodeJS.ProcessEnv {
-  // On Windows a fresh home downloads the MXC launcher at boot, and once it
-  // lands `--strict-sandbox` stops refusing — so the suite's outcome depended
-  // on how fast npm answered. Keep Windows isolation disabled for this suite.
-  const env: NodeJS.ProcessEnv = { ...process.env, GEZEL_MXC: 'off', ...extra };
-  for (const key of Object.keys(env)) {
-    if (key.startsWith('VITEST')) delete env[key];
-  }
-  return env;
-}
-
-/**
- * A fresh home whose turns carry no indexed context. The mock provider echoes
- * the prompt it was given, and per-turn retrieval legitimately prepends hits
- * from the bundled Handboek catalog, which an empty workspace cwd cannot keep
- * out. The stdout cases assert the CLI's stdout/stderr boundary, not what
- * retrieval finds.
- */
-async function mkdtempHomeWithoutRetrieval(prefix: string): Promise<string> {
-  const home = await mkdtemp(join(tmpdir(), prefix));
-  await writeFile(join(home, 'config.json'), `${JSON.stringify({ retrieval: { mode: 'off' } })}\n`);
-  return home;
-}
-
-async function runCliAtHome(
-  home: string,
-  ...args: string[]
-): Promise<{ stdout: string; stderr: string }> {
-  return execFileAsync(process.execPath, [cliEntry, '--home', home, ...args], {
-    cwd: workspaceCwd,
-    env: childEnv({ GEZEL_HOME: home, GEZEL_MOCK_PROVIDER: '1' }),
-    // connectOwned gives a cold daemon up to 20s to start. Keep the outer
-    // process budget larger than that contract so execFile cannot kill the
-    // CLI before it can report its own success or startup failure.
-    timeout: 25_000,
-  });
-}
-
-beforeAll(async () => {
-  gezelHome = await mkdtemp(join(tmpdir(), 'gezel-daemon-integ-'));
-  // Resolved to match what a child's process.cwd() reports (macOS /var → /private/var).
-  workspaceCwd = await realpath(await mkdtemp(join(tmpdir(), 'gezel-daemon-integ-cwd-')));
-  const daemonEntry = resolveDaemonEntry(import.meta.url);
-  spawned = await discoverOrSpawn({
-    daemonEntry,
-    detached: false,
-    stdio: 'pipe',
-    home: gezelHome,
-    // Stripped of VITEST like every CLI child: inheriting it put this daemon's
-    // indexing and embedding on its event loop, and about a minute after the
-    // suite first touched the cwd project that stalled health checks past
-    // the CLI's 5s probe.
-    env: childEnv({
-      GEZEL_HOME: gezelHome,
-      // Skip the heavy LLM provider boot — mock is deterministic and has
-      // no network dependency, which keeps this test CI-friendly.
-      GEZEL_MOCK_PROVIDER: '1',
-      // Force an ephemeral port. Without GEZEL_PORT the daemon now claims
-      // the canonical fixed port (6228); pinning to 0 keeps this
-      // cross-process test hermetic and off the shared port so it can't
-      // race a real local daemon or another spawning suite.
-      GEZEL_PORT: '0',
-      GEZEL_SERVICE_ROLE: 'user',
-    }),
-    timeoutMs: 15_000,
-  });
-  client = spawned.client;
-  // Drained here or nowhere: a daemon whose pipe fills blocks on its next log line.
-  for (const stream of [spawned.child?.stdout, spawned.child?.stderr])
-    stream?.on('data', (chunk: Buffer) => {
-      daemonLog.push(...chunk.toString().split('\n').filter(Boolean));
-      daemonLog.splice(0, daemonLog.length - 200);
-    });
-}, 20_000);
-
-afterEach(({ task }) => {
-  if (task.result?.state === 'fail')
-    console.error(`gezeld output before this failure:\n${daemonLog.join('\n')}`);
-});
-
-afterAll(async () => {
-  await stopOwnedDaemon(spawned?.child);
-  for (const folder of daemonWorkspaceDirs) {
-    await rm(folder, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-  }
-  if (gezelHome) await rm(gezelHome, { recursive: true, force: true });
-  if (workspaceCwd) await rm(workspaceCwd, { recursive: true, force: true });
-});
+registerSharedDaemon();
 
 // Every case here crosses a process boundary, and the CLI-entry cases shell
-// out twice with a 25s `execFile` budget each — more than vitest's 5s default
-// allows, so a loaded runner timed the suite out rather than failing an
-// assertion. Match the budget to the work the tests actually do.
+// out with a 25s `execFile` budget each — more than vitest's 5s default.
 describe('gezeld cross-process integration', { timeout: 30_000 }, () => {
   // A developer machine that ever ran a packaged install carries a real
   // machine-shared root. The daemon mounts it by design, so a machine-shared
@@ -196,62 +81,6 @@ describe('gezeld cross-process integration', { timeout: 30_000 }, () => {
     const result = await client.toolFindFiles('default', { glob: '**/*.{ts,tsx}', maxResults: 2 });
     expect(Array.isArray(result.files)).toBe(true);
     await expect(client.health()).resolves.toMatchObject({ ok: true });
-  });
-
-  it('sets, lists, and removes write-only provider credentials through the built CLI', async () => {
-    const value = 'integration-only-credential-value';
-    const saved = await execFileAsync(
-      process.execPath,
-      [
-        cliEntry,
-        '--home',
-        gezelHome,
-        'secret',
-        'set',
-        'braveSearchApiKey',
-        '--env',
-        'GEZEL_TEST_SECRET_INPUT',
-        '--use-for-search',
-        '--json',
-      ],
-      {
-        env: childEnv({
-          GEZEL_HOME: gezelHome,
-          GEZEL_MOCK_PROVIDER: '1',
-          GEZEL_TEST_SECRET_INPUT: value,
-        }),
-        timeout: 25_000,
-      },
-    );
-    expect(JSON.parse(saved.stdout)).toEqual({
-      name: 'braveSearchApiKey',
-      configured: true,
-      searchProvider: 'brave',
-    });
-    const config = await client.getConfig();
-    expect(config.hasBraveSearchApiKey).toBe(true);
-    expect(config.webSearch?.provider).toBe('brave');
-    const listed = await runCli('secret', 'list', '--json');
-    expect(JSON.parse(listed.stdout).credentials).toContainEqual({
-      name: 'braveSearchApiKey',
-      configured: true,
-    });
-    expect(saved.stdout + saved.stderr + listed.stdout + listed.stderr).not.toContain(value);
-    const piped = execFileAsync(
-      process.execPath,
-      [cliEntry, '--home', gezelHome, 'secret', 'set', 'tavilyApiKey', '--stdin', '--json'],
-      {
-        env: childEnv({ GEZEL_HOME: gezelHome, GEZEL_MOCK_PROVIDER: '1' }),
-        timeout: 25_000,
-      },
-    );
-    piped.child.stdin?.end(`${value}\r\n`);
-    expect(JSON.parse((await piped).stdout)).toEqual({ name: 'tavilyApiKey', configured: true });
-    await runCli('secret', 'remove', 'braveSearchApiKey');
-    await runCli('secret', 'remove', 'tavilyApiKey');
-    expect((await client.getConfig()).hasBraveSearchApiKey).toBe(false);
-    expect((await client.getConfig()).hasTavilyApiKey).toBe(false);
-    await client.updateConfig({ webSearch: { provider: 'mock' } });
   });
 
   it('runs parameterized project craftbooks and workflow modules through the built Windows CLI', async () => {
@@ -547,157 +376,6 @@ export async function run({ client, projectId, craftbook, params, runCraftbook }
     await client.updateConfig({ provider: before.provider });
   });
 
-  it('sets, reads, and clears a gezel output limit without erasing its other tuning', async () => {
-    const gezel = await client.createGezel({ name: 'Output budget test', about: 'Test only.' });
-    const tuning = {
-      sampling: { temperature: 0.35, maxTokens: 8192 },
-      reasoning: { thinkingBudget: 2048 },
-    };
-    await client.updateGezelSettings(gezel.id, { tuning });
-    const args = ['agent', 'output-limit', gezel.id];
-    expect(JSON.parse((await runCli(...args, '--json')).stdout)).toEqual({
-      gezelId: gezel.id,
-      outputTokens: 8192,
-    });
-    expect(JSON.parse((await runCli(...args, '16384', '--json')).stdout)).toEqual({
-      gezelId: gezel.id,
-      outputTokens: 16384,
-    });
-    expect((await client.getGezel(gezel.id)).parsed.frontmatter.tuning).toEqual({
-      ...tuning,
-      sampling: { ...tuning.sampling, maxTokens: 16384 },
-    });
-    expect(JSON.parse((await runCli(...args, 'auto', '--json')).stdout).outputTokens).toBeNull();
-    expect((await client.getGezel(gezel.id)).parsed.frontmatter.tuning).toEqual({
-      sampling: { temperature: 0.35 },
-      reasoning: tuning.reasoning,
-    });
-    for (const value of ['0', '-1', '1.5', '1e4', '9007199254740992']) {
-      await expect(runCli(...args, value)).rejects.toMatchObject({
-        stderr: expect.stringContaining('positive integer'),
-      });
-    }
-    const plain = await client.createGezel({
-      name: 'Inherited output budget test',
-      about: 'Test only.',
-    });
-    await runCli('agent', 'output-limit', plain.id, '1024');
-    await runCli('agent', 'output-limit', plain.id, 'auto');
-    expect((await client.getGezel(plain.id)).parsed.frontmatter.tuning).toBeUndefined();
-  }, 30_000);
-
-  it('sets, reads, and clears model context through the CLI without changing other models', async () => {
-    await client.updateModelContextOverride('llama-cpp', 'unrelated-model', 98304);
-    const args = ['model', 'context', 'test-model'];
-    const set = JSON.parse(
-      (await runCli(...args, '65536', '--provider', 'llama-cpp', '--json')).stdout,
-    );
-    expect(set).toEqual({ provider: 'llama-cpp', modelId: 'test-model', contextTokens: 65536 });
-    expect(JSON.parse((await runCli(...args, '--provider', 'llama-cpp', '--json')).stdout)).toEqual(
-      set,
-    );
-    await expect(runCli(...args, '1e5')).rejects.toMatchObject({ code: 1 });
-    await expect(runCli(...args, '1024')).rejects.toMatchObject({ code: 1 });
-    await runCli(...args, 'auto', '--provider', 'llama-cpp');
-    expect((await client.getModelContextOverrides('llama-cpp')).overrides).toEqual({
-      'unrelated-model': 98304,
-    });
-    await client.updateModelContextOverride('llama-cpp', 'unrelated-model', null);
-  });
-
-  it('pauses one task idempotently through the CLI while preserving other task work', async () => {
-    const create = (title: string) =>
-      client.createTask('default', {
-        title,
-        description: 'Manual task for the CLI pause integration check.',
-        assignee: { kind: 'user' },
-        steps: [{ name: 'Main' }],
-      });
-    const target = await create('Pause target');
-    const neighbor = await create('Unaffected neighbor');
-    const before = (await client.getConfig()).aiEngagementMode;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      expect(JSON.parse((await runCli('task', 'pause', target.ref, '--json')).stdout)).toEqual({
-        taskRef: target.ref,
-        status: 'paused',
-      });
-    }
-    expect((await client.getTaskByRef(neighbor.ref)).status).toBe('active');
-    expect((await client.getConfig()).aiEngagementMode).toBe(before);
-    await client.setTaskStatus(neighbor.projectId, neighbor.num, 'canceled');
-    await expect(runCli('task', 'pause', neighbor.ref)).rejects.toMatchObject({
-      stderr: expect.stringContaining('pause requires an active or paused task'),
-    });
-  });
-
-  it('sets and clears inference concurrency while preserving other providers', async () => {
-    const before = await client.getConfig();
-    try {
-      await client.updateConfig({
-        providerConcurrency: { ...before.providerConcurrency, openai: 7 },
-      });
-      const args = ['model', 'concurrency'];
-      expect(
-        JSON.parse((await runCli(...args, '1', '--provider', 'llama-cpp', '--json')).stdout),
-      ).toEqual({ provider: 'llama-cpp', slots: 1 });
-      expect(
-        JSON.parse((await runCli(...args, '--provider', 'llama-cpp', '--json')).stdout).slots,
-      ).toBe(1);
-      await expect(runCli(...args, '0')).rejects.toMatchObject({ code: 1 });
-      await expect(runCli(...args, '1.5')).rejects.toMatchObject({ code: 1 });
-      await runCli(...args, 'auto', '--provider', 'llama-cpp');
-      expect(
-        JSON.parse((await runCli(...args, '16', '--provider', 'codex-cli', '--json')).stdout),
-      ).toEqual({ provider: 'codex-cli', slots: 16 });
-      expect((await client.getConfig()).providerConcurrency?.['codex-cli']).toBe(16);
-      await runCli(...args, 'auto', '--provider', 'codex-cli');
-      await expect(runCli(...args, '2', '--provider', 'gemini')).rejects.toMatchObject({ code: 1 });
-      expect((await client.getConfig()).providerConcurrency).toEqual({
-        ...before.providerConcurrency,
-        openai: 7,
-      });
-    } finally {
-      await client.updateConfig({ providerConcurrency: before.providerConcurrency ?? {} });
-    }
-  });
-
-  it('configures external services and project indexing through explicit CLI settings', async () => {
-    const before = await client.getConfig();
-    try {
-      const result = await runCli('security', 'external-services', 'on', '--json');
-      expect(JSON.parse(result.stdout)).toEqual({ allowExternalServices: true });
-      const after = await client.getConfig();
-      expect(after.securityPolicy?.allowExternalServices).toBe(true);
-      expect(after.securityPolicy?.allowFileEdits).toBe(
-        resolveSecurityPolicy(before).allowFileEdits,
-      );
-      await expect(runCli('security', 'external-services', 'yes')).rejects.toMatchObject({
-        stderr: expect.stringContaining('Use on or off'),
-      });
-      const indexing = JSON.parse((await runCli('env', 'indexing', 'off', '--json')).stdout);
-      expect(indexing.indexingEnabled).toBe(false);
-      expect((await client.getProject(indexing.projectId)).indexingEnabled).toBe(false);
-      await runCli('env', 'indexing', 'on');
-    } finally {
-      if (before.securityPolicy)
-        await client.updateConfig({ securityPolicy: before.securityPolicy });
-    }
-  });
-
-  it('switches gezel growth off and on for the home through the CLI', async () => {
-    const before = (await client.getConfig()).growth;
-    try {
-      const off = JSON.parse((await runCli('growth', 'off', '--json')).stdout);
-      expect(off).toEqual({ growthEnabled: false });
-      expect((await client.getConfig()).growth).toEqual({ enabled: false });
-      expect((await runCli('growth')).stdout.trim()).toBe('Growth (XP and level-ups): off');
-      await runCli('growth', 'on');
-      expect((await client.getConfig()).growth).toEqual({ enabled: true });
-    } finally {
-      await client.updateConfig({ growth: { enabled: before?.enabled !== false } });
-    }
-  });
-
   it('drives status and doctor through the installed CLI entry point', async () => {
     const status = await runCli('status');
     expect(status.stderr).toBe('');
@@ -707,19 +385,6 @@ export async function run({ client, projectId, craftbook, params, runCraftbook }
     expect(doctor.stderr).toBe('');
     expect(doctor.stdout).toContain('runtime file: present');
     expect(doctor.stdout).toContain(`pid=${spawned.pid}`);
-  });
-
-  it.each([
-    ['agent', 'list'],
-    ['env', 'list'],
-    ['task', 'list'],
-    ['model', 'list'],
-    ['native', 'list'],
-    ['native', 'status'],
-  ])('executes the %s command family in a subprocess', async (family, command) => {
-    const result = await runCli(family, command);
-    expect(result.stderr).toBe('');
-    expect(result.stdout.trim().length).toBeGreaterThan(0);
   });
 
   it('rejects an empty run command before opening a provider session', async () => {
@@ -857,79 +522,10 @@ export async function run({ client, projectId, craftbook, params, runCraftbook }
     }
   }, 120_000);
 
-  it('starts a craftbook from the do subcommand', async () => {
-    const result = await runCli('do', 'security-architecture-review');
-    expect(result.stderr).toBe('');
-    expect(result.stdout).toMatch(/^started .+\/\d+ — Security Architecture Review/m);
-
-    const { projects } = await client.listProjects();
-    const project = projects.find(
-      (candidate) => candidate.workingDir?.toLowerCase() === workspaceCwd.toLowerCase(),
+  it('wires the settings commands into the built CLI', async () => {
+    // Their logic and validation are pinned in settings-command.test.ts.
+    expect((await runCli('growth')).stdout.trim()).toMatch(
+      /^Growth \(XP and level-ups\): (on|off)$/,
     );
-    expect(project).toBeDefined();
-    const { tasks } = await client.listProjectTasks(project!.id);
-    expect(tasks.some((task) => task.craftbook.id === 'security-architecture-review')).toBe(true);
   });
-
-  it('adds, lists, toggles, and removes an AI App through the app subcommand', async () => {
-    // Build the fixture .gezapp through the daemon's own exporter — the
-    // export route writes it into the default project's artifacts drawer,
-    // and this test owns that home directory.
-    const exported = await client.exportAiApp('default', { typeId: 'just-chat' });
-    const fixturePath = join(gezelHome, 'projects', 'default', 'artifacts', exported.artifactPath);
-
-    const added = await runCli('app', 'add', fixturePath, '--yes');
-    expect(added.stderr).toBe('');
-    expect(added.stdout).toContain('Installed just-chat@');
-
-    const again = await runCli('app', 'add', fixturePath, '--yes');
-    expect(again.stdout).toContain('already installed — no changes');
-
-    const list = await runCli('app', 'list');
-    expect(list.stdout).toContain('just-chat');
-    expect(list.stdout).toContain('enabled');
-
-    const folder = await mkdtemp(join(tmpdir(), 'gezel-app-apply-'));
-    try {
-      const applied = await runCliAtHome(
-        gezelHome,
-        '--project',
-        folder,
-        'app',
-        'apply',
-        'just-chat',
-        '--yes',
-      );
-      expect(applied.stdout).toContain('Applied just-chat@');
-
-      const status = await runCliAtHome(gezelHome, '--project', folder, 'app', 'status');
-      expect(status.stdout).toContain('just-chat');
-      expect(status.stdout).not.toContain('Update available');
-
-      const noop = await runCliAtHome(
-        gezelHome,
-        '--project',
-        folder,
-        'app',
-        'apply',
-        'just-chat',
-        '--yes',
-      );
-      expect(noop.stdout).toContain('already applied');
-    } finally {
-      daemonWorkspaceDirs.push(folder);
-    }
-
-    const disabled = await runCli('app', 'disable', 'just-chat');
-    expect(disabled.stdout).toContain('Disabled just-chat@');
-
-    const show = await runCli('app', 'show', 'just-chat');
-    expect(show.stdout).toContain('state: disabled');
-
-    const removed = await runCli('app', 'remove', 'just-chat', '--yes');
-    expect(removed.stdout).toContain('Uninstalled just-chat');
-
-    const empty = await runCli('app', 'list');
-    expect(empty.stdout).toContain('No AI Apps installed');
-  }, 90_000);
 });

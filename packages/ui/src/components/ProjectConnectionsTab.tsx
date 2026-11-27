@@ -5,6 +5,7 @@ import { api } from '../api.js';
 import { formatAbsoluteTime, formatRelativeTime } from '../relative-time.js';
 import { setVisibleInterval } from '../visible-interval.js';
 import { AddConnectionDialog, type AddedConnection } from './AddConnectionDialog.js';
+import { ConnectionCloudSwitch } from './ConnectionCloudSwitch.js';
 import { RemoveConnectionDialog } from './RemoveConnectionDialog.js';
 import { WebsiteBindingRow } from './WebsiteBindingRow.js';
 import { CameraBindingCard } from './cameras/CameraBindingCard.js';
@@ -219,6 +220,27 @@ export function ProjectConnectionsTab({
     [project.id, refresh],
   );
 
+  const handleCloud = useCallback(
+    async (bindingId: string, allow: boolean) => {
+      setBusy(bindingId);
+      setError('');
+      try {
+        await api.patchConnector(project.id, bindingId, { allowCloudModels: allow });
+        setNotice(
+          allow
+            ? 'A cloud AI you use can read it now.'
+            : 'Only models on this computer can read it now. This does not take back what a cloud AI already read.',
+        );
+        await refresh();
+      } catch (err) {
+        setError(apiErrorMessage(err));
+      } finally {
+        setBusy(null);
+      }
+    },
+    [project.id, refresh],
+  );
+
   const handleUnbind = useCallback(
     async (bindingId: string, deleteData = false) => {
       setBusy(bindingId);
@@ -319,7 +341,7 @@ export function ProjectConnectionsTab({
                 </li>
               ) : (
                 <li key={b.id} className="connected-app-row">
-                  <div>
+                  <div className="gz-connection-facts">
                     <strong>{b.displayName || b.type}</strong>
                     <span className="muted small"> · {b.type}</span>
                     {b.account ? <div className="small muted">Signed in as {b.account}</div> : null}
@@ -362,6 +384,13 @@ export function ProjectConnectionsTab({
                       )}
                     </div>
                     {b.tables && b.tables.length > 0 ? <TableStats tables={b.tables} /> : null}
+                    {b.allowCloudModels !== undefined ? (
+                      <ConnectionCloudSwitch
+                        checked={b.allowCloudModels}
+                        disabled={busy === b.id}
+                        onChange={(allow) => void handleCloud(b.id, allow)}
+                      />
+                    ) : null}
                   </div>
                   <div className="gz-mail-link-actions">
                     {onOpenFolder && b.corpusDir ? (

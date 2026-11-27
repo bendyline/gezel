@@ -16,9 +16,9 @@ interface MarkdownFieldProps {
   minHeight?: string;
   maxHeight?: string;
   /**
-   * Show Squisq's Write / Source view tabs (default true). Off for a field
-   * inside a form, where the field stays in Write and the formatting keys
-   * remain.
+   * Show Squisq's view button, whose View menu switches between Write and
+   * Source (default true). Off for a field inside a form, where the field
+   * stays in Write and the formatting keys remain.
    */
   showViewTabs?: boolean;
   /**

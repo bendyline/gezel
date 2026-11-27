@@ -52,7 +52,8 @@
  *     prior truncation OR break it further; both cases need the check.
  */
 
-import ts from 'typescript';
+import type ts from 'typescript';
+import { typescript } from './typescript-lazy.js';
 
 export interface SourceValidationOk {
   ok: true;
@@ -227,7 +228,7 @@ const DIAG_TOKEN_EXPECTED = 1005;
  */
 export function locateUnterminatedConstruct(
   body: string,
-  scriptKind: ts.ScriptKind = ts.ScriptKind.JS,
+  scriptKind: ts.ScriptKind = typescript().ScriptKind.JS,
 ): UnterminatedConstruct | null {
   const sf = parseFor(body, scriptKind);
   const first = parseDiagnosticsOf(sf)?.[0];
@@ -255,17 +256,17 @@ export function locateUnterminatedConstruct(
 
 function parseFor(source: string, scriptKind: ts.ScriptKind): ts.SourceFile {
   const ext =
-    scriptKind === ts.ScriptKind.TSX
+    scriptKind === typescript().ScriptKind.TSX
       ? 'tsx'
-      : scriptKind === ts.ScriptKind.TS
+      : scriptKind === typescript().ScriptKind.TS
         ? 'ts'
-        : scriptKind === ts.ScriptKind.JSX
+        : scriptKind === typescript().ScriptKind.JSX
           ? 'jsx'
           : 'js';
-  return ts.createSourceFile(
+  return typescript().createSourceFile(
     `unterminated-probe.${ext}`,
     source,
-    ts.ScriptTarget.ES2022,
+    typescript().ScriptTarget.ES2022,
     /*setParentNodes*/ false,
     scriptKind,
   );
@@ -280,7 +281,7 @@ function closerForDiagnostic(diag: ts.DiagnosticWithLocation): string | null {
   if (diag.code === DIAG_BLOCK_COMMENT_UNCLOSED) return '*/';
   if (diag.code === DIAG_TEMPLATE_UNTERMINATED) return '`';
   if (diag.code === DIAG_TOKEN_EXPECTED) {
-    const text = ts.flattenDiagnosticMessageText(diag.messageText, ' ');
+    const text = typescript().flattenDiagnosticMessageText(diag.messageText, ' ');
     const quoted = /^'(.{1,2})' expected/.exec(text);
     const token = quoted?.[1];
     return token && ['}', ')', ']'].includes(token) ? token : null;
@@ -314,7 +315,7 @@ function labelForCloser(closer: string): string {
 function locateTrailingBlockComment(body: string, scriptKind: ts.ScriptKind): number | null {
   const repaired = `${body}*/`;
   const sf = parseFor(repaired, scriptKind);
-  const ranges = ts.getLeadingCommentRanges(repaired, sf.endOfFileToken.pos) ?? [];
+  const ranges = typescript().getLeadingCommentRanges(repaired, sf.endOfFileToken.pos) ?? [];
   const trailing = ranges.find((r) => r.end === repaired.length);
   return trailing ? trailing.pos : null;
 }
@@ -336,9 +337,9 @@ function locateNodeSpanningEnd(
     if (node.end === repaired.length && start < repaired.length) {
       if (best === null || start > best) best = start;
     }
-    ts.forEachChild(node, visit);
+    typescript().forEachChild(node, visit);
   };
-  ts.forEachChild(sf, visit);
+  typescript().forEachChild(sf, visit);
   return best;
 }
 
@@ -358,12 +359,12 @@ function locateInlineScriptError(
   bodyStart: number,
   body: string,
 ): { line: number; col: number } | null {
-  const sf = ts.createSourceFile(
+  const sf = typescript().createSourceFile(
     'inline-script.js',
     body,
-    ts.ScriptTarget.ES2022,
+    typescript().ScriptTarget.ES2022,
     /*setParentNodes*/ false,
-    ts.ScriptKind.JS,
+    typescript().ScriptKind.JS,
   );
   const diags = (sf as ts.SourceFile & { parseDiagnostics?: ts.DiagnosticWithLocation[] })
     .parseDiagnostics;
@@ -401,16 +402,16 @@ function validateJsTsSource(path: string, source: string): SourceValidationResul
   const lower = path.toLowerCase();
   const isTypeScriptFile = lower.endsWith('.ts') || lower.endsWith('.tsx');
   const scriptKind = lower.endsWith('.tsx')
-    ? ts.ScriptKind.TSX
+    ? typescript().ScriptKind.TSX
     : lower.endsWith('.ts')
-      ? ts.ScriptKind.TS
+      ? typescript().ScriptKind.TS
       : lower.endsWith('.jsx')
-        ? ts.ScriptKind.JSX
-        : ts.ScriptKind.JS;
-  const sf = ts.createSourceFile(
+        ? typescript().ScriptKind.JSX
+        : typescript().ScriptKind.JS;
+  const sf = typescript().createSourceFile(
     path,
     source,
-    ts.ScriptTarget.ES2022,
+    typescript().ScriptTarget.ES2022,
     /*setParentNodes*/ true,
     scriptKind,
   );
@@ -453,15 +454,15 @@ function findNestedStaticModuleDeclaration(sf: ts.SourceFile): ts.Node | null {
   const visit = (node: ts.Node): void => {
     if (found) return;
     if (
-      (ts.isImportDeclaration(node) ||
-        ts.isExportDeclaration(node) ||
-        ts.isExportAssignment(node)) &&
+      (typescript().isImportDeclaration(node) ||
+        typescript().isExportDeclaration(node) ||
+        typescript().isExportAssignment(node)) &&
       node.parent !== sf
     ) {
       found = node;
       return;
     }
-    ts.forEachChild(node, visit);
+    typescript().forEachChild(node, visit);
   };
   visit(sf);
   return found;
@@ -472,7 +473,7 @@ function formatSourceDiagnostic(
   sf: ts.SourceFile,
   first: ts.DiagnosticWithLocation,
 ): SourceValidationError {
-  const msg = ts.flattenDiagnosticMessageText(first.messageText, '\n');
+  const msg = typescript().flattenDiagnosticMessageText(first.messageText, '\n');
   const { line, character } = sf.getLineAndCharacterOfPosition(first.start);
   return {
     ok: false,
@@ -495,25 +496,25 @@ function findTypeScriptOnlySyntax(
       found = { node, description };
       return;
     }
-    ts.forEachChild(node, visit);
+    typescript().forEachChild(node, visit);
   };
   visit(sf);
   return found;
 }
 
 function describeTypeScriptOnlyNode(node: ts.Node): string | null {
-  if (ts.isNonNullExpression(node)) return 'non-null assertion';
-  if (ts.isAsExpression(node)) return 'type assertion';
-  if (ts.isTypeAssertionExpression(node)) return 'type assertion';
-  if (ts.isSatisfiesExpression(node)) return 'satisfies expression';
-  if (ts.isInterfaceDeclaration(node)) return 'interface declaration';
-  if (ts.isTypeAliasDeclaration(node)) return 'type alias';
-  if (ts.isEnumDeclaration(node)) return 'enum declaration';
-  if (ts.isModuleDeclaration(node)) return 'namespace/module declaration';
-  if (ts.isImportClause(node) && node.isTypeOnly) return 'type-only import';
-  if (ts.isImportSpecifier(node) && node.isTypeOnly) return 'type-only import';
-  if (ts.isExportSpecifier(node) && node.isTypeOnly) return 'type-only export';
-  if (ts.isExportDeclaration(node) && node.isTypeOnly) return 'type-only export';
+  if (typescript().isNonNullExpression(node)) return 'non-null assertion';
+  if (typescript().isAsExpression(node)) return 'type assertion';
+  if (typescript().isTypeAssertionExpression(node)) return 'type assertion';
+  if (typescript().isSatisfiesExpression(node)) return 'satisfies expression';
+  if (typescript().isInterfaceDeclaration(node)) return 'interface declaration';
+  if (typescript().isTypeAliasDeclaration(node)) return 'type alias';
+  if (typescript().isEnumDeclaration(node)) return 'enum declaration';
+  if (typescript().isModuleDeclaration(node)) return 'namespace/module declaration';
+  if (typescript().isImportClause(node) && node.isTypeOnly) return 'type-only import';
+  if (typescript().isImportSpecifier(node) && node.isTypeOnly) return 'type-only import';
+  if (typescript().isExportSpecifier(node) && node.isTypeOnly) return 'type-only export';
+  if (typescript().isExportDeclaration(node) && node.isTypeOnly) return 'type-only export';
 
   if (hasTypeAnnotation(node)) return 'type annotation';
   if (hasTypeParameters(node)) return 'type parameters';
@@ -524,7 +525,7 @@ function describeTypeScriptOnlyNode(node: ts.Node): string | null {
 function hasTypeAnnotation(node: ts.Node): boolean {
   if (!('type' in node)) return false;
   const type = (node as ts.Node & { type?: unknown }).type;
-  return !!type && typeof type === 'object' && ts.isTypeNode(type as ts.Node);
+  return !!type && typeof type === 'object' && typescript().isTypeNode(type as ts.Node);
 }
 
 function hasTypeParameters(node: ts.Node): boolean {
@@ -536,17 +537,19 @@ function hasTypeParameters(node: ts.Node): boolean {
 }
 
 function hasTypeOnlyModifier(node: ts.Node): boolean {
-  const modifiers = ts.canHaveModifiers(node) ? ts.getModifiers(node) : undefined;
+  const modifiers = typescript().canHaveModifiers(node)
+    ? typescript().getModifiers(node)
+    : undefined;
   return (
     modifiers?.some((modifier) =>
       [
-        ts.SyntaxKind.AbstractKeyword,
-        ts.SyntaxKind.DeclareKeyword,
-        ts.SyntaxKind.OverrideKeyword,
-        ts.SyntaxKind.PrivateKeyword,
-        ts.SyntaxKind.ProtectedKeyword,
-        ts.SyntaxKind.PublicKeyword,
-        ts.SyntaxKind.ReadonlyKeyword,
+        typescript().SyntaxKind.AbstractKeyword,
+        typescript().SyntaxKind.DeclareKeyword,
+        typescript().SyntaxKind.OverrideKeyword,
+        typescript().SyntaxKind.PrivateKeyword,
+        typescript().SyntaxKind.ProtectedKeyword,
+        typescript().SyntaxKind.PublicKeyword,
+        typescript().SyntaxKind.ReadonlyKeyword,
       ].includes(modifier.kind),
     ) ?? false
   );

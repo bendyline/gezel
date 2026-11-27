@@ -9,8 +9,14 @@ import { ChatManager } from '../chat/manager.js';
 import { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
 import { MockProvider } from '../providers/mock.js';
+import { denyNetBoundaryAvailable } from '../sandbox/runner.js';
 import { FileSecretStore } from '../secrets/file-store.js';
 import { ScriptRunner } from './runner.js';
+
+// Deny-net script runs need an OS network boundary: Seatbelt on macOS, a
+// systemd unit or the sandbox helper on Linux, the MXC container on Windows.
+// These suites ran only on macOS until 2026-11-23, so CI never executed them.
+const DENY_NET_BOUNDARY = await denyNetBoundaryAvailable();
 
 /**
  * End-to-end test for Slice C: `gezel.http.authed` in the SDK →
@@ -83,7 +89,7 @@ async function writeScript(name: string, source: string): Promise<void> {
 
 // The end-to-end SDK channel runs inside a denyNet child; only macOS
 // Seatbelt currently supplies the required OS network boundary.
-describe.runIf(process.platform === 'darwin')('gezel.http.authed — end-to-end', () => {
+describe.runIf(DENY_NET_BOUNDARY)('gezel.http.authed — end-to-end', () => {
   it('attaches a Bearer token and returns the response body', async () => {
     await secrets.set({ kind: 'providerCredential', name: 'githubToken' }, 'ghp_test_token_alpha');
     await store.updateProject('alpha', {

@@ -402,6 +402,33 @@ describe('sessionRouteGuard', () => {
     expect((await put({ about: 'A new about text' })).status).toBe(200);
   });
 
+  it('keeps the person’s own project buttons away from every session', async () => {
+    for (const team of [false, true]) {
+      const app = sessionPolicyApp(session('proj-a', team));
+      const post = (path: string) => app.request(`/api/projects/proj-a${path}`, { method: 'POST' });
+      for (const path of [
+        '/reveal-reference',
+        '/continue',
+        '/index/refresh',
+        '/index/enrich',
+        '/index/enrich/stop',
+        '/reports/generate',
+        '/suggested-work/dismiss',
+        '/albums/prepare',
+        '/skills/invoke',
+        '/people/face-1/rename',
+      ]) {
+        expect((await post(path)).status, `${team ? 'coordinator' : 'worker'} ${path}`).toBe(403);
+      }
+      const forget = await app.request('/api/projects/proj-a/people/face-1', { method: 'DELETE' });
+      expect(forget.status).toBe(403);
+      // Reading stays open, and the neighbouring tool routes are untouched.
+      expect((await app.request('/api/projects/proj-a/people')).status).toBe(200);
+      expect((await post('/suggested-work/disable')).status).toBe(200);
+      expect((await post('/tools/search')).status).toBe(200);
+    }
+  });
+
   it('keeps connector setup, sync and sign-in first-party only', async () => {
     const app = sessionPolicyApp(session('proj-a', true));
     const post = (path: string) => app.request(path, { method: 'POST' });

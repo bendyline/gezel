@@ -18,6 +18,7 @@ import type {
   WorkspaceIndexStatus,
 } from '@bendyline/gezel';
 import type { ChatManager } from '../chat/manager.js';
+import { keptLocalRefusal } from '../connectors/kept-local.js';
 import { CONNECTOR_CREDENTIAL_PREFIX, connectorCredentialName } from '../connectors/registry.js';
 import type { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
@@ -25,6 +26,7 @@ import { resolveCredentialOriginPolicy } from '../secrets/origins.js';
 import { CredentialMissingError, type CredentialRegistry } from '../secrets/registry.js';
 import type { TaskManager } from '../tasks/manager.js';
 import { assertPublicUrl } from '../utils/ssrf.js';
+import type { ScriptKeptLocal } from './kept-local.js';
 
 const SCRIPT_HTTP_TIMEOUT_MS = 30_000;
 const SCRIPT_HTTP_MAX_RESPONSE_BYTES = 1_000_000;
@@ -73,6 +75,8 @@ export interface DispatcherContext {
   gezelId?: string;
   /** That chat's session: its turn is waiting on this run. */
   sessionId?: string;
+  /** The task step the run serves, when it is one. */
+  step?: { taskRef: string; stepId: string };
   /**
    * The connector binding whose sync started this run. Only that run may
    * spend the binding's credential; see {@link assertConnectorCredentialUse}.
@@ -161,6 +165,8 @@ export interface DispatcherDeps {
    * constructed (they come up later in boot than the runner); until then
    * those calls return a typed error.
    */
+  /** What a run may read of the data kept on models on this computer. */
+  keptLocal?: ScriptKeptLocal;
   /** Told when a script sets or clears its project's reminder, so notifiers reschedule. */
   remindersChanged?: (projectId: string) => void;
   index?: {
@@ -265,20 +271,27 @@ export function buildDispatcher(deps: DispatcherDeps): {
       capability: 'artifacts.read',
       handler: async (ctx, params) => {
         const path = requireParam<string>(params, 'path');
+        const area = await deps.keptLocal?.areaFor(ctx, path);
+        if (area && (await deps.keptLocal!.withheld(ctx))) {
+          throw new Error(keptLocalRefusal([area.source]));
+        }
         const content = await store.readProjectArtifact(ctx.projectId, path);
         if (content === null) throw new Error(`artifact not found: ${path}`);
+        if (area) await deps.keptLocal!.shown(ctx, [area.source]);
         return content;
       },
     },
     'artifact.write': {
       capability: 'artifacts.write',
       handler: async (ctx, params) => {
+        const path = requireParam<string>(params, 'path');
         await store.writeProjectArtifact(
           ctx.projectId,
-          requireParam<string>(params, 'path'),
+          path,
           requireParam<string>(params, 'content'),
           { initiatedByGezel: ctx.initiatedByGezel === true },
         );
+        await deps.keptLocal?.wrote(ctx, path);
       },
     },
     'artifact.list': {
@@ -289,12 +302,13 @@ export function buildDispatcher(deps: DispatcherDeps): {
         // connector corpus is not competing with the rest of the drawer for
         // the walker's entry budget. Paths stay drawer-root-relative either
         // way, so a result can go straight back into `artifact.read`.
-        if (param<boolean>(params, 'recursive') === true) {
-          return store.listProjectArtifactsRecursive(ctx.projectId, {
-            ...(prefix ? { subpath: prefix } : {}),
-          });
-        }
-        return store.listProjectArtifacts(ctx.projectId, prefix);
+        const entries =
+          param<boolean>(params, 'recursive') === true
+            ? await store.listProjectArtifactsRecursive(ctx.projectId, {
+                ...(prefix ? { subpath: prefix } : {}),
+              })
+            : await store.listProjectArtifacts(ctx.projectId, prefix);
+        return deps.keptLocal ? deps.keptLocal.visible(ctx, entries) : entries;
       },
     },
     'artifact.delete': {
@@ -478,7 +492,12 @@ export function buildDispatcher(deps: DispatcherDeps): {
         if (!deps.memory)
           throw new Error('memory.search is not available (no memory manager wired)');
         const query = requireParam<string>(params, 'query');
-        return deps.memory.search('project', ctx.projectId, query);
+        const found = await deps.memory.search('project', ctx.projectId, query);
+        const tags = found.flatMap((r) => (r.source?.kept ? [r.source.kept] : []));
+        if (tags.length === 0 || !deps.keptLocal) return found;
+        if (await deps.keptLocal.withheld(ctx)) return found.filter((r) => !r.source?.kept);
+        await deps.keptLocal.shownMemories(ctx, tags);
+        return found;
       },
     },
     'memory.save': {
@@ -489,7 +508,14 @@ export function buildDispatcher(deps: DispatcherDeps): {
           projectId: ctx.projectId,
           ...(ctx.gezelId ? { gezelId: ctx.gezelId } : {}),
         });
-        return deps.memory.save(save.scope, save.id, save.text, save.kind, save.source);
+        const kept = await deps.keptLocal?.memoryTag(ctx);
+        return deps.memory.save(
+          save.scope,
+          save.id,
+          save.text,
+          save.kind,
+          kept ? { ...save.source, kept } : save.source,
+        );
       },
     },
 

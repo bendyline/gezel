@@ -51,6 +51,20 @@ describe('extractGezelMentionTokens', () => {
     ]);
   });
 
+  it('dedups by raw id but keeps the first-seen label', () => {
+    const md = '@[Leo](gezel:leo) and @[Tess](gezel:tess), also @[Leonardo](gezel:leo)';
+    expect(extractGezelMentionTokens(md)).toEqual([
+      { id: 'leo', label: 'Leo', rawId: 'leo' },
+      { id: 'tess', label: 'Tess', rawId: 'tess' },
+    ]);
+  });
+
+  it('tolerates the backslash-escaped colon remark emits', () => {
+    expect(extractGezelMentionTokens('hi @[Leo](gezel\\:leo)')).toEqual([
+      { id: 'leo', label: 'Leo', rawId: 'leo' },
+    ]);
+  });
+
   it('keeps project-tagged mentions for the same gezel separate', () => {
     const md = '@[Mira](gezel:mira?project=a) and @[Mira](gezel:mira?project=b)';
     expect(extractGezelMentionTokens(md)).toEqual([

@@ -3158,6 +3158,18 @@
   font-family: var(--font-ui);
 }
 
+.gz-acd-privacy {
+  margin-top: 0.5rem;
+}
+
+.gz-acd-privacy a {
+  color: var(--accent-text);
+}
+
+.gz-acd-privacy a:hover {
+  color: var(--accent-text-hover);
+}
+
 .gz-connector-field-group {
   display: flex;
   flex-direction: column;

@@ -30,6 +30,7 @@ import { chatLaunchInvocationKey } from '../../tasks/chat-launch-key.js';
 import { launchErrorResponse } from '../../tasks/launcher.js';
 import { pauseTaskStoppedByUser } from '../../tasks/step-pause.js';
 import type { ServiceContext } from '../context.js';
+import { withoutKeptLocalSessions } from '../kept-local-gate.js';
 import { noteMessageSurface } from './app-tools.js';
 
 const log = createLogger('http');
@@ -105,7 +106,8 @@ export function sessionRoutes(ctx: ServiceContext): Hono {
       ...(params.maxResults ? { maxResults: params.maxResults } : {}),
     });
     const status = await ctx.globalIndex.status();
-    return c.json({ results, engine: status.available ? 'fts' : 'unavailable' });
+    const shown = await withoutKeptLocalSessions(ctx, c, results, (r) => r.sessionId);
+    return c.json({ results: shown, engine: status.available ? 'fts' : 'unavailable' });
   });
 
   // Register before `/:id` — Hono matches in insertion order, and

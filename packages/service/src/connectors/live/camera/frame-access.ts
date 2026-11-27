@@ -15,35 +15,16 @@
  * a ref, and folds what it can.
  */
 
-import { realpath } from 'node:fs/promises';
-import { join, posix, resolve } from 'node:path';
+import { join } from 'node:path';
 import type { ProjectConnectorBinding, ProviderName } from '@bendyline/gezel';
 import { isLocalProvider, parseCameraBindingConfig } from '@bendyline/gezel';
 import { isPathInside } from '@bendyline/gezel-inference/internal/fs/safe-paths';
+import { artifactKey, canonicalPath } from '../../corpus-path.js';
 
 type CameraProject = { connectors?: ProjectConnectorBinding[] };
 
 function cameraBindings(project: CameraProject): ProjectConnectorBinding[] {
   return project.connectors?.filter((b) => b.driver === 'device' && !!b.corpusDir) ?? [];
-}
-
-/**
- * An artifact path as the readers will resolve it, case-folded. Folding on
- * every platform withholds, at worst, a same-named file on a case-sensitive
- * volume; Windows' trailing dots and spaces are dropped for the same reason.
- */
-function artifactKey(raw: string): string {
-  const normalized = posix
-    .normalize(raw.replace(/\\/g, '/'))
-    .split('/')
-    .map((segment) =>
-      segment === '.' || segment === '..' ? segment : segment.replace(/[. ]+$/, ''),
-    )
-    .join('/')
-    .replace(/^(?:\.\/|\/)+/, '')
-    .replace(/^artifacts(?:\/|$)/i, '')
-    .replace(/\/+$/, '');
-  return normalized.toLowerCase();
 }
 
 /** The camera binding whose corpus holds this artifact path, if any. */
@@ -56,11 +37,6 @@ export function cameraBindingForArtifact(
     const dir = artifactKey(b.corpusDir!);
     return path === dir || path.startsWith(`${dir}/`);
   });
-}
-
-async function canonicalPath(path: string): Promise<string> {
-  const real = await realpath(path).catch(() => resolve(path));
-  return process.platform === 'win32' || process.platform === 'darwin' ? real.toLowerCase() : real;
 }
 
 /**

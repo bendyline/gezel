@@ -1,9 +1,29 @@
-import type { HandboekRenderMode } from '@bendyline/gezel';
+import type { HandboekArticle, HandboekRenderMode } from '@bendyline/gezel';
 import { poppetjeFromSeed, seedFromKey } from '@bendyline/gezel';
 import { parseMarkdown, walkMarkdownTree } from '@bendyline/squisq/markdown';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { HandboekDeviceInfo } from './device.js';
 import { type HandboekCatalog, createHandboekEngine, findHandboekContent } from './engine.js';
+
+// The engine re-reads the whole content tree on every call, so an author's
+// edit shows on the next refresh. Nothing here edits the tree mid-run, and
+// those reads were about 40% of each pass over the corpus, so each directory
+// is read once.
+vi.mock('./content.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./content.js')>();
+  const byDir = new Map<string, ReturnType<typeof actual.loadCuratedArticles>>();
+  return {
+    ...actual,
+    loadCuratedArticles: (contentDir: string) => {
+      let articles = byDir.get(contentDir);
+      if (!articles) {
+        articles = actual.loadCuratedArticles(contentDir);
+        byDir.set(contentDir, articles);
+      }
+      return articles;
+    },
+  };
+});
 
 const device: HandboekDeviceInfo = {
   listGezels: async () => [
@@ -258,16 +278,38 @@ describe('the integrated app-building guide', () => {
 describe('no surviving directives (content lint)', { timeout: 15_000 }, () => {
   const modes: HandboekRenderMode[] = ['app', 'site', 'agent'];
 
+  // Both lints read every article in a mode, and a pass over the corpus is
+  // seconds of rendering, so each mode is rendered and parsed once for both.
+  type RenderedArticle = {
+    id: string;
+    article: HandboekArticle | null;
+    doc: ReturnType<typeof parseMarkdown> | null;
+  };
+  const passes = new Map<HandboekRenderMode, Promise<RenderedArticle[]>>();
+  function renderEveryArticle(mode: HandboekRenderMode): Promise<RenderedArticle[]> {
+    let pass = passes.get(mode);
+    if (!pass) {
+      pass = (async () => {
+        const engine = makeEngine();
+        const toc = await engine.toc();
+        const rendered: RenderedArticle[] = [];
+        for (const id of toc.areas.flatMap((a) => a.entries.map((e) => e.id))) {
+          const article = await engine.article(id, { mode });
+          rendered.push({ id, article, doc: article ? parseMarkdown(article.markdown) : null });
+        }
+        return rendered;
+      })();
+      passes.set(mode, pass);
+    }
+    return pass;
+  }
+
   it.each(modes)('every article expands cleanly in %s mode', async (mode) => {
-    const engine = makeEngine();
-    const toc = await engine.toc();
-    const ids = toc.areas.flatMap((a) => a.entries.map((e) => e.id));
-    expect(ids.length).toBeGreaterThan(10);
+    const rendered = await renderEveryArticle(mode);
+    expect(rendered.length).toBeGreaterThan(10);
     const offenders: string[] = [];
-    for (const id of ids) {
-      const article = await engine.article(id, { mode });
+    for (const { id, article, doc } of rendered) {
       expect(article, `article ${id} (${mode})`).toBeTruthy();
-      const doc = parseMarkdown(article!.markdown);
       walkMarkdownTree(doc as never, (node) => {
         const n = node as { type: string; name?: string };
         if (
@@ -285,13 +327,11 @@ describe('no surviving directives (content lint)', { timeout: 15_000 }, () => {
     // squisq keeps a single newline inside a paragraph as literal text and
     // the doc renderer honors it, so source wrapped at 80 columns shows a
     // visible break after every line. See unwrap.ts.
-    const engine = makeEngine();
-    const toc = await engine.toc();
-    const ids = toc.areas.flatMap((a) => a.entries.map((e) => e.id));
+    const rendered = await renderEveryArticle(mode);
     const offenders: string[] = [];
-    for (const id of ids) {
-      const article = await engine.article(id, { mode });
-      walkMarkdownTree(parseMarkdown(article!.markdown) as never, (node) => {
+    for (const { id, article, doc } of rendered) {
+      expect(article, `article ${id} (${mode})`).toBeTruthy();
+      walkMarkdownTree(doc as never, (node) => {
         const n = node as { type: string; value?: string };
         if (n.type === 'text' && n.value?.includes('\n')) {
           offenders.push(`${id} (${mode}): ${n.value.split('\n')[0]}…`);

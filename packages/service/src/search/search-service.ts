@@ -356,6 +356,10 @@ export class SearchService {
        * their own. Explicit searches ask; proactive turn retrieval does not.
        */
       media?: boolean;
+      /** Artifacts the caller's model may not see; they are not results at all. */
+      omitArtifact?: (projectId: string, path: string) => boolean;
+      /** Leave out memories kept on models on this computer. */
+      omitKeptLocalMemory?: boolean;
     },
   ): Promise<{
     results: UnifiedSearchResult[];
@@ -394,14 +398,24 @@ export class SearchService {
       perSourceResults: Math.min(25, Math.max(PER_SOURCE_RESULTS, Math.ceil(fetchDepth / 6))),
     });
     const prefix = normalizePathPrefix(opts.pathPrefix);
+    const seen = found.results.filter((r) => {
+      if (opts.omitKeptLocalMemory && r.memory?.kept) return false;
+      return !(
+        opts.omitArtifact &&
+        r.retrievalSource === 'artifacts' &&
+        r.projectId &&
+        r.path &&
+        opts.omitArtifact(r.projectId, r.path)
+      );
+    });
     const pool = prefix
-      ? found.results.filter((r) => {
+      ? seen.filter((r) => {
           if (!r.path) return false; // a path filter asks for files
           if (r.path.startsWith(prefix)) return true;
           // Models see linked-project paths as ../<project-id>/<path>.
           return Boolean(r.projectId && `../${r.projectId}/${r.path}`.startsWith(prefix));
         })
-      : found.results;
+      : seen;
     // Merge one past the page boundary so "more exists" is a fact, not a guess.
     // The relevance stage re-ranks the whole pool, so it merges all of it.
     let merged = this.merge(pool, active ? Math.max(fetchDepth + 1, pool.length) : fetchDepth + 1);
@@ -1079,7 +1093,11 @@ export class SearchService {
             projectName: p.name,
             retrievalSource: 'project-memory',
             arm,
-            memory: { day: r.day, kind: r.kind },
+            memory: {
+              day: r.day,
+              kind: r.kind,
+              ...(r.source?.kept ? { kept: r.source.kept } : {}),
+            },
             ...scoreResult('memory', relevance),
           });
         }
@@ -1107,7 +1125,11 @@ export class SearchService {
               snippet: r.text,
               retrievalSource: 'gezel-memory' as const,
               arm,
-              memory: { day: r.day, kind: r.kind },
+              memory: {
+                day: r.day,
+                kind: r.kind,
+                ...(r.source?.kept ? { kept: r.source.kept } : {}),
+              },
               ...scoreResult('memory', relevance),
             }));
           },
@@ -1136,7 +1158,11 @@ export class SearchService {
                 snippet: r.text,
                 retrievalSource: 'user-memory' as const,
                 arm,
-                memory: { day: r.day, kind: r.kind },
+                memory: {
+                  day: r.day,
+                  kind: r.kind,
+                  ...(r.source?.kept ? { kept: r.source.kept } : {}),
+                },
                 ...scoreResult('memory', relevance),
               }));
             },

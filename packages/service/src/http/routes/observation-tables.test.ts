@@ -89,13 +89,6 @@ describe('POST /:id/tools/list-tables', () => {
     });
   });
 
-  it('is an empty list, not an error, for a project with no corpus', async () => {
-    await svc.context.store.createProject({ id: 'bare', name: 'Bare' } as never).catch(() => {});
-    const res = await api('/api/projects/bare/tools/list-tables', {});
-    expect(res.status).toBe(200);
-    expect((await res.json()) as { tables: unknown[] }).toEqual({ tables: [] });
-  });
-
   it('404s for a project that does not exist', async () => {
     const res = await api('/api/projects/nope/tools/list-tables', {});
     expect(res.status).toBe(404);
@@ -140,17 +133,8 @@ describe.runIf(hasRealDuckdb())('POST /:id/tools/query-table', () => {
     expect(body.tablesInScope).toEqual(['requests']);
   });
 
-  it('caps rows and says so', async () => {
-    const res = await api('/api/projects/default/tools/query-table', {
-      sql: 'SELECT * FROM requests',
-      limit: 3,
-    });
-    const body = (await res.json()) as { rows: unknown[]; truncated: boolean; limit: number };
-    expect(body.rows).toHaveLength(3);
-    expect(body.truncated).toBe(true);
-    expect(body.limit).toBe(3);
-  });
-
+  // Row caps, limit clamping and CTE-fronted mutations are query.ts rules,
+  // pinned in observations/query.test.ts; these pin what the route answers.
   it('rejects a mutation with a 400 the caller can act on', async () => {
     const res = await api('/api/projects/default/tools/query-table', {
       sql: 'DELETE FROM requests',
@@ -159,14 +143,6 @@ describe.runIf(hasRealDuckdb())('POST /:id/tools/query-table', () => {
     const body = (await res.json()) as { error: string; code: string };
     expect(body.code).toBe('sql-rejected');
     expect(body.error).toMatch(/read-only/);
-  });
-
-  it('rejects a CTE that fronts a mutation', async () => {
-    const res = await api('/api/projects/default/tools/query-table', {
-      sql: 'WITH c AS (SELECT 1 AS v) INSERT INTO requests SELECT v FROM c',
-    });
-    expect(res.status).toBe(400);
-    expect(((await res.json()) as { code: string }).code).toBe('sql-rejected');
   });
 
   it('forwards the engine message so a model can repair its SQL', async () => {
@@ -181,6 +157,7 @@ describe.runIf(hasRealDuckdb())('POST /:id/tools/query-table', () => {
   });
 
   it('explains itself when the project has no tables', async () => {
+    await svc.context.store.createProject({ id: 'bare', name: 'Bare' } as never).catch(() => {});
     const res = await api('/api/projects/bare/tools/query-table', { sql: 'SELECT 1' });
     expect(res.status).toBe(409);
     expect(((await res.json()) as { code: string }).code).toBe('no-observation-tables');

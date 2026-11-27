@@ -125,6 +125,7 @@ import {
   assertCraftbookGraph,
   asyncHandoffReleaseInstruction,
   binaryDocumentWriteRefusalText,
+  claimedMolenKind,
   coerceDeliverableKind,
   composeCraftbookLaunch,
   craftbookCheckup,
@@ -155,6 +156,7 @@ import {
   listScriptsText,
   listTasksText,
   messageGezelText,
+  molenCheckText,
   nearbyPathMatches,
   parseKnowledgeUri,
   pickUnusedGezelName,
@@ -319,6 +321,7 @@ import {
 import {
   type FileContent,
   formatValidateResult,
+  molenCheckToValidateCheck,
   pageLibrariesToValidateCheck,
   runtimePageCheckToValidateCheck,
   validateFile,
@@ -1624,6 +1627,18 @@ server.tool(
       };
     }
     const result = validateFile(filePath, content);
+    if (/\.json$/i.test(filePath) && content.text && claimedMolenKind(content.text) !== null) {
+      result.checks.push(
+        await api
+          .checkMolenDocument(projectId, content.text)
+          .then(molenCheckToValidateCheck)
+          .catch((err: unknown) =>
+            molenCheckToValidateCheck({
+              unavailable: `Molen check unavailable: ${unwrapApiError(err)}`,
+            }),
+          ),
+      );
+    }
     const validationTarget =
       drawer === 'workspace' ? await concreteWorkspaceTarget(filePath).catch(() => null) : null;
     if (
@@ -2251,6 +2266,49 @@ async function htmlRuntimeCheckSuffix(path: string): Promise<string> {
   }
 }
 
+/**
+ * Post-write check for a Molen film, game or scene document. The daemon
+ * compiles it (nothing in it runs) and the verdict rides in the write tool's
+ * own result, so the model fixes a misspelled cast id while its context is
+ * hot: in the Phase 0 probe this loop took a 4B model from 7 of 12 films
+ * that compiled to 12 of 12 (docs/molen-exploration.md). Best-effort: no
+ * answer from the daemon leaves the write result as it was.
+ */
+async function molenCheckSuffix(
+  path: string,
+  content: string,
+  drawer: 'workspace' | 'artifacts',
+): Promise<{ text: string; failed: boolean }> {
+  if (!/\.json$/i.test(path) || claimedMolenKind(content) === null) {
+    return { text: '', failed: false };
+  }
+  try {
+    const check = await api.checkMolenDocument(projectId, content);
+    const fix =
+      drawer === 'workspace' && toolIsAuthorizedForThisSession('replace_in_file')
+        ? 'Fix these with replace_in_file, or write the whole document again.'
+        : `Fix these and write the whole document again with ${drawer === 'workspace' ? 'write_file' : 'write_artifact'}.`;
+    return { text: `\n\n${molenCheckText(path, check, fix)}`, failed: !check.ok };
+  } catch {
+    return { text: '', failed: false };
+  }
+}
+
+/** The same check after an edit, which has only the path: read the file back. */
+async function molenEditSuffix(path: string): Promise<string> {
+  if (!/\.json$/i.test(path)) return '';
+  try {
+    const target = await concreteWorkspaceTarget(path);
+    const { content } = await workspaceClient(target).readProjectWorkspaceFile(
+      target.projectId,
+      target.path,
+    );
+    return (await molenCheckSuffix(path, content, 'workspace')).text;
+  } catch {
+    return '';
+  }
+}
+
 const RASTER_IMAGE_PATH_RE = /\.(?:png|jpe?g|webp|gif|bmp|avif)$/i;
 
 /**
@@ -2413,7 +2471,10 @@ server.tool(
       partialEdits.close(path);
       return {
         content: [
-          { type: 'text' as const, text: `Wrote ${path}${await htmlRuntimeCheckSuffix(path)}` },
+          {
+            type: 'text' as const,
+            text: `Wrote ${path}${await htmlRuntimeCheckSuffix(path)}${(await molenCheckSuffix(path, normalizedContent, 'workspace')).text}`,
+          },
         ],
       };
     } catch (err) {
@@ -2532,7 +2593,7 @@ server.tool(
         content: [
           {
             type: 'text' as const,
-            text: `Appended ${content.length} chars to ${path} (total: ${merged.length} chars).${await htmlRuntimeCheckSuffix(path)}`,
+            text: `Appended ${content.length} chars to ${path} (total: ${merged.length} chars).${await htmlRuntimeCheckSuffix(path)}${(await molenCheckSuffix(path, merged, 'workspace')).text}`,
           },
         ],
       };
@@ -3491,7 +3552,7 @@ function explainWriteFailure(err: unknown): string {
  * report errors it expects. It gets the draft ledger instead.
  */
 async function editResultSuffix(path: string, partial: boolean | undefined): Promise<string> {
-  if (!partial) return htmlRuntimeCheckSuffix(path);
+  if (!partial) return `${await htmlRuntimeCheckSuffix(path)}${await molenEditSuffix(path)}`;
   const draft = partialEdits.get(path);
   return draft ? partialEdits.noticeFor(draft) : '';
 }
@@ -4362,15 +4423,21 @@ async function writeArtifactToolCall({
     ...(gezelId ? { gezelId } : {}),
     ...(sessionId ? { sessionId } : {}),
   });
+  const molen = await molenCheckSuffix(clean, content, 'artifacts');
+  // A document that does not play is not ready to submit, so the hint that
+  // says to submit it would contradict the check above it.
   const completionHint =
-    sessionTaskRef && sessionStepId
+    sessionTaskRef && sessionStepId && !molen.failed
       ? artifactCompletionHint(sessionStepCompletion, {
           checkedByStep: sessionStepCheckedArtifacts.includes(clean),
         })
       : '';
   return {
     content: [
-      { type: 'text' as const, text: `Wrote ${clean}${workspaceTwinNote}${completionHint}` },
+      {
+        type: 'text' as const,
+        text: `Wrote ${clean}${workspaceTwinNote}${molen.text}${completionHint}`,
+      },
     ],
   };
 }

@@ -372,6 +372,7 @@ export class PerfCollector {
   private readonly enableLocalSampling: boolean;
   private readonly daemonLogPath?: string;
   private readonly chatEventsPath?: string;
+  private readonly resolveGpuSampler: () => GpuSampler | null;
   private stopped = false;
   private loop?: Promise<void>;
   /**
@@ -411,6 +412,12 @@ export class PerfCollector {
      * behaviour.
      */
     enableLocalSampling?: boolean;
+    /**
+     * Picks the GPU sampler at the first tick. Defaults to probing this host.
+     * Tests replace it: on a Windows box with ~2,000 GPU-engine counter
+     * instances the probe alone takes 16 s.
+     */
+    resolveGpuSampler?: () => GpuSampler | null;
   }) {
     this.sampleIntervalMs = opts.sampleIntervalMs ?? 5_000;
     this.log = opts.log;
@@ -418,6 +425,7 @@ export class PerfCollector {
     this.enableLocalSampling = opts.enableLocalSampling ?? true;
     this.daemonLogPath = opts.daemonLogPath;
     this.chatEventsPath = opts.chatEventsPath;
+    this.resolveGpuSampler = opts.resolveGpuSampler ?? resolveGpuSampler;
   }
 
   start(daemonPid: number): void {
@@ -453,7 +461,7 @@ export class PerfCollector {
           if (ps) this.processSamples.push({ atMs: at, ...ps });
         }
         if (this.gpuSampler === undefined) {
-          this.gpuSampler = resolveGpuSampler();
+          this.gpuSampler = this.resolveGpuSampler();
           this.log(
             this.gpuSampler
               ? `[perf] gpu sampler=${this.gpuSampler.kind} interval=${Math.max(this.sampleIntervalMs, this.gpuSampler.minIntervalMs)}ms`
@@ -1280,7 +1288,7 @@ export interface GpuReading {
  * the trial. Peak-over-trial is a coarse axis, so a slower cadence costs
  * almost nothing in signal.
  */
-interface GpuSampler {
+export interface GpuSampler {
   kind: string;
   minIntervalMs: number;
   sample(): GpuReading | null;

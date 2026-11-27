@@ -1,13 +1,14 @@
 /* Squisq's viewport-based outline grows to 460px even inside a split pane.
-   Keep document navigation compact and its toolbar tabs on the same width.
-   The shell sets this shared variable inline, so the host needs !important. */
+   Keep document navigation compact and the toolbar's view section on the
+   same width. The shell sets this shared variable inline, so the host needs
+   !important. */
 .squisq-editor-shell {
   --squisq-outline-width: 240px !important;
 }
 
 /* The selected radio glyph sits below center in some UI fonts. Draw the dot
-   geometrically; this menu portals outside the editor shell. */
-.squisq-view-menu-popover .squisq-view-menu-radio {
+   geometrically; the View menu portals outside the editor shell. */
+.squisq-view-menu-columns .squisq-view-menu-radio {
   font-size: 0;
 }
 
@@ -21,7 +22,8 @@
 }
 
 /* Host actions (Export, narration, AI) cannot collapse into Squisq's format
-   menu. Give view tabs their own row when those actions would leave the pane. */
+   menu. Give the view button its own row when those actions would leave the
+   pane. */
 .squisq-editor-shell:not([data-host-mode="chat"]) .squisq-editor-header {
   container: gezel-editor-header / inline-size;
 }
@@ -2452,37 +2454,23 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   background: var(--gezel-paper-workshop);
   border-right-color: color-mix(in srgb, var(--wash-tint) 28%, transparent);
 }
-.squisq-editor-shell[data-theme="dark"] .squisq-toolbar-view-tab,
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-button {
   color: #d6c9b8;
 }
 
-/* Force a flat bottom edge on the view tabs so the active state's
-   `border-bottom` renders as a straight orange bar instead of a
-   browser-default rounded-button arc. Also suppress the default
-   focus-visible outline, which the browser draws as a rounded
-   rectangle whose visible lower arc reads as a parabolic underline. */
-.squisq-editor-shell .squisq-toolbar-view-tab {
-  border-radius: 0;
+/* The view button is a key: Squisq's 7px corner becomes the key radius. It
+   names the view on screen, so it wears the selected ink the active view
+   tab wore before Squisq folded the tabs into one View menu. */
+.squisq-editor-shell .squisq-toolbar-view-button {
+  border-radius: var(--radius-md);
 }
-.squisq-editor-shell .squisq-toolbar-view-tab:focus,
-.squisq-editor-shell .squisq-toolbar-view-tab:focus-visible {
-  outline: none;
+.squisq-editor-shell[data-theme="dark"] .squisq-toolbar-view-button {
+  color: #e0b897;
 }
-/* Squisq seats the Write / Slideshow mode chevrons 2px above the underline;
-   beside Gezel's tab labels that reads 1px low. Overrides the touch-screen
-   padding too, which keeps the same 2px. */
-.squisq-editor-shell .squisq-view-mode-trigger {
-  padding-bottom: 3px;
-}
-.squisq-editor-shell[data-theme="dark"] .squisq-toolbar-view-tab:hover,
+.squisq-editor-shell[data-theme="dark"] .squisq-toolbar-view-button:hover,
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-button:hover {
   color: #f3ede0;
   background: color-mix(in srgb, var(--wash-tint) 14%, transparent);
-}
-.squisq-editor-shell[data-theme="dark"] .squisq-toolbar-view-tab--active {
-  color: #e0b897;
-  border-bottom-color: #b0724c;
 }
 .squisq-editor-shell[data-theme="dark"] .squisq-toolbar-button--active {
   color: #e0b897;
@@ -2644,10 +2632,9 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
   }
 }
 
-.squisq-editor-shell[data-theme="light"] .squisq-toolbar-view-tab--active,
-[data-theme="light"] .squisq-toolbar-view-tab--active {
-  color: var(--success-text) !important;
-  border-bottom-color: var(--success-text) !important;
+.squisq-editor-shell[data-theme="light"] .squisq-toolbar-view-button,
+[data-theme="light"] .squisq-toolbar-view-button {
+  color: var(--success-text);
 }
 .squisq-editor-shell[data-theme="light"] .squisq-toolbar-button--active,
 [data-theme="light"] .squisq-toolbar-button--active {
@@ -2671,7 +2658,9 @@ body:has(.chat-editor-wrap button[aria-label="Insert"][aria-expanded="true"])
 }
 
 @media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) .squisq-toolbar-view-tab--active,
+  :root:not([data-theme="dark"]) .squisq-toolbar-view-button {
+    color: var(--success-text);
+  }
   :root:not([data-theme="dark"]) .squisq-view-tab--active {
     color: var(--success-text) !important;
     border-bottom-color: var(--success-text) !important;

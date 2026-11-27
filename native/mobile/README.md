@@ -225,7 +225,7 @@ descriptor remains with the engine until unload. No API here provides downloads,
 filesystem tools, network access, or script execution.
 
 Build choices follow the pinned upstream's
-[`build-xcframework.sh`](https://github.com/ggml-org/llama.cpp/blob/b1b770d90d94cad9e9ea5b993bdbc383a522fb28/build-xcframework.sh) and
-[`docs/android.md`](https://github.com/ggml-org/llama.cpp/blob/b1b770d90d94cad9e9ea5b993bdbc383a522fb28/docs/android.md),
+[`build-xcframework.sh`](https://github.com/ggml-org/llama.cpp/blob/171527522610996f5f0acf12334e185156ca8f44/build-xcframework.sh) and
+[`docs/android.md`](https://github.com/ggml-org/llama.cpp/blob/171527522610996f5f0acf12334e185156ca8f44/docs/android.md),
 [Apple's XCFramework guide](https://developer.apple.com/documentation/xcode/creating-a-multi-platform-binary-framework-bundle),
 and [Android's 16 KB page guidance](https://developer.android.com/guide/practices/page-sizes).

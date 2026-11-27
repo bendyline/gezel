@@ -657,7 +657,7 @@ ${cssLinks(css, depth)}
 </head>`;
 }
 
-function masthead(
+export function masthead(
   areas: HandboekTocArea[],
   depth: number,
   siteUrl: string | undefined,

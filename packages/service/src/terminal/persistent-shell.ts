@@ -36,6 +36,37 @@ const PROMPT_YESNO_RE =
   /\(\s*(y|yes)\s*[/|]\s*(n|no)\s*\)\s*\??\s*$|\[\s*y\s*[/|]\s*n\s*\]\s*\??\s*$|\[\s*Y\s*[/|]\s*n\s*\]\s*\??\s*$|\[\s*y\s*[/|]\s*N\s*\]\s*\??\s*$/i;
 const PROMPT_GENERIC_RE = /[:?]\s*$/;
 
+/**
+ * Newer Windows ConPTY can ask its terminal for Primary Device Attributes
+ * (DA1, `ESC [ c`), and its `WaitForDA1` holds the console until a reply
+ * arrives. A real terminal always answers; a headless host must too.
+ * Inbox conhost before microsoft/terminal#18681 counted a reply only when
+ * its first parameter is >= 61 and at least one attribute follows, so
+ * xterm's classic `ESC [ ? 1 ; 2 c` is not enough. We claim VT500-family
+ * conformance with ANSI color (22) and nothing that would change how
+ * conhost paints text we parse.
+ */
+const DA1_REPLY = '\x1b[?61;22c';
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching control chars is the point
+const DA1_REQUEST_RE = /\x1b\[0?c/g;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching control chars is the point
+const DA1_PARTIAL_TAIL_RE = /\x1b(?:\[0?)?$/;
+
+/**
+ * Counts DA1 requests in a PTY output chunk. `carry` is the unfinished
+ * request prefix the previous chunk ended with, so a request split across
+ * reads is still answered once.
+ */
+export function scanDeviceAttributeRequests(
+  carry: string,
+  data: string,
+): { requests: number; carry: string } {
+  const text = carry + data;
+  const requests = text.match(DA1_REQUEST_RE)?.length ?? 0;
+  const partial = DA1_PARTIAL_TAIL_RE.exec(text);
+  return { requests, carry: partial ? partial[0] : '' };
+}
+
 type NodePtyRuntime = Pick<typeof import('node-pty'), 'spawn'>;
 type NodePtyImporter = () => Promise<NodePtyRuntime>;
 
@@ -164,6 +195,8 @@ export class PersistentShell {
    * would otherwise consume our trailing line as their stdin.
    */
   private readonly shellSentinel: string;
+  /** Unfinished DA1 request prefix from the previous output chunk. */
+  private deviceAttributeCarry = '';
   private exited = false;
   private exitInfo: { exitCode: number; signal?: number } | null = null;
   /**
@@ -395,7 +428,12 @@ export class PersistentShell {
             // Capture `$?` before the prompt body itself changes it. Reset
             // `$LASTEXITCODE` after every prompt so a later failing cmdlet
             // cannot inherit the exit code of an older native executable.
-            `function global:prompt { $gezelSuccess = $?; $gezelLastExit = $global:LASTEXITCODE; $gezelExit = if ($gezelSuccess) { 0 } elseif ($null -ne $gezelLastExit -and $gezelLastExit -ne 0) { [int]$gezelLastExit } else { 1 }; $global:LASTEXITCODE = 0; [Console]::Write("\`n${shellSentinel}|$gezelExit|$((Get-Location).Path)\`n"); return '' }`,
+            // The cwd comes from the engine, never a cmdlet: in Windows
+            // PowerShell `Get-Location` autoloads its module, and that search
+            // analyzes every module installed before the built-in ones. On
+            // the hosted CI images (AWSPowershell, Microsoft.Graph, SqlServer)
+            // the first prompt never arrived within 10 s (2026-11-26).
+            `function global:prompt { $gezelSuccess = $?; $gezelLastExit = $global:LASTEXITCODE; $gezelExit = if ($gezelSuccess) { 0 } elseif ($null -ne $gezelLastExit -and $gezelLastExit -ne 0) { [int]$gezelLastExit } else { 1 }; $global:LASTEXITCODE = 0; [Console]::Write("\`n${shellSentinel}|$gezelExit|$($ExecutionContext.SessionState.Path.CurrentLocation.Path)\`n"); return '' }`,
             '$global:LASTEXITCODE = 0',
           ].join('; ');
 
@@ -606,8 +644,21 @@ export class PersistentShell {
     return new Promise<PersistentShellRunResult>((resolve, reject) => {
       const timer = setTimeout(() => {
         if (this.currentRun?.sentinel !== sentinel) return;
+        const { text } = this.currentRun.ring.value();
         this.currentRun = null;
-        log.warn(`command timed out after ${this.commandTimeoutMs}ms; killing shell`);
+        // Raw and escaped, so a stuck terminal handshake shows its escape
+        // sequences. An init timeout prints nothing else to go on. The head
+        // holds what the terminal sent before our input; the tail, where the
+        // shell stopped.
+        const head =
+          text.length > 600 ? ` First output: ${JSON.stringify(text.slice(0, 200))}.` : '';
+        log.warn(
+          `${opts.discardOutput ? 'shell initialization' : 'command'} timed out after ${
+            this.commandTimeoutMs
+          }ms; killing shell.${head} Last output (${text.length} chars): ${JSON.stringify(
+            text.slice(-400),
+          )}`,
+        );
         this.kill();
         reject(new Error(`Command exceeded ${this.commandTimeoutMs}ms and the shell was killed.`));
       }, this.commandTimeoutMs);
@@ -635,6 +686,13 @@ export class PersistentShell {
   }
 
   private handleData(data: string): void {
+    // Windows only: conhost answers every query a console client makes,
+    // so the only DA1 that reaches us is conhost's own startup handshake.
+    if (this.platform === 'win32' && !this.exited) {
+      const scan = scanDeviceAttributeRequests(this.deviceAttributeCarry, data);
+      this.deviceAttributeCarry = scan.carry;
+      for (let i = 0; i < scan.requests; i++) this.pty.write(DA1_REPLY);
+    }
     if (!this.currentRun) {
       // Pre-init bytes (shell banner) or post-run trailing prompt —
       // both safe to drop. Nothing to do.
@@ -949,6 +1007,10 @@ function pickPlatformShell(): {
         '$ErrorActionPreference = "Continue"',
         '$OutputEncoding = [System.Text.Encoding]::UTF8',
         '[Console]::OutputEncoding = [System.Text.Encoding]::UTF8',
+        // Load the cmdlets nearly every command uses by name, which finds
+        // their folder directly. Left to autoloading, the first `Write-Output`
+        // would analyze every installed module first (see the prompt).
+        'Import-Module Microsoft.PowerShell.Management, Microsoft.PowerShell.Utility -ErrorAction SilentlyContinue',
       ],
       platform: 'win32',
     };

@@ -5781,7 +5781,14 @@ export const UnifiedSearchResultSchema = z.object({
   /** Coarse confidence derived from `relevance` — render hints, early-stop cues. */
   tier: z.enum(['strong', 'weak']).optional(),
   /** What a memory hit records: the day it was written and its kind (kind 'memory' only). */
-  memory: z.object({ day: z.string(), kind: z.enum(MEMORY_KINDS) }).optional(),
+  memory: z
+    .object({
+      day: z.string(),
+      kind: z.enum(MEMORY_KINDS),
+      /** Kept on models on this computer: the connections it came from. */
+      kept: z.string().optional(),
+    })
+    .optional(),
   // ── knowledge provenance (kind 'knowledge' only) ────────────────────────
   /** Catalog the hit came from, plus the exact installed version. */
   catalogId: z.string().optional(),

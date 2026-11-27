@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   type FileContent,
   formatValidateResult,
+  molenCheckToValidateCheck,
   pageLibrariesToValidateCheck,
   runtimePageCheckToValidateCheck,
   validateFile,
@@ -338,6 +339,44 @@ describe('validateFile — formatting', () => {
     expect(formatted).toContain('runtime-load');
     expect(formatted).toContain('addColorStop');
     expect(formatted).toContain('Do not install a separate static server');
+  });
+});
+
+describe('molen-document check', () => {
+  it('passes a document that plays and lists what is worth fixing', () => {
+    const check = molenCheckToValidateCheck({
+      ok: true,
+      kind: 'film',
+      summary: 'a film "Dusk" 8.0 s long with 2 cast members and 1 prop',
+      issues: [],
+      notices: [
+        { path: '/shots/0', code: 'subject_hidden', message: '"ana" is hidden behind "house"' },
+      ],
+    });
+    const formatted = formatValidateResult({ path: 'film.json', checks: [check] });
+    expect(formatted).toContain('PASS');
+    expect(formatted).toContain('✓ molen-document: plays: a film "Dusk"');
+    expect(formatted).toContain('  - "ana" is hidden behind "house"');
+  });
+
+  it("fails with Molen's own numbered issues", () => {
+    const check = molenCheckToValidateCheck({
+      ok: false,
+      kind: 'game',
+      issues: [{ path: '/win', code: 'no_win', message: 'a game needs a way to win' }],
+      notices: [],
+      formatted:
+        '✖ game "Moths" failed validation (1 issue)\n\n1. /win\n   a game needs a way to win',
+    });
+    const formatted = formatValidateResult({ path: 'game.json', checks: [check] });
+    expect(formatted).toContain('FAIL');
+    expect(formatted).toContain('1. /win');
+    expect(formatted).toContain('at the JSON path it names');
+  });
+
+  it('reports an unreachable daemon as skipped, never as a pass', () => {
+    const check = molenCheckToValidateCheck({ unavailable: 'Molen check unavailable: offline' });
+    expect(formatValidateResult({ path: 'film.json', checks: [check] })).toContain('1 skipped');
   });
 });
 

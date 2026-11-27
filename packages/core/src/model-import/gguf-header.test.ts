@@ -4,6 +4,7 @@ import {
   chatTemplateThinks,
   ggufNonChatKind,
   ggufParameterSize,
+  unloadableGgufRevision,
   unreadableGgufTensorTypes,
 } from './gguf-header.js';
 
@@ -48,6 +49,49 @@ describe('unreadableGgufTensorTypes', () => {
     expect(
       unreadableGgufTensorTypes({ version: 3, tensorTypeCounts: { 12: 3, 31: 1, 250: 1 } }),
     ).toEqual({ removed: ['Q4_0_4_4'], unknown: [250] });
+  });
+});
+
+describe('unloadableGgufRevision', () => {
+  const revisions = [
+    {
+      architecture: 'kolibri1',
+      key: 'kolibri1.attention.indexer.top_k',
+      model: 'Kolibri 1.1',
+      upstream: 'https://github.com/ggml-org/llama.cpp/pull/32891',
+    },
+  ];
+
+  it('names the newer revision a file carries the marker key of', () => {
+    const header = {
+      version: 3,
+      architecture: 'kolibri1',
+      metadataKeys: ['general.architecture', 'kolibri1.attention.indexer.top_k'],
+    };
+    expect(unloadableGgufRevision(header, revisions)?.model).toBe('Kolibri 1.1');
+  });
+
+  it('passes the original design and other designs with the same key', () => {
+    expect(
+      unloadableGgufRevision(
+        { version: 3, architecture: 'kolibri1', metadataKeys: ['kolibri1.block_count'] },
+        revisions,
+      ),
+    ).toBeUndefined();
+    expect(
+      unloadableGgufRevision(
+        {
+          version: 3,
+          architecture: 'glm-dsa',
+          metadataKeys: ['glm-dsa.attention.indexer.top_k', 'kolibri1.attention.indexer.top_k'],
+        },
+        revisions,
+      ),
+    ).toBeUndefined();
+    // A header read without its key list cannot be judged, so it passes.
+    expect(unloadableGgufRevision({ version: 3, architecture: 'kolibri1' }, revisions)).toBe(
+      undefined,
+    );
   });
 });
 

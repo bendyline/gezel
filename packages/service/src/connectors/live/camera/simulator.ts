@@ -113,6 +113,27 @@ export function simulatedJpeg(gray: Uint8Array, step: SimulatedStep): Buffer {
   return Buffer.concat([encoded.subarray(0, 2), com, encoded.subarray(2)]);
 }
 
+/**
+ * Encoded pictures by what they show. jpeg-js is pure JS, about 20 ms a frame,
+ * and the scene holds one picture for most of its two minutes, so a frame
+ * reuses the encoding of the first frame that showed the same step with the
+ * cat in the same place. Only the analysis frame needs fresh sensor noise: the
+ * motion detector reads it, and nothing reads the picture's noise. Bounded by
+ * the scene's distinct views (a few hundred at most).
+ */
+const jpegByView = new Map<string, Buffer>();
+
+function viewJpeg(frameIndex: number, gray: Uint8Array): Buffer {
+  const { step, progress } = sceneAt(frameIndex);
+  const key = `${step}:${catX(step, progress) ?? 'none'}`;
+  let encoded = jpegByView.get(key);
+  if (!encoded) {
+    encoded = simulatedJpeg(gray, step);
+    jpegByView.set(key, encoded);
+  }
+  return encoded;
+}
+
 /** The scene step a simulated JPEG carries, or null for a real camera's frame. */
 export function simulatedStepOf(bytes: Buffer): SimulatedStep | null {
   const head = bytes.subarray(0, 64).toString('latin1');
@@ -165,7 +186,7 @@ export class SimulatedFrameSource implements FrameSource {
   /** Produce the next frame now (tests drive the scene by hand). */
   tick(at = Date.now()): CameraFrame {
     const gray = simulatedGray(this.index);
-    const frame = { at, gray, jpeg: simulatedJpeg(gray, sceneAt(this.index).step) };
+    const frame = { at, gray, jpeg: viewJpeg(this.index, gray) };
     this.index++;
     for (const cb of this.frameListeners) cb(frame);
     return frame;

@@ -14,12 +14,21 @@ import { createTrustingFetch } from '@bendyline/gezel-client/node';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Store } from '../fs/store.js';
 import type { MemoryManager } from '../memory/manager.js';
+import { loadMolenStage } from '../molen/documents.js';
 import { MockImageProvider } from '../providers/image/mock.js';
 import type { ImageProvider } from '../providers/image/types.js';
 import { MockProvider } from '../providers/mock.js';
+import { denyNetBoundaryAvailable } from '../sandbox/runner.js';
 import { type RunningService, startService } from '../service.js';
 import { ChatEventBus } from './events.js';
 import { ChatManager } from './manager.js';
+
+// Deny-net script runs need an OS network boundary: Seatbelt on macOS, a
+// systemd unit or the sandbox helper on Linux, the MXC container on Windows.
+// These suites ran only on macOS until 2026-11-23, so CI never executed them.
+const DENY_NET_BOUNDARY = await denyNetBoundaryAvailable();
+// @bendyline/molen-stage is optional until its first npm release (pnpm link:molen).
+const MOLEN_STAGE_INSTALLED = (await loadMolenStage()) !== null;
 
 const require = createRequire(import.meta.url);
 
@@ -165,6 +174,9 @@ beforeEach(async () => {
   // Flag suppresses the background system-toolsets bootstrap — otherwise
   // its tarball download races with `afterEach`'s home rm and throws.
   process.env.GEZEL_MOCK_PROVIDER = '1';
+  // Nothing here asserts on embeddings, and five tests spent 11-12 s each
+  // cold-loading the embedder for project search and craftbook ranking.
+  process.env.GEZEL_DISABLE_EMBEDDINGS = '1';
   home = await mkdtemp(join(tmpdir(), 'gezel-mgr-mcp-test-'));
   svc = await startService({ home });
   store = svc.context.store;
@@ -208,6 +220,7 @@ afterEach(async () => {
   await svc?.stop();
   await rm(home, { recursive: true, force: true }).catch(() => {});
   delete process.env.GEZEL_MOCK_PROVIDER;
+  delete process.env.GEZEL_DISABLE_EMBEDDINGS;
 });
 
 describe('ChatManager turn intent routing', () => {
@@ -440,122 +453,119 @@ describe('ChatManager turn intent routing', () => {
   }, 30_000);
 });
 
-describe.runIf(process.platform === 'darwin')(
-  'ChatManager + MCP — inline craftbook guardrail hooks',
-  () => {
-    it('routes Careful required inputs through ScriptRunner and denies a declined delete', async () => {
-      manager.setScriptRunner(svc.context.scriptRunner);
-      await store.writeProjectWorkspaceFile('default', 'protected.txt', 'keep me\n');
-      const task = await installInlineHookTask({
-        craftbookId: 'careful-mode',
-        craftbookName: 'Careful Mode',
-        matcher: '^delete_path$',
-        scriptName: 'check-careful',
-        source: CAREFUL_HOOK_SOURCE,
-      });
-      const session = await manager.createSession({
-        gezelId: 'ada',
-        projectId: 'default',
-        taskRef: task.ref,
-        stepId: task.activeStepId,
-      });
+describe.runIf(DENY_NET_BOUNDARY)('ChatManager + MCP — inline craftbook guardrail hooks', () => {
+  it('routes Careful required inputs through ScriptRunner and denies a declined delete', async () => {
+    manager.setScriptRunner(svc.context.scriptRunner);
+    await store.writeProjectWorkspaceFile('default', 'protected.txt', 'keep me\n');
+    const task = await installInlineHookTask({
+      craftbookId: 'careful-mode',
+      craftbookName: 'Careful Mode',
+      matcher: '^delete_path$',
+      scriptName: 'check-careful',
+      source: CAREFUL_HOOK_SOURCE,
+    });
+    const session = await manager.createSession({
+      gezelId: 'ada',
+      projectId: 'default',
+      taskRef: task.ref,
+      stepId: task.activeStepId,
+    });
 
-      mock.scriptToolCalls([{ name: 'delete_path', arguments: { path: 'protected.txt' } }]);
-      mock.script('The delete was denied.');
-      const send = manager.send(session.id, 'Delete protected.txt.');
+    mock.scriptToolCalls([{ name: 'delete_path', arguments: { path: 'protected.txt' } }]);
+    mock.script('The delete was denied.');
+    const send = manager.send(session.id, 'Delete protected.txt.');
 
-      const question = await waitForToolPermissionQuestion();
-      expect(question.intent).toMatchObject({
-        kind: 'tool-permission',
-        toolName: 'delete_path',
-      });
-      expect(question.prompt).toContain('careful integration: approve protected delete');
-      await store.writeQuestion({
-        ...question,
-        answer: { selectedChoices: [1], at: new Date().toISOString() },
-      });
-      await send;
+    const question = await waitForToolPermissionQuestion();
+    expect(question.intent).toMatchObject({
+      kind: 'tool-permission',
+      toolName: 'delete_path',
+    });
+    expect(question.prompt).toContain('careful integration: approve protected delete');
+    await store.writeQuestion({
+      ...question,
+      answer: { selectedChoices: [1], at: new Date().toISOString() },
+    });
+    await send;
 
-      await expect(store.readProjectWorkspaceFile('default', 'protected.txt')).resolves.toBe(
-        'keep me\n',
-      );
-      expect(mock.toolCallOutputs.find(({ name }) => name === 'delete_path')?.output).toContain(
-        'careful integration: approve protected delete',
-      );
-      const persisted = await store.getSession('ada', session.id);
-      const reply = persisted?.messages.find(({ content }) => content === 'The delete was denied.');
-      expect(reply?.toolCalls?.[0]).toMatchObject({ name: 'delete_path', success: false });
+    await expect(store.readProjectWorkspaceFile('default', 'protected.txt')).resolves.toBe(
+      'keep me\n',
+    );
+    expect(mock.toolCallOutputs.find(({ name }) => name === 'delete_path')?.output).toContain(
+      'careful integration: approve protected delete',
+    );
+    const persisted = await store.getSession('ada', session.id);
+    const reply = persisted?.messages.find(({ content }) => content === 'The delete was denied.');
+    expect(reply?.toolCalls?.[0]).toMatchObject({ name: 'delete_path', success: false });
 
-      const gated = await svc.context.history.listEvents({
-        projectId: 'default',
-        kinds: ['tool.gated'],
-      });
-      expect(gated).toEqual([
-        expect.objectContaining({
-          details: expect.objectContaining({
-            craftbookId: 'careful-mode',
-            tool: 'delete_path',
-            decision: 'ask',
-          }),
+    const gated = await svc.context.history.listEvents({
+      projectId: 'default',
+      kinds: ['tool.gated'],
+    });
+    expect(gated).toEqual([
+      expect.objectContaining({
+        details: expect.objectContaining({
+          craftbookId: 'careful-mode',
+          tool: 'delete_path',
+          decision: 'ask',
         }),
-      ]);
-    }, 30_000);
+      }),
+    ]);
+  }, 30_000);
 
-    it('routes Freeze required inputs through ScriptRunner and denies an outside write', async () => {
-      manager.setScriptRunner(svc.context.scriptRunner);
-      await store.writeProjectWorkspaceFile('default', '.gezel/freeze.json', '{"dir":"safe"}\n');
-      await store.writeProjectWorkspaceFile('default', 'outside.txt', 'original\n');
-      const task = await installInlineHookTask({
-        craftbookId: 'freeze-scope',
-        craftbookName: 'Freeze Scope',
-        matcher: '^write_file$',
-        scriptName: 'check-freeze',
-        source: FREEZE_HOOK_SOURCE,
-      });
-      const session = await manager.createSession({
-        gezelId: 'ada',
-        projectId: 'default',
-        taskRef: task.ref,
-        stepId: task.activeStepId,
-      });
+  it('routes Freeze required inputs through ScriptRunner and denies an outside write', async () => {
+    manager.setScriptRunner(svc.context.scriptRunner);
+    await store.writeProjectWorkspaceFile('default', '.gezel/freeze.json', '{"dir":"safe"}\n');
+    await store.writeProjectWorkspaceFile('default', 'outside.txt', 'original\n');
+    const task = await installInlineHookTask({
+      craftbookId: 'freeze-scope',
+      craftbookName: 'Freeze Scope',
+      matcher: '^write_file$',
+      scriptName: 'check-freeze',
+      source: FREEZE_HOOK_SOURCE,
+    });
+    const session = await manager.createSession({
+      gezelId: 'ada',
+      projectId: 'default',
+      taskRef: task.ref,
+      stepId: task.activeStepId,
+    });
 
-      mock.scriptToolCalls([
-        {
-          name: 'write_file',
-          arguments: { path: 'outside.txt', content: 'changed\n' },
-        },
-      ]);
-      mock.script('The outside write was denied.');
-      await manager.send(session.id, 'Overwrite outside.txt.');
+    mock.scriptToolCalls([
+      {
+        name: 'write_file',
+        arguments: { path: 'outside.txt', content: 'changed\n' },
+      },
+    ]);
+    mock.script('The outside write was denied.');
+    await manager.send(session.id, 'Overwrite outside.txt.');
 
-      await expect(store.readProjectWorkspaceFile('default', 'outside.txt')).resolves.toBe(
-        'original\n',
-      );
-      expect(mock.toolCallOutputs.find(({ name }) => name === 'write_file')?.output).toContain(
-        'freeze integration: outside write denied',
-      );
-      const persisted = await store.getSession('ada', session.id);
-      const reply = persisted?.messages.find(
-        ({ content }) => content === 'The outside write was denied.',
-      );
-      expect(reply?.toolCalls?.[0]).toMatchObject({ name: 'write_file', success: false });
+    await expect(store.readProjectWorkspaceFile('default', 'outside.txt')).resolves.toBe(
+      'original\n',
+    );
+    expect(mock.toolCallOutputs.find(({ name }) => name === 'write_file')?.output).toContain(
+      'freeze integration: outside write denied',
+    );
+    const persisted = await store.getSession('ada', session.id);
+    const reply = persisted?.messages.find(
+      ({ content }) => content === 'The outside write was denied.',
+    );
+    expect(reply?.toolCalls?.[0]).toMatchObject({ name: 'write_file', success: false });
 
-      const gated = await svc.context.history.listEvents({
-        projectId: 'default',
-        kinds: ['tool.gated'],
-      });
-      expect(gated).toEqual([
-        expect.objectContaining({
-          details: expect.objectContaining({
-            craftbookId: 'freeze-scope',
-            tool: 'write_file',
-            decision: 'deny',
-          }),
+    const gated = await svc.context.history.listEvents({
+      projectId: 'default',
+      kinds: ['tool.gated'],
+    });
+    expect(gated).toEqual([
+      expect.objectContaining({
+        details: expect.objectContaining({
+          craftbookId: 'freeze-scope',
+          tool: 'write_file',
+          decision: 'deny',
         }),
-      ]);
-    }, 30_000);
-  },
-);
+      }),
+    ]);
+  }, 30_000);
+});
 
 describe('ChatManager + MCP — tool calls fire through the bridge', () => {
   it('executes a scripted write_document tool call during send()', async () => {
@@ -602,6 +612,50 @@ describe('ChatManager + MCP — tool calls fire through the bridge', () => {
     expect(assistantMsg!.toolCalls![0]!.resultTruncated).not.toBe(true);
     expect(assistantMsg!.toolCalls![0]!.deliveredResultTruncated).toBe(false);
   }, 30_000);
+
+  it.runIf(MOLEN_STAGE_INSTALLED)(
+    'checks a Molen film in the write result, through the session token',
+    async () => {
+      const session = await manager.createSession({ gezelId: 'ada' });
+      const film = {
+        format: 'molen/film@1',
+        name: 'Pier',
+        cast: [
+          { id: 'ana', preset: 'human.adult', at: [-4, 0] },
+          { id: 'ben', preset: 'human.adult', at: [4, 0] },
+        ],
+        beats: [{ at: 1, who: 'anna', do: 'walk-to', target: 'ben' }],
+        shots: [{ at: 0, kind: 'wide', on: ['ana', 'ben'] }],
+      };
+      mock.scriptToolCalls([
+        { name: 'write_artifact', arguments: { path: 'pier.json', jsonContent: film } },
+        {
+          name: 'write_artifact',
+          arguments: {
+            path: 'pier-fixed.json',
+            jsonContent: { ...film, beats: [{ at: 1, who: 'ana', do: 'walk-to', target: 'ben' }] },
+          },
+        },
+      ]);
+      mock.script('Wrote the film.');
+      await manager.send(session.id, 'write a short film about two friends on a pier');
+
+      const outputs = Object.fromEntries(
+        mock.toolCallOutputs
+          .filter((o) => o.name === 'write_artifact')
+          .map((o) => [o.output.split('\n')[0], o.output]),
+      );
+      expect(outputs['Wrote pier.json']).toContain('[Molen check] pier.json does not play yet:');
+      expect(outputs['Wrote pier.json']).toContain('did you mean "ana"?');
+      expect(outputs['Wrote pier.json']).toContain(
+        'write the whole document again with write_artifact',
+      );
+      expect(outputs['Wrote pier-fixed.json']).toMatch(
+        /\[Molen check\] pier-fixed\.json plays: a film "Pier" [\d.]+ s long/,
+      );
+    },
+    30_000,
+  );
 
   it('stamps each tool call with its offset into the turn reasoning trace', async () => {
     const session = await manager.createSession({ gezelId: 'ada' });

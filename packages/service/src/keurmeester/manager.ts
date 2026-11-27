@@ -19,6 +19,7 @@ import {
   formatCraftbookDocErrors,
   isLocalProvider,
   parseCraftbookDoc,
+  parseTaskRef,
   serializeCraftbookDoc,
   stepOwnerGezelId,
 } from '@bendyline/gezel';
@@ -261,6 +262,13 @@ export function parseVerdict(raw: string): KeurmeesterVerdict {
  * TaskScheduler so trigger sites stay one call each; the one-shot and
  * the chat/tasks ports are injected to avoid runtime dependency cycles.
  */
+/** Whether a conversation or task holds data kept on models on this computer. */
+export interface KeurmeesterKeptLocalPort {
+  session(sessionId: string): Promise<boolean>;
+  task(projectId: string, num: number): Promise<boolean>;
+  artifacts(projectId: string, paths: readonly string[]): Promise<boolean>;
+}
+
 export class KeurmeesterManager {
   private readonly store: Store;
   private readonly history: HistoryManager;
@@ -269,6 +277,7 @@ export class KeurmeesterManager {
   readonly cases: KeurmeesterCaseStore;
   private tasksPort?: KeurmeesterTasksPort;
   private chatPort?: KeurmeesterChatPort;
+  private keptLocalPort?: KeurmeesterKeptLocalPort;
 
   /** Per-session / per-task consult counters + last-consult timestamps.
    * In-memory — a service restart resetting budgets is acceptable (they
@@ -320,7 +329,16 @@ export class KeurmeesterManager {
   async judgeOneShot(
     prompt: string,
     timeoutMs: number,
+    judged?: { projectId: string; num: number; paths: readonly string[] },
   ): Promise<{ text: string } | { unavailable: string }> {
+    if (
+      judged &&
+      this.keptLocalPort &&
+      ((await this.keptLocalPort.task(judged.projectId, judged.num)) ||
+        (await this.keptLocalPort.artifacts(judged.projectId, judged.paths)))
+    ) {
+      return { unavailable: 'this work holds data kept on this computer' };
+    }
     const config = await this.store.readConfig();
     const target = await this.resolveConsultTarget(config);
     if (!target) {
@@ -340,6 +358,23 @@ export class KeurmeesterManager {
 
   setChat(port: KeurmeesterChatPort): void {
     this.chatPort = port;
+  }
+
+  /**
+   * A consult sends the stuck work to a cloud model, so work that holds data
+   * kept on this computer is never offered for one.
+   */
+  setKeptLocal(port: KeurmeesterKeptLocalPort): void {
+    this.keptLocalPort = port;
+  }
+
+  private async sessionStaysHere(sessionId: string): Promise<boolean> {
+    return (await this.keptLocalPort?.session(sessionId)) === true;
+  }
+
+  private async taskStaysHere(taskRef: string): Promise<boolean> {
+    const ref = parseTaskRef(taskRef);
+    return !!ref && (await this.keptLocalPort?.task(ref.projectId, ref.num)) === true;
   }
 
   // ── Chat-stall consults (trigger 1) ─────────────────────────────────
@@ -382,6 +417,7 @@ export class KeurmeesterManager {
       return false;
     }
     if (!this.sessionBudgetAllows(ctx.sessionId, config)) return false;
+    if (await this.sessionStaysHere(ctx.sessionId)) return false;
     const target = await this.resolveConsultTarget(config);
     if (!target) {
       log.info(
@@ -693,6 +729,7 @@ export class KeurmeesterManager {
     if (config.keurmeesterGezelId && ctx.gezelId === config.keurmeesterGezelId) return null;
     if (this.consultInFlight) return null;
     if (!this.sessionBudgetAllows(ctx.sessionId, config)) return null;
+    if (await this.sessionStaysHere(ctx.sessionId)) return null;
     const target = await this.resolveConsultTarget(config);
     if (!target) return null;
 
@@ -711,6 +748,7 @@ export class KeurmeesterManager {
       return null;
     }
     if (!this.taskBudgetAllows(task.ref, config)) return null;
+    if (await this.taskStaysHere(task.ref)) return null;
 
     this.consultInFlight = true;
     this.bumpBudget(this.sessionConsults, ctx.sessionId);
@@ -760,6 +798,7 @@ export class KeurmeesterManager {
     if (config.keurmeesterGezelId && assigneeGezelId === config.keurmeesterGezelId) return false;
     if (this.consultInFlight) return false;
     if (!this.taskBudgetAllows(taskRef, config)) return false;
+    if (await this.taskStaysHere(taskRef)) return false;
     // At-risk check from the assignee's resolved provider/model — the
     // same tier rule as chat stalls, derived from config + frontmatter
     // because no session state is in scope.
@@ -1353,7 +1392,8 @@ export class KeurmeesterManager {
         .sort((a, b) => (b.lastActivityAt ?? '').localeCompare(a.lastActivityAt ?? ''))[0];
       if (!latest) return [];
       const session = await this.store.getSession(gezelId, latest.id);
-      if (!session) return [];
+      // The assignee's newest thread need not be the task's own.
+      if (!session || (await this.sessionStaysHere(session.id))) return [];
       return session.messages.slice(-8).map((m) => ({
         role: m.role,
         content: m.content.length > 1200 ? `${m.content.slice(0, 1200)} …[truncated]` : m.content,

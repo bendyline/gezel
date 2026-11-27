@@ -41,3 +41,4 @@ regression surface when an anecdote is carrying architectural weight.
 | [0032](0032-connector-test-strategy.md) | Accepted | Testing connectors without an account for each provider |
 | [0033](0033-spectral-published-components.md) | Accepted | Spectral connectors run Prismatic's published components |
 | [0034](0034-page-libraries.md) | Accepted | Pages load libraries from a local shelf |
+| [0035](0035-kept-local-data.md) | Accepted | A connection's data can stay on models on this computer |

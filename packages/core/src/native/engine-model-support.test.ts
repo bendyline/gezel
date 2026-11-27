@@ -5,6 +5,7 @@ import {
   LLAMA_CPP_ARCHITECTURES,
   LLAMA_CPP_GGUF_SUPPORT_COMMIT,
   LLAMA_CPP_GGUF_SUPPORT_TAG,
+  LLAMA_CPP_UNLOADABLE_REVISIONS,
 } from './llama-cpp-gguf-support.js';
 import { MLX_MODEL_TYPES, MLX_VLM_SUPPORT_VERSION } from './mlx-model-support.js';
 
@@ -25,6 +26,13 @@ describe('engine model support tables', () => {
       'utf8',
     );
     expect(MLX_VLM_SUPPORT_VERSION).toBe(/'mlx-vlm==([^']+)'/.exec(venv)?.[1]);
+  });
+
+  it('name unloadable revisions by a listed design and its own key', () => {
+    for (const entry of LLAMA_CPP_UNLOADABLE_REVISIONS) {
+      expect(LLAMA_CPP_ARCHITECTURES).toContain(entry.architecture);
+      expect(entry.key.startsWith(`${entry.architecture}.`)).toBe(true);
+    }
   });
 
   it('know the designs the catalog ships', () => {

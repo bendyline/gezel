@@ -21,8 +21,8 @@ the server when bumping versions (`docblocks mcp` publishes exactly 19 tools, no
 aliases; verify with a `tools/list` against the new tarball).
 
 Since 2.7.3 the daemon ships DocBlocks itself: `@bendyline/docblocks-cli` is an
-exact-pinned dependency of `packages/service`, currently **2.7.16** (tarball
-SHA-256 `fce4ccf78758cd33ab53d32ca089d0a3de9903cd026b36f0f50add6fc09c2210`).
+exact-pinned dependency of `packages/service`, currently **2.8.5** (tarball
+SHA-256 `0ff35ddfc7720cc5f62db4d8efea0728399941bd5e115ea9b149c3987509935b`).
 [bundled-docblocks.ts](../packages/service/src/toolsets/bundled-docblocks.ts)
 resolves it as an immutable system toolset, so it works on first launch and
 offline with no catalog download, and an install request returns it instead of

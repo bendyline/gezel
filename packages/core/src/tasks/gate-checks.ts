@@ -268,6 +268,8 @@ export function gateCheckLabel(c: GateCheck): string {
       return `esmImports ${c.file}`;
     case 'sourceParses':
       return `sourceParses ${c.file}`;
+    case 'molenDocument':
+      return `molenDocument ${c.file}${c.as ? ` as=${c.as}` : ''}`;
     case 'tableShape':
       return `tableShape ${c.file}`;
     case 'recordSchema':

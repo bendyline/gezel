@@ -177,7 +177,8 @@ json chat_params_parse(json body, const chat_config & opt, const common_chat_tem
     json llama_params;
 
     auto tools = json_value(body, "tools", json());
-    auto tool_choice = json_value(body, "tool_choice", std::string("auto"));
+    // v1.1.0 parses the OpenAI object form too (a named function, allowed_tools).
+    auto tool_choice = json_value(body, "tool_choice", json("auto"));
 
     // Handle "stop" field
     if (body.contains("stop") && body.at("stop").is_string()) {
@@ -242,7 +243,7 @@ json chat_params_parse(json body, const chat_config & opt, const common_chat_tem
     common_chat_templates_inputs inputs;
     inputs.messages = common_chat_msgs_parse_oaicompat(messages);
     inputs.tools = common_chat_tools_parse_oaicompat(tools);
-    inputs.tool_choice = common_chat_tool_choice_parse_oaicompat(tool_choice);
+    inputs.tool_choice = common_chat_tool_choice_parse_oaicompat(tool_choice, inputs.tools);
     inputs.json_schema = json_schema.is_null() ? "" : json_schema.dump();
     inputs.grammar = grammar;
     inputs.use_jinja = true;

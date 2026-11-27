@@ -906,6 +906,119 @@ describe('ProjectConnectionsTab bring-your-own OAuth app', () => {
   });
 });
 
+describe('ProjectConnectionsTab cloud AI switch', () => {
+  beforeEach(() => {
+    vi.mocked(api.listConnectors).mockReset();
+    vi.mocked(api.listConnectorActions).mockReset();
+    vi.mocked(api.listConnectorTypes).mockReset();
+    vi.mocked(api.patchConnector).mockReset();
+    vi.mocked(api.bindConnector).mockReset();
+    vi.mocked(api.connectorReadiness).mockReset();
+    vi.mocked(api.connectorOAuthApp).mockReset();
+    vi.mocked(api.connectorReadiness).mockResolvedValue({ needed: false } as never);
+    vi.mocked(api.connectorOAuthApp).mockResolvedValue({ key: null, builtin: false } as never);
+    vi.mocked(api.listConnectorActions).mockResolvedValue({ pending: [] } as never);
+    vi.mocked(api.patchConnector).mockResolvedValue({ ok: true } as never);
+    vi.mocked(api.bindConnector).mockResolvedValue({ binding: { id: 'b1' } } as never);
+    vi.mocked(api.listConnectorTypes).mockResolvedValue({
+      items: [
+        connectorItem('calendar-google', 'Google Calendar', {
+          secretShape: { kind: 'oauth2', required: true },
+        }),
+        connectorItem('mail-gmail', 'Gmail', { secretShape: { kind: 'api-key' } }),
+        connectorItem('rss-feed', 'RSS feed', { secretShape: undefined }),
+      ],
+    } as never);
+  });
+
+  const row = (allowCloudModels?: boolean) =>
+    vi.mocked(api.listConnectors).mockResolvedValue({
+      configured: true,
+      bindings: [
+        {
+          id: 'b1',
+          type: 'calendar-google',
+          displayName: 'Work',
+          ...(allowCloudModels === undefined ? {} : { allowCloudModels }),
+        },
+      ],
+    } as never);
+  const cloud = () => screen.getByRole('checkbox', { name: 'Let cloud AI read this' });
+
+  it('says what each answer means, and saves the one the person picks', async () => {
+    row(false);
+    render(<ProjectConnectionsTab project={PROJECT} />);
+    expect(await screen.findByText(/Only models that run on this computer/)).toBeVisible();
+    expect(cloud()).not.toBeChecked();
+
+    row(true);
+    await userEvent.click(cloud());
+    expect(api.patchConnector).toHaveBeenCalledWith('project-alpha', 'b1', {
+      allowCloudModels: true,
+    });
+    await waitFor(() => expect(cloud()).toBeChecked());
+    expect(screen.getByText(/What it reads goes to that provider/)).toBeVisible();
+
+    row(false);
+    await userEvent.click(cloud());
+    expect(api.patchConnector).toHaveBeenLastCalledWith('project-alpha', 'b1', {
+      allowCloudModels: false,
+    });
+    expect(
+      await screen.findByText(/does not take back what a cloud AI already read/),
+    ).toBeVisible();
+  });
+
+  it('asks nothing about a connection that does not need it', async () => {
+    row();
+    render(<ProjectConnectionsTab project={PROJECT} />);
+    expect(await screen.findByText('Work')).toBeVisible();
+    expect(screen.queryByRole('checkbox', { name: 'Let cloud AI read this' })).toBeNull();
+  });
+
+  async function open(name: string) {
+    row(false);
+    render(<ProjectConnectionsTab project={PROJECT} />);
+    await userEvent.click(await screen.findByRole('button', { name: 'Add connection' }));
+    const dialog = await screen.findByRole('dialog');
+    await userEvent.click(await within(dialog).findByRole('radio', { name }));
+    return dialog;
+  }
+
+  it('is never ticked for the person, and goes along only when they tick it', async () => {
+    const dialog = await open('Gmail');
+    const box = within(dialog).getByRole('checkbox', { name: 'Let cloud AI read this' });
+    expect(box).not.toBeChecked();
+    await userEvent.click(box);
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Add' }));
+    await waitFor(() => expect(api.bindConnector).toHaveBeenCalled());
+    expect(vi.mocked(api.bindConnector).mock.calls[0]?.[1]).toMatchObject({
+      allowCloudModels: true,
+    });
+  });
+
+  it('forgets the tick when another connector is chosen', async () => {
+    const dialog = await open('Gmail');
+    await userEvent.click(within(dialog).getByRole('checkbox', { name: 'Let cloud AI read this' }));
+    await userEvent.click(within(dialog).getByRole('button', { name: /Connectors/ }));
+    await userEvent.click(within(dialog).getByRole('radio', { name: 'Google Calendar' }));
+    expect(
+      within(dialog).getByRole('checkbox', { name: 'Let cloud AI read this' }),
+    ).not.toBeChecked();
+  });
+
+  it('links the privacy policy where the person is about to sign in', async () => {
+    const dialog = await open('Google Calendar');
+    expect(within(dialog).getByRole('link', { name: 'Privacy policy' })).toHaveAttribute(
+      'href',
+      'https://gezel.com/privacy/#google-microsoft',
+    );
+    await userEvent.click(within(dialog).getByRole('button', { name: /Connectors/ }));
+    await userEvent.click(within(dialog).getByRole('radio', { name: 'RSS feed' }));
+    expect(within(dialog).queryByRole('link', { name: 'Privacy policy' })).toBeNull();
+  });
+});
+
 describe('ProjectConnectionsTab data-table stats', () => {
   beforeEach(() => {
     vi.mocked(api.listConnectors).mockReset();

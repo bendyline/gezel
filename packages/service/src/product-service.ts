@@ -57,6 +57,7 @@ import { ChannelManager } from './channels/manager.js';
 import { ChatEventBus } from './chat/events.js';
 import { ChatManager, resolveCatalogReasoningBudget } from './chat/manager.js';
 import { ConnectorActionManager } from './connectors/actions.js';
+import { KeptLocalData } from './connectors/kept-local.js';
 import { CAMERA_ADAPTER_ID, CameraService } from './connectors/live/camera/service.js';
 import { LiveConnectorHost } from './connectors/live/host.js';
 import { registerLiveAdapter } from './connectors/live/registry.js';
@@ -1080,6 +1081,15 @@ export async function startProductService(
     ensureOrCreateSession: (args) => chat.ensureOrCreateSession(args),
     send: (sessionId, text, opts) => chat.send(sessionId, text, opts),
   });
+  const keptLocal = new KeptLocalData(store);
+  keurmeester.setKeptLocal({
+    session: async (id) => (await chat.keptLocalSources(id)).length > 0,
+    task: async (projectId, num) => (await chat.keptLocalTaskSources(projectId, num)).length > 0,
+    artifacts: async (projectId, paths) => {
+      const areas = await keptLocal.areas(projectId);
+      return paths.some((path) => keptLocal.areaForPath(areas, path) !== undefined);
+    },
+  });
   tasks.setKeurmeester(keurmeester);
   scheduler.setKeurmeester(keurmeester);
   // Remote model execution: let ChatManager resolve per-server chat providers
@@ -2013,6 +2023,7 @@ export async function startProductService(
     pinnedProjects: () => (sharedProject ? [sharedProject.id] : []),
     holdsRefresh: async (projectId) =>
       indexingHold.holds(await store.getProject(projectId).catch(() => null)),
+    ...opts.workspaceWatch,
   });
 
   // Connectors: mail, calendar, and wiki natives plus the generic drivers,

@@ -296,6 +296,8 @@ export interface RunQueryOptions {
   limit?: number;
   /** Restrict the views built; default is every table in the project. */
   tables?: readonly string[];
+  /** Corpora the caller may not see; their tables do not exist for it. */
+  omitCorpus?: (corpusDir: string) => boolean;
   timeoutMs?: number;
 }
 
@@ -314,7 +316,9 @@ export async function runQuery(
   project: ProjectLike,
   opts: RunQueryOptions,
 ): Promise<QueryResult> {
-  const all = await listProjectTables(deps.store, project);
+  const all = (await listProjectTables(deps.store, project)).filter(
+    (t) => !opts.omitCorpus?.(t.corpusDir),
+  );
   if (all.length === 0) {
     throw new NoTablesError(
       'this project has no data tables yet. They appear when a data connector is bound and synced, ' +

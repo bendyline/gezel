@@ -92,9 +92,6 @@ vi.mock('../components/ChatReferences.js', () => ({
 vi.mock('../components/CopilotLoginCommand.js', () => ({
   CopilotLoginCommand: () => null,
 }));
-vi.mock('../components/DeviceSummary.js', () => ({
-  DeviceSummary: () => <div data-testid="device-summary">device</div>,
-}));
 vi.mock('../components/GezelIcon.js', () => ({
   GezelIcon: ({ name, pulsing }: { name: string; pulsing?: boolean }) => (
     <span data-testid="gezel-icon" data-name={name} data-pulsing={pulsing ? 'true' : 'false'} />

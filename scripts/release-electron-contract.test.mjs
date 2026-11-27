@@ -436,12 +436,33 @@ test('PR and release gates share serialized unit and CLI TUI stability contracts
     2,
     'local validation must still run stability passes 2 and 3',
   );
-  assert.match(quality, /run: pnpm test:ci/);
-  const stabilityStart = quality.indexOf('  stability:');
-  const stabilityEnd = quality.indexOf('\n  packaged-bundle:', stabilityStart);
-  const stability = quality.slice(stabilityStart, stabilityEnd);
-  assert.match(stability, /run: pnpm test:stability:pass\n/);
-  assert.match(stability, /pass: \[2, 3\]/, 'CI must run stability passes 2 and 3, one per runner');
+  // The PR gate runs what the release gate runs, split across runners: every
+  // other package once in `unit`, and three passes over the UI and service
+  // suites in `suites`, one lane per runner. run-test-lane.test.mjs checks
+  // that the lanes together run exactly what `test:ci` runs.
+  const { LANES } = await import('./run-test-lane.mjs');
+  const unitStart = quality.indexOf('  unit:');
+  const unit = quality.slice(unitStart, quality.indexOf('\n  coverage:', unitStart));
+  assert.match(unit, /run: pnpm test:lane packages\n/);
+  const suitesStart = quality.indexOf('  suites:');
+  const suites = quality.slice(suitesStart, quality.indexOf('\n  packaged-bundle:', suitesStart));
+  assert.match(
+    suites,
+    /pass: \[1, 2, 3\]/,
+    'CI must run all three passes, each on its own runners',
+  );
+  const lanes = (/lane: \[([^\]]+)\]/.exec(suites)?.[1] ?? '')
+    .split(',')
+    .map((lane) => lane.trim())
+    .sort();
+  assert.deepEqual(
+    lanes,
+    Object.keys(LANES)
+      .filter((lane) => lane !== 'packages')
+      .sort(),
+    'every pass must run every UI and service lane',
+  );
+  assert.match(suites, /run: pnpm test:lane \$\{\{ matrix\.lane \}\}\n/);
   assert.equal(
     quality.match(/uses: \.\/\.github\/actions\/setup-test-embedder/g)?.length,
     3,

@@ -16,6 +16,7 @@ import { type GezelConfig, createLogger } from '@bendyline/gezel';
 import type { Store } from '../fs/store.js';
 import type { HistoryManager } from '../history/manager.js';
 import type { CompactOneShot } from './compaction.js';
+import { withoutKeptMemories } from './daily-markdown.js';
 import type { MemoryManager } from './manager.js';
 
 const log = createLogger('memory');
@@ -82,7 +83,8 @@ export async function runLessonsDistillation(args: LessonsArgs): Promise<{ updat
   const maxChars = settings.maxChars ?? DEFAULT_LESSONS_MAX_CHARS;
   const lookbackDays = settings.lookbackDays ?? DEFAULT_LESSONS_LOOKBACK_DAYS;
 
-  const notes = await memory.getRecent('gezel', gezelId, lookbackDays);
+  // The Scribe who distills these may run on a cloud model.
+  const notes = withoutKeptMemories(await memory.getRecent('gezel', gezelId, lookbackDays));
   if (notes.trim().length < LESSONS_MIN_INPUT_CHARS) return { updated: false };
   const { pinned, rest: current } = splitPinnedLessons(await store.readMemoryLessons(gezelId));
 

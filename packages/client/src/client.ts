@@ -317,6 +317,8 @@ import type {
   ModelImportConfirmResponse,
   ModelImportReview,
   ModelImportReviewRequest,
+  MolenCheckRequest,
+  MolenCheckResponse,
   NativeEngineName,
   NativeEngineResolveEvent,
   NativeEngineStatusResponse,
@@ -2058,6 +2060,17 @@ export class GezelClient {
     return this.request('POST', `/api/projects/${encodeURIComponent(projectId)}/page-check`, {
       path: relativePath,
     } satisfies PageCheckRequest);
+  }
+
+  /**
+   * Check a Molen document (film, game or data-only scene): whether it plays,
+   * what it is, and Molen's own issues when it does not. Pass the parsed
+   * document, or its text exactly as written so a broken file is reported.
+   */
+  checkMolenDocument(projectId: string, document: unknown): Promise<MolenCheckResponse> {
+    return this.request('POST', `/api/projects/${encodeURIComponent(projectId)}/molen/check`, {
+      document,
+    } satisfies MolenCheckRequest);
   }
 
   /**
@@ -5187,6 +5200,11 @@ export class GezelClient {
       displayName?: string;
       /** The account the person signed in with (Google, Microsoft). */
       account?: string;
+      /**
+       * Present only for a type that asks before cloud models may read its
+       * data (a Google account's): whether the person allowed them.
+       */
+      allowCloudModels?: boolean;
       /** `mirror` (faithful copy) vs `window` (recent activity only). */
       completeness?: string;
       lastSyncedAt?: string;
@@ -5246,6 +5264,8 @@ export class GezelClient {
       displayName?: string;
       config?: Record<string, unknown>;
       credential?: unknown;
+      /** Let cloud models read what it brings in, for a type that asks first. */
+      allowCloudModels?: boolean;
     },
   ): Promise<{ ok: boolean; binding: { id: string; type: string } }> {
     return this.request('POST', `/api/projects/${encodeURIComponent(id)}/connectors/bind`, body);
@@ -5370,7 +5390,13 @@ export class GezelClient {
   patchConnector(
     id: string,
     bindingId: string,
-    patch: { displayName?: string; config?: Record<string, unknown>; disabled?: boolean },
+    patch: {
+      displayName?: string;
+      config?: Record<string, unknown>;
+      disabled?: boolean;
+      /** Let cloud models read what it brings in, for a type that asks first. */
+      allowCloudModels?: boolean;
+    },
   ): Promise<{ ok: boolean; binding: { id: string; type: string } }> {
     return this.request(
       'PATCH',
@@ -5740,6 +5766,8 @@ export class GezelClient {
       displayName?: string;
       /** Pre-fill the provider's account picker (mail: the address being linked). */
       loginHint?: string;
+      /** Let cloud models read what it brings in, for a type that asks first. */
+      allowCloudModels?: boolean;
     },
   ): Promise<{ ok: boolean; authUrl: string; state: string }> {
     return this.request(

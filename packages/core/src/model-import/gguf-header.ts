@@ -9,6 +9,8 @@ import {
   LLAMA_CPP_ARCHITECTURES,
   LLAMA_CPP_REMOVED_TENSOR_TYPES,
   LLAMA_CPP_TENSOR_TYPES,
+  LLAMA_CPP_UNLOADABLE_REVISIONS,
+  type LlamaCppUnloadableRevision,
 } from '../native/llama-cpp-gguf-support.js';
 
 export interface GgufHeaderFacts {
@@ -56,6 +58,8 @@ export interface GgufHeaderFacts {
   /** KV cache cost at f16, from the attention geometry. */
   kvBytesPerTokenF16?: number;
   kvFixedBytesF16?: number;
+  /** Every metadata key the header carries, in file order (capped by the reader). */
+  metadataKeys?: string[];
 }
 
 /** llama.cpp's encoder-only designs: they make search vectors, not replies. */
@@ -74,6 +78,22 @@ const SUPPORTED_ARCHITECTURES = new Set(LLAMA_CPP_ARCHITECTURES);
 
 export function isSupportedGgufArchitecture(architecture: string): boolean {
   return SUPPORTED_ARCHITECTURES.has(architecture) && architecture !== 'clip';
+}
+
+/**
+ * The newer revision of a supported design this file is, when the pinned
+ * engine's loader can't read that revision yet (Kolibri 1.1 declares
+ * `kolibri1`, the design of Kolibri 1). Undefined when the file loads.
+ */
+export function unloadableGgufRevision(
+  header: GgufHeaderFacts,
+  revisions: readonly LlamaCppUnloadableRevision[] = LLAMA_CPP_UNLOADABLE_REVISIONS,
+): LlamaCppUnloadableRevision | undefined {
+  if (!header.architecture || !header.metadataKeys?.length) return undefined;
+  const keys = new Set(header.metadataKeys);
+  return revisions.find(
+    (entry) => entry.architecture === header.architecture && keys.has(entry.key),
+  );
 }
 
 /** Why this file is not a model someone can chat with, or undefined when it is. */

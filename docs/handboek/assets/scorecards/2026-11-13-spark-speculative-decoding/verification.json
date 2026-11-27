@@ -1,0 +1,31 @@
+{
+  "counts": {
+    "trials": 903,
+    "passes": 809,
+    "taskFailures": 94,
+    "rawNonModelFailures": 0,
+    "speedSensitiveFailures": 8,
+    "judged": 397,
+    "tableJudged": 397,
+    "tableNoArtifact": 2,
+    "tableExcludedReviews": 0,
+    "tableNotApplicable": 504,
+    "wrongSpeculationMode": 0
+  },
+  "arms": 7,
+  "armScenarioCells": 301,
+  "repetitions": 3,
+  "exactRepetitions": true,
+  "everyTrialRanItsArmsSpeculation": true,
+  "everyCellOnOneCommitAndBuild": true,
+  "pairedAnalysisMatchesStudy": true,
+  "originalEvidenceModified": false,
+  "newInferenceCalls": 0,
+  "newJudgeCalls": 0,
+  "rawClassificationCorrections": 0,
+  "judgeLedgerMatchesTrialReports": true,
+  "evidenceFilesVerified": 5006,
+  "schemas": [
+    "ScorecardDatasetSchema v1"
+  ]
+}

@@ -16,6 +16,7 @@ import os from 'node:os';
 import { join } from 'node:path';
 import { findServiceBundleResource } from '@bendyline/gezel-inference/internal/utils/service-worker-entry';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { resolveManagedChromiumBinary } from '../rendering/managed-chromium.js';
 import { resolveCaptureChromium } from './launch-policy.js';
 import { PageCaptureService } from './service.js';
 
@@ -27,6 +28,18 @@ const homes = [
 let browser: string | null = null;
 for (const home of homes) {
   browser ??= await resolveCaptureChromium(home);
+}
+// CI installs Playwright's full Chromium into the shared cache, never into a
+// Gezel home, so without these this test skipped on every CI run and the
+// capture worker read 0% covered there. Capture refuses the headless shell.
+for (const cache of [
+  join(os.homedir(), 'Library', 'Caches', 'ms-playwright'),
+  join(os.homedir(), '.cache', 'ms-playwright'),
+  join(process.env.LOCALAPPDATA ?? join(os.homedir(), 'AppData', 'Local'), 'ms-playwright'),
+]) {
+  if (browser) break;
+  const found = await resolveManagedChromiumBinary(cache);
+  if (found && !/headless[-_]shell/i.test(found)) browser = found;
 }
 const worker = findServiceBundleResource(import.meta.url, ['page-capture/capture-worker.js']);
 const ready = Boolean(browser && worker && existsSync(worker));

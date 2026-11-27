@@ -45,6 +45,9 @@ import {
   type InstalledPackage,
   type InstalledToolset,
   InstalledToolsetSchema,
+  type KeptLocalEntry,
+  KeptLocalEntrySchema,
+  type KeptLocalLedger,
   KeyedLock,
   type Lookout,
   LookoutSchema,
@@ -169,6 +172,7 @@ import {
   projectHistoryFile,
   projectIconArtFile,
   projectInternalGithubDir,
+  projectKeptLocalFile,
   projectLocalConfigFile,
   projectLocalGezelDir,
   projectLocalGezelsRoot,
@@ -5786,6 +5790,7 @@ export class Store {
 
   /** Per-session lock serializing {@link mutateSession}'s read-modify-writes. */
   private readonly sessionMutationChains = new KeyedLock();
+  private readonly keptLocalWrites = new KeyedLock();
 
   /**
    * Serialized read-modify-write on one session file.
@@ -6896,6 +6901,44 @@ export class Store {
       else log.warn(`[lookouts] dropping an unreadable lookout in ${projectId}`);
     }
     return out;
+  }
+
+  /** The project's kept-local ledger: artifacts that hold kept-local data. */
+  async readKeptLocal(projectId: string): Promise<KeptLocalEntry[]> {
+    let raw: string;
+    try {
+      raw = await readFile(projectKeptLocalFile(this.home, projectId), 'utf8');
+    } catch {
+      return [];
+    }
+    let file: unknown;
+    try {
+      file = JSON.parse(raw);
+    } catch {
+      log.warn(`[kept-local] ignoring an unreadable kept-local.json for ${projectId}`);
+      return [];
+    }
+    const entries = (file as { entries?: unknown })?.entries;
+    return (Array.isArray(entries) ? entries : []).flatMap((entry) => {
+      const parsed = KeptLocalEntrySchema.safeParse(entry);
+      return parsed.success ? [parsed.data] : [];
+    });
+  }
+
+  /** Change the ledger; returning the same array writes nothing. */
+  async updateKeptLocal(
+    projectId: string,
+    update: (entries: KeptLocalEntry[]) => KeptLocalEntry[],
+  ): Promise<void> {
+    await this.keptLocalWrites.run(projectId, async () => {
+      const entries = await this.readKeptLocal(projectId);
+      const next = update(entries);
+      if (next === entries) return;
+      const path = projectKeptLocalFile(this.home, projectId);
+      await mkdir(dirname(path), { recursive: true });
+      const file: KeptLocalLedger = { version: 1, entries: next };
+      await writeFileAtomic(path, `${JSON.stringify(file, null, 2)}\n`, { mode: 0o600 });
+    });
   }
 
   async writeLookouts(projectId: string, lookouts: Lookout[]): Promise<void> {

@@ -3,9 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Store } from '../fs/store.js';
-import { canApplyLinuxSystemdSandbox } from '../sandbox/runner.js';
-import { canApplyWindowsMxcSandbox } from '../sandbox/windows-mxc.js';
+import { canApplyLinuxSystemdSandbox, denyNetBoundaryAvailable } from '../sandbox/runner.js';
 import { deriveWorkspaceFile } from './derive.js';
+
+// Deny-net script runs need an OS network boundary: Seatbelt on macOS, a
+// systemd unit or the sandbox helper on Linux, the MXC container on Windows.
+// These suites ran only on macOS until 2026-11-23, so CI never executed them.
+const DENY_NET_BOUNDARY = await denyNetBoundaryAvailable();
 
 let home: string;
 let store: Store;
@@ -28,11 +32,9 @@ async function seedWorkspaceFile(path: string, content: string): Promise<void> {
 }
 
 describe('deriveWorkspaceFile', () => {
-  it.runIf(process.platform !== 'darwin')(
+  it.runIf(!DENY_NET_BOUNDARY)(
     'fails closed before running the inline transform without an OS network boundary',
     async () => {
-      if (process.platform === 'linux' && (await canApplyLinuxSystemdSandbox())) return;
-      if (await canApplyWindowsMxcSandbox(process.execPath)) return;
       const res = await deriveWorkspaceFile(store, {
         projectId: 'default',
         script: `throw new Error('must not execute');`,
@@ -105,7 +107,7 @@ console.log('wrote', records.length, 'records');
     30_000,
   );
 
-  it.runIf(process.platform === 'darwin')(
+  it.runIf(DENY_NET_BOUNDARY)(
     'runs the inline script in the sandbox and verifies the produced output',
     async () => {
       await seedWorkspaceFile('data/raw.csv', 'email,name\na@x.com,Ada\nb@x.com,Bo\n');
@@ -137,7 +139,7 @@ console.log('wrote', records.length, 'records');
     30_000,
   );
 
-  it.runIf(process.platform === 'darwin')(
+  it.runIf(DENY_NET_BOUNDARY)(
     'surfaces a nonzero exit with stderr and no output block',
     async () => {
       const res = await deriveWorkspaceFile(store, {
@@ -153,7 +155,7 @@ console.log('wrote', records.length, 'records');
     30_000,
   );
 
-  it.runIf(process.platform === 'darwin')(
+  it.runIf(DENY_NET_BOUNDARY)(
     'fails verification when the script exits clean without producing the output',
     async () => {
       const res = await deriveWorkspaceFile(store, {
@@ -168,7 +170,7 @@ console.log('wrote', records.length, 'records');
     30_000,
   );
 
-  it.runIf(process.platform === 'darwin')(
+  it.runIf(DENY_NET_BOUNDARY)(
     'fails verification when a data output does not parse as a table',
     async () => {
       const res = await deriveWorkspaceFile(store, {

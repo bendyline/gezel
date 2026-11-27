@@ -335,12 +335,20 @@ export type CraftbookStepPromptProfile = z.infer<typeof CraftbookStepPromptProfi
 
 /**
  * The document format a step writes, when it is one the runtime teaches.
- * The step's prompt gets the canonical notes (core `squisqAuthoringNote`):
+ * The step's prompt gets the canonical notes (core `authoringNote`):
  * `squisq` for Squisq extended markdown, `squisq-slideshow` for scenes,
- * photos and motion. Books declare it instead of copying syntax, so one
- * source stays right when Squisq changes.
+ * photos and motion, and `molen-film`, `molen-game`, `molen-scene` for
+ * Molen's 3D authoring documents (the primers Molen ships). Books declare
+ * it instead of copying syntax, so one source stays right when the format
+ * changes.
  */
-export const CraftbookStepAuthoringSchema = z.enum(['squisq', 'squisq-slideshow']);
+export const CraftbookStepAuthoringSchema = z.enum([
+  'squisq',
+  'squisq-slideshow',
+  'molen-film',
+  'molen-game',
+  'molen-scene',
+]);
 export type CraftbookStepAuthoring = z.infer<typeof CraftbookStepAuthoringSchema>;
 
 /**

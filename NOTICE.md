@@ -122,12 +122,16 @@ repository and linked into the workspace. Their license matches Squisq's
 (MIT). Consuming packages pin every Squisq dependency exactly.
 
 - `@bendyline/squisq` — MIT
+- `@bendyline/squisq-calc` — MIT. Spreadsheet calculation; its IronCalc
+  backend is the optional `@ironcalc/wasm` peer listed below.
 - `@bendyline/squisq-cli` — MIT
 - `@bendyline/squisq-react` — MIT
 - `@bendyline/squisq-editor-react` — MIT
 - `@bendyline/squisq-formats` — MIT
 - `@bendyline/squisq-graph` — MIT. A dependency of `@bendyline/squisq`; it has
   no dependencies of its own.
+- `@bendyline/squisq-grid-react` — MIT. The editor's data grid, a dependency
+  of `@bendyline/squisq-editor-react`.
 - `@bendyline/squisq-video` — MIT
 - `@bendyline/squisq-video-react` — MIT. Gezel's editors use its
   cover-image, dashboard-image, and media-edit entries. The media-edit worker
@@ -287,7 +291,7 @@ copies and their engine- and helper-aware manifest live in
 
 | Component | Pinned version | License | Source |
 |---|---|---|---|
-| **llama.cpp** (`llama-server`, `libllama*`, `libmtmd*`) | tag `v1.0.0` | MIT | [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) |
+| **llama.cpp** (`llama-server`, `libllama*`, `libmtmd*`) | tag `v1.1.0` | MIT | [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) |
 | **ggml** (`libggml*` — CPU, Metal and BLAS on macOS, CUDA, Vulkan backends) | bundled with llama.cpp, whisper.cpp, and stable-diffusion.cpp | MIT | [ggml-org/ggml](https://github.com/ggml-org/ggml) |
 | **AMD ROCm runtime** (`-rocm` variants of `llama-server` only, x64: HIP runtime, Code Object Manager, rocm-kpack, hipBLAS, rocBLAS and its per-GPU kernels, rocSOLVER, hipBLASLt, origami; on Linux also ROCr, rocprofiler-register, roctracer, rocRoller, LLVM, and TheRock's private copies of libdrm, numactl, elfutils' libelf, zlib, zstd, xz's liblzma and bzip2), redistributed unmodified apart from rocBLAS's kernel packs, trimmed to rocBLAS's own kernels | ROCm SDK `10.0.0` (TheRock wheels, pinned in `native/scripts/rocm-sdk-requirements.txt`) | MIT (AMD components); Apache-2.0 WITH LLVM-exception (LLVM, Code Object Manager); libdrm MIT; numactl LGPL-2.1; libelf LGPL-3.0-or-later OR GPL-2.0-or-later; zlib; zstd BSD-3-Clause; liblzma 0BSD; bzip2 — texts ship in each `-rocm` archive's `THIRD_PARTY_LICENSES/AMD-ROCm/` | [ROCm/TheRock](https://github.com/ROCm/TheRock) |
 | **ds4 / DwarfStar** (`ds4-server` + `metal/*.metal` shaders) | commit `b3f50180` (`main-2026-11-03`) | MIT | [antirez/ds4](https://github.com/antirez/ds4) |
@@ -429,7 +433,7 @@ under `licenses/native/` and is checked at packaging time by
 | **llama.cpp** (`libgezel-llama`, compiled into the app) | same pin as the desktop engine | MIT | [ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp) |
 | **ggml** | bundled with llama.cpp/whisper.cpp | MIT | [ggml-org/ggml](https://github.com/ggml-org/ggml) |
 | **whisper.cpp** (`libGezelSpeech`, speech-to-text) | commit `f049fff9` | MIT | [ggml-org/whisper.cpp](https://github.com/ggml-org/whisper.cpp) |
-| **ONNX Runtime** (`libonnxruntime.so`, `onnxruntime.xcframework`) | `1.28.0` | MIT | [microsoft/onnxruntime](https://github.com/microsoft/onnxruntime), Microsoft's own Android AAR (Maven Central) and iOS pod archive |
+| **ONNX Runtime** (`libonnxruntime.so`, `onnxruntime.xcframework`) | `1.28.0` | MIT | [microsoft/onnxruntime](https://github.com/microsoft/onnxruntime), Microsoft's own Android AAR (Maven Central) and iOS framework (NuGet `Microsoft.ML.OnnxRuntime`) |
 | **Capacitor** (app shell, Android and iOS runtimes) | `8.5.2` | MIT | [ionic-team/capacitor](https://github.com/ionic-team/capacitor) |
 
 Apple Foundation Models and Android ML Kit are operating-system APIs the app

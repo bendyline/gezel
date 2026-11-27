@@ -22,7 +22,7 @@ import {
   projectHistoryFile,
 } from '@bendyline/gezel/paths';
 import { currentRequestAccount } from '../accounts/request-account.js';
-import { readLinesBackward } from './read-backward.js';
+import { readLinesBackward, readMatchingLinesBackward } from './read-backward.js';
 
 const log = createLogger('history');
 
@@ -267,7 +267,9 @@ export class HistoryManager {
    * `at` inside the serialized append, so a file is in `at` order apart from
    * clock steps and caller-supplied stamps, which the slack absorbs. Gate
    * evidence asks for the current step's tool calls this way on every
-   * completion, and project logs reach hundreds of megabytes.
+   * completion, and project logs reach gigabytes. A step's window opens when it
+   * was first activated, so a task resumed after days reads back days: a task
+   * scope is searched for in the bytes, and other tasks' lines are not decoded.
    */
   async listEvents(
     filter: HistoryFilter = {},
@@ -305,8 +307,17 @@ export class HistoryManager {
       let stopBelow = fromFloor;
       let matched = 0;
       let oldestMatched: string | undefined;
+      const isPast = (lineStart: string) => {
+        const at = LINE_HEAD.exec(lineStart)?.[1];
+        return stopBelow !== undefined && at !== undefined && at < stopBelow;
+      };
+      const lines = !bounded
+        ? readLinesForward(path)
+        : taskNeedle !== undefined
+          ? readMatchingLinesBackward(path, taskNeedle, isPast)
+          : readLinesBackward(path);
       try {
-        for await (const line of bounded ? readLinesBackward(path) : readLinesForward(path)) {
+        for await (const line of lines) {
           if (!line.trim()) continue;
           // A bounded read must see each line's time before skipping it.
           const at = bounded ? LINE_HEAD.exec(line)?.[1] : undefined;

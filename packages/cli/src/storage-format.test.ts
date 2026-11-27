@@ -1,4 +1,4 @@
-import type { StorageJob, StorageSummary } from '@bendyline/gezel';
+import type { RestoreReview, StorageJob, StorageSummary } from '@bendyline/gezel';
 import { describe, expect, it } from 'vitest';
 import {
   formatBytes,
@@ -6,6 +6,7 @@ import {
   formatCleanupResult,
   formatStorageSummary,
   resolveCleanupSelection,
+  resolveRestoreSelection,
 } from './storage-format.js';
 
 function summary(overrides: Partial<StorageSummary> = {}): StorageSummary {
@@ -33,6 +34,76 @@ function category(over: Partial<StorageSummary['categories'][number]>) {
     ...over,
   };
 }
+
+/**
+ * `gezel restore` acts on what this returns: an item it marks `replace`
+ * overwrites what the person has now. Restoring an old backup onto a working
+ * install must never do that unless they passed `--replace`.
+ */
+describe('resolveRestoreSelection', () => {
+  const item = (
+    kind: RestoreReview['items'][number]['kind'],
+    id: string,
+    conflict: 'none' | 'exists',
+  ) => ({ kind, id, label: `${kind} ${id}`, bytes: 1, fileCount: 1, conflict });
+  const review = (items: RestoreReview['items']): RestoreReview => ({
+    restoreId: 'r1',
+    createdAt: '2026-11-01T00:00:00.000Z',
+    gezelVersion: '1.0.0',
+    archivePath: '/backups/one.zip',
+    items,
+    secretsExcluded: true,
+    warnings: [],
+  });
+
+  it('adds what is missing and skips what is already here, naming the way past it', () => {
+    const result = resolveRestoreSelection(
+      review([item('gezel', 'ada', 'none'), item('project', 'site', 'exists')]),
+      {},
+    );
+    expect(result.items).toEqual([{ kind: 'gezel', id: 'ada', action: 'add' }]);
+    expect(result.skipped).toEqual(['project site (already here — use --replace to overwrite)']);
+  });
+
+  it('replaces what is already here only when asked to', () => {
+    const result = resolveRestoreSelection(review([item('project', 'site', 'exists')]), {
+      replace: true,
+    });
+    expect(result.items).toEqual([{ kind: 'project', id: 'site', action: 'replace' }]);
+    expect(result.skipped).toEqual([]);
+  });
+
+  it('never marks a new item as a replacement, even with --replace', () => {
+    const result = resolveRestoreSelection(review([item('gezel', 'ada', 'none')]), {
+      replace: true,
+    });
+    expect(result.items).toEqual([{ kind: 'gezel', id: 'ada', action: 'add' }]);
+  });
+
+  it('restores only the named items, by bare id or kind:id', () => {
+    const all = review([
+      item('gezel', 'ada', 'none'),
+      item('project', 'ada', 'none'),
+      item('project', 'site', 'none'),
+    ]);
+    expect(resolveRestoreSelection(all, { only: ['project:ada'] }).items).toEqual([
+      { kind: 'project', id: 'ada', action: 'add' },
+    ]);
+    expect(
+      resolveRestoreSelection(all, { only: ['site'] }).items.map((i) => `${i.kind}:${i.id}`),
+    ).toEqual(['project:site']);
+    // An empty --only list means everything, not nothing.
+    expect(resolveRestoreSelection(all, { only: [] }).items).toHaveLength(3);
+  });
+
+  it('keeps a skipped conflict out of the items even when it was named', () => {
+    const result = resolveRestoreSelection(review([item('project', 'site', 'exists')]), {
+      only: ['site'],
+    });
+    expect(result.items).toEqual([]);
+    expect(result.skipped).toHaveLength(1);
+  });
+});
 
 describe('formatBytes', () => {
   it('scales to the unit a person would say out loud', () => {

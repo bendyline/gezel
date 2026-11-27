@@ -25,6 +25,7 @@ import { deriveGezelRoster, filterRoster, rankProjectsForGezel } from '../../gez
 import { generateGezelIcon } from '../../icon/generator.js';
 import { sanitizeSvg } from '../../icon/sanitize.js';
 import type { ServiceContext } from '../context.js';
+import { callerSessionId, withoutKeptLocalSessions } from '../kept-local-gate.js';
 import { buildTimeline } from './timeline.js';
 
 /**
@@ -158,7 +159,8 @@ export function gezelRoutes(ctx: ServiceContext): Hono {
       before: c.req.query('before'),
       projectId: c.req.query('project'),
     });
-    return c.json(response);
+    const messages = await withoutKeptLocalSessions(ctx, c, response.messages, (m) => m.sessionId);
+    return c.json({ ...response, messages });
   });
 
   app.put('/:id/md', async (c) => {
@@ -377,6 +379,7 @@ export function gezelRoutes(ctx: ServiceContext): Hono {
       const res = await ctx.chat.messageGezel({
         fromGezelId: body.fromGezelId,
         fromSessionId: body.fromSessionId,
+        ...(callerSessionId(c) ? { callerSessionId: callerSessionId(c)! } : {}),
         toGezelIdOrName: toId,
         projectId: body.projectId,
         text: body.text,

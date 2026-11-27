@@ -526,6 +526,11 @@ export function projectReminderFile(root: string, projectId: string): string {
 }
 
 /** The person's lookouts ("keep a lookout for X, then do Y"). Account-private. */
+/** Which artifacts hold data that stays on models on this computer. */
+export function projectKeptLocalFile(root: string, projectId: string): string {
+  return join(projectPrivateDir(root, projectId), 'kept-local.json');
+}
+
 export function projectLookoutsFile(root: string, projectId: string): string {
   return join(projectPrivateDir(root, projectId), 'lookouts.json');
 }
