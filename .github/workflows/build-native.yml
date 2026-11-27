@@ -946,9 +946,12 @@ jobs:
           # cuobjdump is its own package — `cuda-nvcc-*` ships the compiler
           # driver (nvcc, ptxas, fatbinary) but not the object inspector the
           # architecture-payload audit below shells out to.
+          # cuda-nvml-dev is header-only for us: llama.cpp since v1.1.0
+          # (#30672) includes <nvml.h> and opens libnvidia-ml.so.1 from the
+          # driver at runtime, so nothing new links or ships.
           sudo apt-get install -y --no-install-recommends \
             "cuda-nvcc-${cuda_pkg}" "cuda-cudart-dev-${cuda_pkg}" "libcublas-dev-${cuda_pkg}" \
-            "cuda-cuobjdump-${cuda_pkg}"
+            "cuda-cuobjdump-${cuda_pkg}" "cuda-nvml-dev-${cuda_pkg}"
           echo "CUDA_PATH=/usr/local/cuda-${cuda_ver}" >> "$GITHUB_ENV"
           # ds4's Makefile invokes `$(CUDA_HOME)/bin/nvcc` directly (not PATH
           # nvcc), and there's no guaranteed /usr/local/cuda symlink, so pin
@@ -970,8 +973,8 @@ jobs:
           method: 'network'
           # `cuobjdump` is listed for the same reason as the Linux apt line
           # above: the architecture-payload audit needs it and "nvcc" alone
-          # does not pull it in.
-          sub-packages: '["nvcc","cuobjdump","cudart","cublas","cublas_dev","visual_studio_integration"]'
+          # does not pull it in. `nvml_dev` supplies <nvml.h>, as on Linux.
+          sub-packages: '["nvcc","cuobjdump","cudart","cublas","cublas_dev","nvml_dev","visual_studio_integration"]'
 
       # ── CUDA Toolkit (Windows ARM64) ──────────────────────────
       # RTX Spark legs. Jimver's action installs x64 toolkits only, so this
