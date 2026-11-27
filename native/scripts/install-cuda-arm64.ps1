@@ -4,8 +4,10 @@
 # NVIDIA publishes no Windows ARM64 CUDA installer; the toolkit for RTX Spark
 # (NVIDIA N1X) builds comes as separate windows-arm64 redist zips. This merges
 # the ones gezel's CUDA builds need (nvcc, the CRT headers, NVVM, CCCL, cudart,
-# cuBLAS, cuobjdump) into one CUDA_PATH-shaped tree. Every archive is pinned by
-# sha256 and checked before it is unpacked.
+# cuBLAS, cuobjdump, and the NVML header llama.cpp includes since v1.1.0 while
+# loading nvml.dll from the driver at runtime) into one CUDA_PATH-shaped tree.
+# Every archive is pinned by the sha256 NVIDIA publishes in
+# redistrib_13.4.1.json and checked before it is unpacked.
 #
 # One copy for CI (build-native.yml) and for a local build on an RTX Spark, so
 # the two cannot drift onto different toolkits.
@@ -32,6 +34,7 @@ $archives = [ordered]@{
   'cuda_cudart/windows-arm64/cuda_cudart-windows-arm64-13.4.49-archive.zip'       = 'd48085b557db615f1095d4a6f96d4d1fcc8ba0c4fd16ad40f30f953b6ae422cf'
   'libcublas/windows-arm64/libcublas-windows-arm64-13.7.0.27-archive.zip'         = '932794dcd1e67e152ab2aeaf32ee8141ded807c6ea6d8f85692c40b02fdd09d7'
   'cuda_cuobjdump/windows-arm64/cuda_cuobjdump-windows-arm64-13.4.49-archive.zip' = '2df6140a0cde3c33a71c8b065e0adbbee21c2b3f6d5cbc2f5128ab0493654a4c'
+  'cuda_nvml_dev/windows-arm64/cuda_nvml_dev-windows-arm64-13.4.61-archive.zip'   = '285e406201ccd48469a739334dba8af9ea601c3d89eda4156da43537727a0d72'
 }
 
 if (-not $Downloads) { $Downloads = Join-Path ([System.IO.Path]::GetTempPath()) 'gezel-cuda-redist' }
@@ -55,7 +58,7 @@ foreach ($archive in $archives.GetEnumerator()) {
   Write-Host "[cuda] $(Split-Path -Leaf $archive.Key) verified and merged"
 }
 Copy-Item -LiteralPath (Join-Path $Root 'LICENSE') -Destination (Join-Path $Root 'EULA.txt') -Force
-foreach ($required in @('bin\nvcc.exe', 'bin\cuobjdump.exe', 'nvvm\bin\cicc.exe', 'lib\arm64\cudart.lib', 'lib\arm64\cublas.lib', 'bin\arm64')) {
+foreach ($required in @('bin\nvcc.exe', 'bin\cuobjdump.exe', 'nvvm\bin\cicc.exe', 'lib\arm64\cudart.lib', 'lib\arm64\cublas.lib', 'bin\arm64', 'include\nvml.h')) {
   if (-not (Test-Path (Join-Path $Root $required))) { throw "CUDA install is missing $required" }
 }
 & (Join-Path $Root 'bin\nvcc.exe') --version

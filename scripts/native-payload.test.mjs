@@ -333,6 +333,7 @@ test('Windows-on-ARM CUDA targets RTX Spark with a pinned toolkit', () => {
     'cuda_cudart',
     'cuda_cuobjdump',
     'cuda_nvcc',
+    'cuda_nvml_dev',
     'libcublas',
     'libnvvm',
   ]);
