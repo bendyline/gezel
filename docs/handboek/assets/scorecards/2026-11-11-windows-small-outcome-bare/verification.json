@@ -1,0 +1,34 @@
+{
+  "counts": {
+    "planned": 1806,
+    "recorded": 1806,
+    "passes": 848,
+    "modelFailures": 952,
+    "infrastructureExclusions": 6,
+    "judgeable": 798,
+    "judged": 724,
+    "noArtifact": 74,
+    "notApplicable": 1008,
+    "excludedReviews": 0,
+    "speedSamples": 1800,
+    "periods": {
+      "silent-45w": 408,
+      "turbo-77w": 1393,
+      "battery-overlap": 5
+    }
+  },
+  "cells": 602,
+  "trialsPerCell": 3,
+  "checks": [
+    "Every cell has exactly the three trials its summary lists, and no other directories.",
+    "Recounted cells match the ingested shard exactly.",
+    "Every engine launch was native 0.1.62, CUDA 12.8, llama.cpp cd959bae.",
+    "Model weights match the Gilde 0.3.8 entry and were installed before the model’s first trial.",
+    "Every review matches the judge report and its deliverable hash; every unreviewed judgeable trial has no deliverable.",
+    "No trial overlaps a Modern Standby window or the gap between the power loss and the restart.",
+    "Only Granite 4.2 8B has a CPU-spill offload plan, in every trial."
+  ],
+  "evidenceFilesVerified": 9276,
+  "sourceEvidenceModified": false,
+  "newInferenceCalls": 0
+}
