@@ -101,7 +101,7 @@
     "@bendyline/gezel-script-runtime": "workspace:*",
     "@bendyline/gezel-script-stdlib": "workspace:*",
     "@bendyline/gezel-sdk": "workspace:*",
-    "@bendyline/gilde": "0.3.15",
+    "@bendyline/gilde": "0.3.16",
     "@bendyline/squisq": "2.14.4",
     "@bendyline/squisq-cli": "2.9.42",
     "@bendyline/squisq-formats": "2.8.27",
