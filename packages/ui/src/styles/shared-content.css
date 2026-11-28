@@ -6,21 +6,6 @@
   --squisq-outline-width: 240px !important;
 }
 
-/* The selected radio glyph sits below center in some UI fonts. Draw the dot
-   geometrically; the View menu portals outside the editor shell. */
-.squisq-view-menu-columns .squisq-view-menu-radio {
-  font-size: 0;
-}
-
-.squisq-view-menu-radio-row[aria-checked="true"] .squisq-view-menu-radio::before {
-  content: "";
-  width: 5px;
-  height: 5px;
-  flex: none;
-  border-radius: 50%;
-  background: currentColor;
-}
-
 /* Host actions (Export, narration, AI) cannot collapse into Squisq's format
    menu. Give the view button its own row when those actions would leave the
    pane. */
