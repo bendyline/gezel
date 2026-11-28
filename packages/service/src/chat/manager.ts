@@ -8160,7 +8160,7 @@ export class ChatManager extends LocalEngineRuntime {
           if (status.phase === 'provisioning') {
             sawProvisioning = true;
             // The runtime's own message names Python packages and pins
-            // ("Installing mlx-vlm==0.7.12 …"); the pill, the chat status
+            // ("Installing mlx-vlm==0.8.1 …"); the pill, the chat status
             // line and the CLI all print this detail verbatim.
             this.events.publish(warmupScope, {
               type: 'engine_phase',

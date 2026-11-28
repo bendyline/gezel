@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "publicationId": "2026-11-11-windows-small-outcome-bare",
+  "regenerate": "node scripts/run-with-dependency-lease.mjs --direct-node scripts/import-small-outcome-bare-scorecard.mjs",
+  "check": "node scripts/run-with-dependency-lease.mjs --direct-node scripts/import-small-outcome-bare-scorecard.mjs --check",
+  "prepare": "node scripts/run-with-dependency-lease.mjs --direct-node scripts/import-small-outcome-bare-scorecard.mjs --prepare --gilde-tarball=<bendyline-gilde-0.3.8.tgz> --gilde-dir=<extracted package/>",
+  "files": [
+    {
+      "path": "packages/core/src/scorecard/data/runs/2026-11-11-windows-small-outcome-bare.json",
+      "bytes": 262546,
+      "sha256": "277ba8e5dc68287e5bce65f89d11aa739033bd4275b59449c8f5b011b97c4e66"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-11-windows-small-outcome-bare/scorecard.json",
+      "bytes": 262546,
+      "sha256": "277ba8e5dc68287e5bce65f89d11aa739033bd4275b59449c8f5b011b97c4e66"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-11-windows-small-outcome-bare/scorecard-details.json",
+      "bytes": 7401091,
+      "sha256": "984a2347ba6d1e423f225b6d88e77a91e686ede964234e8834616e1828d3cb52"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-11-windows-small-outcome-bare/trials.csv",
+      "bytes": 401471,
+      "sha256": "56e24528914f060c979dd7910a0b477d704b7defe89d90a19091d7c125ff034b"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-11-windows-small-outcome-bare/README.md",
+      "bytes": 5607,
+      "sha256": "b129cee72b6d68e203be5cdc7b6684b2e2e3e31d0721ec2e2d6da3f339d337f0"
+    },
+    {
+      "path": "docs/handboek/assets/scorecards/2026-11-11-windows-small-outcome-bare/verification.json",
+      "bytes": 1162,
+      "sha256": "1384613f7c68161027e2cfa598fd564c0d3d866a05b0d4816dda49b5620aec47"
+    }
+  ]
+}

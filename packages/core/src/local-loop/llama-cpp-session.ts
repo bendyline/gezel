@@ -448,17 +448,34 @@ function isLfm25A2bModel(model: string | undefined): boolean {
   return model?.startsWith('lfm2.5-24b-a2b-') === true;
 }
 
+// Inkling 2 Mini's template has no enable_thinking. Constrained turns pin its
+// reasoning_effort to `none` (reasoning-depth.ts), yet on a hard repair, or a
+// turn whose instructions pull two ways, it still writes 1-3K chars of
+// analysis before the call: with `none` on the wire, conflict-synthesis and
+// wikipedia-research-brief aborted 16 times at ~1,025 chars (2026-11-27).
+// Same engine-budgeted allowance as LFM2.5-24B.
+function isInklingModel(model: string | undefined): boolean {
+  return model?.startsWith('inkling') === true;
+}
+
+/** Templates that cannot stop reasoning, so llama-server ends it at a token budget instead. */
+function usesEngineBudgetedConstrainedReasoning(model: string | undefined): boolean {
+  return isLfm25A2bModel(model) || isInklingModel(model);
+}
+
 function needsExpandedConstrainedToolReasoning(model: string | undefined): boolean {
   return (
     isDeepSeekR1Model(model) ||
     isGptOss20bModel(model) ||
     isMuseGlimmerModel(model) ||
-    isLfm25A2bModel(model)
+    usesEngineBudgetedConstrainedReasoning(model)
   );
 }
 
 export function constrainedToolReasoningCharLimitForModel(model: string): number {
-  if (isLfm25A2bModel(model)) return ENGINE_BUDGETED_CONSTRAINED_TOOL_REASONING_CHAR_LIMIT;
+  if (usesEngineBudgetedConstrainedReasoning(model)) {
+    return ENGINE_BUDGETED_CONSTRAINED_TOOL_REASONING_CHAR_LIMIT;
+  }
   return needsExpandedConstrainedToolReasoning(model)
     ? EXPANDED_CONSTRAINED_TOOL_REASONING_CHAR_LIMIT
     : CONSTRAINED_TOOL_REASONING_CHAR_LIMIT;
@@ -1383,7 +1400,7 @@ function disableThinkingForConstrainedTurn(
   model: string | undefined,
 ): void {
   setChatTemplateKwarg(body, 'enable_thinking', false);
-  downgradeReasoningDepthKwargs(body);
+  downgradeReasoningDepthKwargs(body, model);
   // llama.cpp's bundled GPT-OSS template ignores enable_thinking and defaults
   // reasoning_effort to "medium". Set the template's actual control for terse,
   // tool-constrained turns so the model can reach the required call promptly.
@@ -1393,7 +1410,7 @@ function disableThinkingForConstrainedTurn(
     setChatTemplateKwarg(body, 'reasoning_effort', 'low');
   }
   // Only llama-server accepts a per-request budget; DS4 strips the field.
-  if (shape === 'chat-template' && isLfm25A2bModel(model)) {
+  if (shape === 'chat-template' && usesEngineBudgetedConstrainedReasoning(model)) {
     const current = body.reasoning_budget_tokens;
     body.reasoning_budget_tokens =
       typeof current === 'number' && current > 0

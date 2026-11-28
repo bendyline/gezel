@@ -110,6 +110,9 @@ import run_2026_11_06_windows_saluki_native_0_1_57_fanout from './runs/2026-11-0
 import run_2026_11_09_windows_saluki_native_0_1_57_round3 from './runs/2026-11-09-windows-saluki-native-0-1-57-round3.json' with {
   type: 'json',
 };
+import run_2026_11_11_windows_small_outcome_bare from './runs/2026-11-11-windows-small-outcome-bare.json' with {
+  type: 'json',
+};
 import run_2026_11_13_spark_speculative_decoding from './runs/2026-11-13-spark-speculative-decoding.json' with {
   type: 'json',
 };
@@ -159,6 +162,7 @@ export const RUN_SHARDS: ScorecardDataset[] = [
   run_2026_11_03_windows_saluki_native_0_1_57_original as unknown as ScorecardDataset,
   run_2026_11_06_windows_saluki_native_0_1_57_fanout as unknown as ScorecardDataset,
   run_2026_11_09_windows_saluki_native_0_1_57_round3 as unknown as ScorecardDataset,
+  run_2026_11_11_windows_small_outcome_bare as unknown as ScorecardDataset,
   run_2026_11_13_spark_speculative_decoding as unknown as ScorecardDataset,
   run_docbench_fixes_0_2_2_2026_11_11 as unknown as ScorecardDataset,
   run_docbench_sweep_0_2_1_2026_11_10 as unknown as ScorecardDataset,

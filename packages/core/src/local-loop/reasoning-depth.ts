@@ -42,7 +42,31 @@ export const REASONING_DEPTH_TEMPLATE_KWARGS: ReadonlySet<string> = new Set([
 export const CONSTRAINED_TURN_REASONING_DEPTH = 'low';
 
 /**
- * Downgrade every declared reasoning-depth kwarg on `body` to `low`.
+ * Models whose template has no `enable_thinking` switch but whose depth dial
+ * has a value that means "no reasoning", matched by catalog-id prefix so
+ * sibling quants inherit it. For these, `low` is not a floor: Inkling 2 Mini's
+ * template reads only `reasoning_effort` and maps `low` to 0.2, which still
+ * thinks, and `none` to 0. With `low`, an immediate-write turn reasoned past
+ * the 1,024-character limit and was aborted six times in a row
+ * (wikipedia-research-brief, 2026-11-27).
+ */
+const REASONING_OFF_DEPTH_BY_MODEL_PREFIX: ReadonlyArray<readonly [prefix: string, depth: string]> =
+  [['inkling', 'none']];
+
+/** The depth a constrained turn pins this model's declared dials to. */
+export function constrainedTurnReasoningDepth(model: string | undefined): string {
+  if (model) {
+    for (const [prefix, depth] of REASONING_OFF_DEPTH_BY_MODEL_PREFIX) {
+      if (model.startsWith(prefix)) return depth;
+    }
+  }
+  return CONSTRAINED_TURN_REASONING_DEPTH;
+}
+
+/**
+ * Downgrade every declared reasoning-depth kwarg on `body` to the model's
+ * constrained-turn depth (`low`, or the off value named above). The model is
+ * read from `body.model`, which both local engines set to the catalog id.
  *
  * Only rewrites keys the model already declared: writing a dial the template
  * does not read is at best inert and at worst raises inside the template (the
@@ -52,15 +76,19 @@ export const CONSTRAINED_TURN_REASONING_DEPTH = 'low';
  * Returns the keys it changed, so callers can log what actually moved rather
  * than asserting an effect they did not verify.
  */
-export function downgradeReasoningDepthKwargs(body: Record<string, unknown>): string[] {
+export function downgradeReasoningDepthKwargs(
+  body: Record<string, unknown>,
+  model: string | undefined = typeof body.model === 'string' ? body.model : undefined,
+): string[] {
   const declared = body.chat_template_kwargs;
   if (!declared || typeof declared !== 'object' || Array.isArray(declared)) return [];
   const kwargs = declared as Record<string, unknown>;
+  const depth = constrainedTurnReasoningDepth(model);
   const changed: string[] = [];
   for (const key of Object.keys(kwargs)) {
     if (!REASONING_DEPTH_TEMPLATE_KWARGS.has(key)) continue;
-    if (kwargs[key] === CONSTRAINED_TURN_REASONING_DEPTH) continue;
-    kwargs[key] = CONSTRAINED_TURN_REASONING_DEPTH;
+    if (kwargs[key] === depth) continue;
+    kwargs[key] = depth;
     changed.push(key);
   }
   return changed;

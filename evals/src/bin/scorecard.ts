@@ -41,8 +41,6 @@ import {
   buildSuiteScoreboard,
   describeProvenance,
   mergeShards,
-  shardFileName,
-  splitIntoShards,
 } from '@bendyline/gezel';
 import type { ScorecardDataset, ScorecardModelResult, ScorecardRun } from '@bendyline/gezel';
 import { classifyEvalModelTier, modelBillionsForEval } from '../model-tier.ts';
@@ -65,6 +63,7 @@ import { suiteScenarios } from '../suites.ts';
 import type { MatrixSummary } from '../types.ts';
 import { assertKnownFlags, parseArgs } from './args.ts';
 import { resolveSuitesForRun, suitesFlagFragment } from './scorecard-args.ts';
+import { writeRunShards } from './scorecard-shards.ts';
 
 /**
  * The suites a scorecard covers by default.
@@ -173,30 +172,16 @@ function formatWithBiome(paths: string[]): void {
   }
 }
 
-function writeDataset(target: string, dataset: ScorecardDataset): void {
+function writeDataset(target: string, dataset: ScorecardDataset, runId: string): void {
   if (target !== publishedDatasetDir) {
     mkdirSync(dirname(target), { recursive: true });
     writeFileSync(target, `${JSON.stringify(dataset, null, 2)}\n`);
     return;
   }
 
-  // One file per sweep. Only shards whose bytes actually changed are
-  // rewritten: an ingest that re-reads fourteen sweeps to correct one must
-  // not show up as fourteen modified files in the diff, which is most of
-  // what sharding bought.
-  mkdirSync(target, { recursive: true });
-  const touched: string[] = [];
-  for (const shard of splitIntoShards(dataset)) {
-    const runId = shard.runs[0]?.id;
-    if (!runId) continue;
-    const path = join(target, shardFileName(runId));
-    const next = `${JSON.stringify(shard, null, 2)}\n`;
-    const current = existsSync(path) ? readFileSync(path, 'utf8') : null;
-    if (current === next) continue;
-    writeFileSync(path, next);
-    touched.push(path);
-  }
-  formatWithBiome(touched);
+  // One file per sweep, and only this sweep's: the other shards are read
+  // back in a normalized form that differs from their published bytes.
+  formatWithBiome(writeRunShards(target, dataset, new Set([runId])));
 
   // The barrel is what core actually imports (ESM cannot glob), so a new
   // shard that never reaches it is a sweep silently missing from the
@@ -411,7 +396,7 @@ function main(): void {
   const persist = (): void => {
     if (results.length === 0) return;
     const merged = mergeScorecard(readDataset(datasetPath), buildRun(), results);
-    writeDataset(datasetPath, merged);
+    writeDataset(datasetPath, merged, runId);
   };
 
   for (const model of models) {

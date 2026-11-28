@@ -26,13 +26,13 @@ describe('measuredResultFor', () => {
   });
 
   it('falls back to another platform rather than saying nothing, and names it', () => {
-    const measured = measuredResultFor(SCORECARD, 'gemma4-e2b-q4', {
+    const measured = measuredResultFor(SCORECARD, 'btl4-35b-q4', {
       platform: 'win32',
       arch: 'x64',
       label: 'Windows',
     });
     expect(measured?.sameHardwareClass).toBe(false);
-    expect(measuredClaim(measured)).toBe('42% general (M5 Max)');
+    expect(measuredClaim(measured)).toBe('85% general (M5 Max)');
   });
 
   it('says not measured for a model no round has run', () => {

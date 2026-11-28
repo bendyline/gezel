@@ -66,22 +66,25 @@ export type TemplateReasoningOpen = 'always' | 'unless-thinking-off';
  * splits on explicit paired tags, which is unambiguous.
  */
 export function templateOpensReasoning(modelDir: string): TemplateReasoningOpen | undefined {
-  let template: string;
+  const template = readChatTemplate(modelDir);
+  return template === undefined ? undefined : templateTextOpensReasoning(template);
+}
+
+/** The model's chat template: `chat_template.jinja`, else the tokenizer config's string. */
+export function readChatTemplate(modelDir: string): string | undefined {
   try {
-    template = readFileSync(join(modelDir, 'chat_template.jinja'), 'utf8');
+    return readFileSync(join(modelDir, 'chat_template.jinja'), 'utf8');
   } catch {
     try {
       const config = JSON.parse(readFileSync(join(modelDir, 'tokenizer_config.json'), 'utf8')) as {
         chat_template?: unknown;
       };
-      if (typeof config.chat_template !== 'string') return undefined;
-      template = config.chat_template;
+      return typeof config.chat_template === 'string' ? config.chat_template : undefined;
     } catch (err) {
       log.debug(`chat template unreadable in ${modelDir}: ${String(err)}`);
       return undefined;
     }
   }
-  return templateTextOpensReasoning(template);
 }
 
 /**

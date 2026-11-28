@@ -3,6 +3,7 @@ import {
   degradeMoeOffloadDecision,
   estimateExactPerSlotKvBytesF16,
   estimateKvReserveBytes,
+  estimateLinearHybridKvLinearization,
   estimateWindowedKvLinearization,
   planDenseFfnOffload,
   planMoeOffload,
@@ -629,5 +630,78 @@ describe('estimateWindowedKvLinearization', () => {
         headCountKv: undefined,
       }),
     ).toBeUndefined();
+  });
+});
+
+describe('looped core span (Inkling 2 Mini)', () => {
+  // 24 blocks, local (SWA 1024) except blocks 5, 11, 17 and 23; blocks
+  // [6, 18) run three times, each pass with its own cache. llama.cpp expands
+  // the cache to 24 + 2 * 12 = 48 slots: 8 global (5, 11 x3, 17 x3, 23) and
+  // 40 windowed.
+  const global = new Set([5, 11, 17, 23]);
+  const inkling = {
+    blockCount: 24,
+    headCountKv: 8,
+    headCountKvPerLayer: Array.from({ length: 24 }, () => 8),
+    slidingWindow: 1024,
+    slidingWindowPattern: Array.from({ length: 24 }, (_, i) => !global.has(i)),
+    keyLength: 128,
+    valueLength: 128,
+    keyLengthSwa: 128,
+    valueLengthSwa: 128,
+    loopSpan: { start: 6, end: 18, count: 3 },
+  };
+  const perSlotToken = 8 * (128 + 128) * 2;
+
+  it('prices the windowed cache per replayed slot', () => {
+    const w = estimateWindowedKvLinearization({ ...inkling, kvCacheType: 'f16' });
+    expect(w?.bytesPerToken).toBe(8 * perSlotToken);
+    expect(w?.fixedBytes).toBe(40 * perSlotToken * (1024 + 2048));
+  });
+
+  it('prices the full cache at 48 slots', () => {
+    expect(estimateKvReserveBytes({ ...inkling, ctxTokens: 4096, kvCacheType: 'f16' })).toBe(
+      48 * perSlotToken * 4096,
+    );
+  });
+
+  it('reading only the block count would halve the global cost', () => {
+    const unlooped = estimateWindowedKvLinearization({
+      ...inkling,
+      loopSpan: undefined,
+      kvCacheType: 'f16',
+    });
+    expect(unlooped?.bytesPerToken).toBe(4 * perSlotToken);
+  });
+
+  it('wins over loopCount and ignores a span that does not fit the stack', () => {
+    const both = estimateWindowedKvLinearization({ ...inkling, loopCount: 5, kvCacheType: 'f16' });
+    expect(both?.bytesPerToken).toBe(8 * perSlotToken);
+    const outside = estimateWindowedKvLinearization({
+      ...inkling,
+      loopSpan: { start: 6, end: 30, count: 3 },
+      kvCacheType: 'f16',
+    });
+    expect(outside?.bytesPerToken).toBe(4 * perSlotToken);
+  });
+
+  it('weights a linear-attention hybrid by its passes too', () => {
+    const hybrid = estimateLinearHybridKvLinearization({
+      blockCount: 8,
+      headCountKv: 2,
+      keyLength: 128,
+      valueLength: 128,
+      fullAttentionInterval: 4,
+      ssmInnerSize: 1024,
+      ssmStateSize: 16,
+      ssmConvKernel: 4,
+      loopSpan: { start: 4, end: 8, count: 2 },
+      kvCacheType: 'f16',
+    });
+    // Full-attention layers are 3 and 7; only 7 is in the span.
+    expect(hybrid?.bytesPerToken).toBe(3 * 2 * 256 * 2);
+    const linearState = (1024 * 3 + 1024 * 16) * 4;
+    // Linear layers 0-2 once, 4-6 twice.
+    expect(hybrid?.fixedBytes).toBe(9 * linearState);
   });
 });

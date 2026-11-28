@@ -98,6 +98,13 @@ export function ggufQuantizationTag(summary: {
   return name.replace(/^(?:MOSTLY|ALL)_/, '');
 }
 
+/** A looped core span: blocks `[start, end)` run `count` times. See {@link GgufSummary.loopSpan}. */
+export interface KvLoopSpan {
+  start: number;
+  end: number;
+  count: number;
+}
+
 export interface GgufSummary {
   magic: string;
   version: number;
@@ -185,6 +192,19 @@ export interface GgufSummary {
    * Absent / `1` on ordinary models.
    */
   loopCount?: number;
+  /**
+   * `<arch>.loop.{start,end,count}` — a transformer that loops only a CORE
+   * span of its blocks. Blocks in `[start, end)` run `count` times over shared
+   * weights, each pass with its own KV and conv state; the blocks outside the
+   * span run once. llama.cpp expands the cache to
+   * `blockCount + (count - 1) * (end - start)` slots, each replaying the
+   * SWA/global type of its block. Inkling 2 Mini declares 24 blocks with core
+   * `[6, 18)` x 3, so 48 slots: reading `blockCount` alone priced its global
+   * KV at half of what the engine allocates.
+   *
+   * Set only when all three keys are present. Absent on ordinary models.
+   */
+  loopSpan?: KvLoopSpan;
   /** `<arch>.attention.key_length_swa` — per-head K dim on SWA layers when it differs (Gemma 4: 256 vs 512). */
   keyLengthSwa?: number;
   /** `<arch>.attention.value_length_swa` — per-head V dim on SWA layers when it differs. */
@@ -782,6 +802,9 @@ function parseGgufSummary(source: GgufByteSource, opts?: ReadGgufSummaryOptions)
 
   let alignment = DEFAULT_ALIGNMENT;
   const metadataKeys: string[] | undefined = opts?.includeMetadataKeys ? [] : undefined;
+  let loopStart: number | undefined;
+  let loopEnd: number | undefined;
+  let loopPasses: number | undefined;
 
   for (let i = 0n; i < metadataCount; i++) {
     const key = r.string();
@@ -872,6 +895,12 @@ function parseGgufSummary(source: GgufByteSource, opts?: ReadGgufSummaryOptions)
       summary.sharedKvLayers = readUintScalar(r, type);
     } else if (key.endsWith('.num_loops')) {
       summary.loopCount = readUintScalar(r, type);
+    } else if (key.endsWith('.loop.start')) {
+      loopStart = readUintScalar(r, type);
+    } else if (key.endsWith('.loop.end')) {
+      loopEnd = readUintScalar(r, type);
+    } else if (key.endsWith('.loop.count')) {
+      loopPasses = readUintScalar(r, type);
     } else if (key.endsWith('.attention.key_length_swa')) {
       summary.keyLengthSwa = readUintScalar(r, type);
     } else if (key.endsWith('.attention.value_length_swa')) {
@@ -891,6 +920,9 @@ function parseGgufSummary(source: GgufByteSource, opts?: ReadGgufSummaryOptions)
     }
   }
   if (metadataKeys) summary.metadataKeys = metadataKeys;
+  if (loopStart !== undefined && loopEnd !== undefined && loopPasses !== undefined) {
+    summary.loopSpan = { start: loopStart, end: loopEnd, count: loopPasses };
+  }
 
   // Tensor-info section follows the metadata. `includeTensors` reads
   // just the names — the ground-truth way to detect MoE (`*_exps`) and

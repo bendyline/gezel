@@ -40,6 +40,8 @@
  * supervisor's `recoverStartup` hook.
  */
 
+import type { KvLoopSpan } from './gguf-metadata.js';
+
 /** 1 GiB of headroom reserved for driver/OS/other-apps beyond the model. */
 const DEFAULT_MARGIN_BYTES = 1024 ** 3;
 
@@ -569,6 +571,11 @@ export interface KvReserveInput {
    * Absent / 1 on ordinary models.
    */
   loopCount?: number | undefined;
+  /**
+   * `<arch>.loop.{start,end,count}` — only blocks `[start, end)` loop, each
+   * pass with its own cache (Inkling 2). Wins over {@link loopCount}.
+   */
+  loopSpan?: KvLoopSpan | undefined;
   keyLength?: number | undefined;
   valueLength?: number | undefined;
   /** SWA-layer head dims when they differ from the global ones (Gemma 4: 256 vs 512). */
@@ -617,7 +624,7 @@ export function estimateKvReserveBytes(input: KvReserveInput): number | undefine
   const vDim = input.valueLength ?? headDim;
   if (!kDim || !vDim) return undefined;
   const bytesPerElement = KV_BYTES_PER_ELEMENT[input.kvCacheType ?? 'f16'] ?? 2;
-  const loops = kvLoopMultiplier(input.loopCount);
+  const passes = kvLayerPasses(input, blockCount);
   const perLayerHeads = input.headCountKvPerLayer;
   const pattern = input.slidingWindowPattern;
   if (
@@ -631,9 +638,9 @@ export function estimateKvReserveBytes(input: KvReserveInput): number | undefine
     let elemsPerToken = 0;
     for (let layer = 0; layer < cacheLayerCount; layer++) {
       const heads = perLayerHeads?.[layer] ?? headCountKv ?? 0;
-      elemsPerToken += heads * (pattern[layer] ? kDimSwa + vDimSwa : kDim + vDim);
+      elemsPerToken += heads * (pattern[layer] ? kDimSwa + vDimSwa : kDim + vDim) * passes(layer);
     }
-    return Math.round(elemsPerToken * ctxTokens * bytesPerElement * loops);
+    return Math.round(elemsPerToken * ctxTokens * bytesPerElement);
   }
   if (!headCountKv) return undefined;
   // Linear-attention hybrids: only the full-attention layers hold a cache
@@ -641,10 +648,12 @@ export function estimateKvReserveBytes(input: KvReserveInput): number | undefine
   // term) because callers derive bytes-per-token by dividing this by a
   // reference context — folding a fixed cost in there would inflate the
   // slope. The fixed part belongs to the linearization below.
-  const scalingLayers = fullAttentionLayerCount(cacheLayerCount, input.fullAttentionInterval);
-  return Math.round(
-    scalingLayers * ctxTokens * headCountKv * (kDim + vDim) * bytesPerElement * loops,
+  const scalingLayers = fullAttentionLayerCount(
+    cacheLayerCount,
+    input.fullAttentionInterval,
+    passes,
   );
+  return Math.round(scalingLayers * ctxTokens * headCountKv * (kDim + vDim) * bytesPerElement);
 }
 
 /**
@@ -653,17 +662,40 @@ export function estimateKvReserveBytes(input: KvReserveInput): number | undefine
  * their attention type and do not allocate their own cache tensors.
  */
 /**
- * KV multiplier for a looped transformer. Deliberately NOT folded into
- * {@link cacheOwningLayerCount}: that count also bounds the per-layer loops
- * that index `slidingWindowPattern` / `headCountKvPerLayer`, which are arrays
- * of LOGICAL layers — multiplying it there would read off the end. The loops
- * replay the same logical stack, so the honest place to apply the factor is
- * the per-token total each estimator returns.
+ * How many cache slots each logical layer owns on a looped transformer.
+ * Deliberately NOT folded into {@link cacheOwningLayerCount}: that count also
+ * bounds the per-layer loops that index `slidingWindowPattern` /
+ * `headCountKvPerLayer`, which are arrays of LOGICAL layers — multiplying it
+ * there would read off the end. A loop replays logical layers, so each
+ * estimator weights a layer's per-token cost by its passes.
+ *
+ * A core span (`loopSpan`, Inkling 2) loops only blocks `[start, end)`;
+ * `loopCount` loops the whole stack. A span that does not fit the stack is
+ * ignored rather than guessed at.
  */
-function kvLoopMultiplier(loopCount: number | undefined): number {
-  return typeof loopCount === 'number' && Number.isFinite(loopCount) && loopCount > 1
-    ? Math.floor(loopCount)
-    : 1;
+function kvLayerPasses(
+  input: { loopCount?: number | undefined; loopSpan?: KvLoopSpan | undefined },
+  blockCount: number,
+): (layer: number) => number {
+  const span = input.loopSpan;
+  if (
+    span &&
+    Number.isInteger(span.start) &&
+    Number.isInteger(span.end) &&
+    Number.isInteger(span.count) &&
+    span.count > 1 &&
+    span.start >= 0 &&
+    span.start < span.end &&
+    span.end <= blockCount
+  ) {
+    return (layer) => (layer >= span.start && layer < span.end ? span.count : 1);
+  }
+  const loopCount = input.loopCount;
+  const loops =
+    typeof loopCount === 'number' && Number.isFinite(loopCount) && loopCount > 1
+      ? Math.floor(loopCount)
+      : 1;
+  return () => loops;
 }
 
 function cacheOwningLayerCount(blockCount: number, sharedKvLayers: number | undefined): number {
@@ -680,11 +712,19 @@ function cacheOwningLayerCount(blockCount: number, sharedKvLayers: number | unde
  * (llama.cpp marks layer `i` full-attention when `(i + 1) % interval == 0`,
  * so 40 layers at interval 4 gives 10).
  */
-function fullAttentionLayerCount(blockCount: number, interval: number | undefined): number {
-  if (!interval || interval <= 1) return blockCount;
+function fullAttentionLayerCount(
+  blockCount: number,
+  interval: number | undefined,
+  passes: (layer: number) => number = () => 1,
+): number {
+  let all = 0;
+  for (let layer = 0; layer < blockCount; layer++) all += passes(layer);
+  if (!interval || interval <= 1) return all;
   let n = 0;
-  for (let layer = 0; layer < blockCount; layer++) if ((layer + 1) % interval === 0) n++;
-  return n > 0 ? n : blockCount;
+  for (let layer = 0; layer < blockCount; layer++) {
+    if ((layer + 1) % interval === 0) n += passes(layer);
+  }
+  return n > 0 ? n : all;
 }
 
 /**
@@ -729,6 +769,11 @@ export interface WindowedKvInput {
    * Absent / 1 on ordinary models.
    */
   loopCount?: number | undefined;
+  /**
+   * `<arch>.loop.{start,end,count}` — only blocks `[start, end)` loop, each
+   * pass with its own cache (Inkling 2). Wins over {@link loopCount}.
+   */
+  loopSpan?: KvLoopSpan | undefined;
   keyLength?: number | undefined;
   valueLength?: number | undefined;
   /** SWA-layer head dims when they differ from the global ones (Gemma 4: 256 vs 512). */
@@ -841,12 +886,12 @@ export function estimateLinearHybridKvLinearization(
   const vDim = input.valueLength ?? headDim;
   if (!kDim || !vDim) return undefined;
   const bytesPerElement = KV_BYTES_PER_ELEMENT[input.kvCacheType ?? 'f16'] ?? 2;
-  const loops = kvLoopMultiplier(input.loopCount);
-  const scalingLayers = fullAttentionLayerCount(blockCount, fullAttentionInterval);
-  const linearLayers = blockCount - scalingLayers;
+  const passes = kvLayerPasses(input, blockCount);
+  const scalingLayers = fullAttentionLayerCount(blockCount, fullAttentionInterval, passes);
+  const linearLayers = fullAttentionLayerCount(blockCount, undefined, passes) - scalingLayers;
   return {
-    bytesPerToken: scalingLayers * headCountKv * (kDim + vDim) * bytesPerElement * loops,
-    fixedBytes: Math.round(linearLayers * linearLayerStateBytes(input) * loops),
+    bytesPerToken: scalingLayers * headCountKv * (kDim + vDim) * bytesPerElement,
+    fixedBytes: Math.round(linearLayers * linearLayerStateBytes(input)),
   };
 }
 
@@ -868,20 +913,21 @@ export function estimateWindowedKvLinearization(
   if (perLayerHeads && perLayerHeads.length !== blockCount) return undefined;
   if (!perLayerHeads && !input.headCountKv) return undefined;
   const bytesPerElement = KV_BYTES_PER_ELEMENT[input.kvCacheType ?? 'f16'] ?? 2;
-  const loops = kvLoopMultiplier(input.loopCount);
+  const passes = kvLayerPasses(input, blockCount);
   const cacheLayerCount = cacheOwningLayerCount(blockCount, input.sharedKvLayers);
   let globalElemsPerToken = 0;
   let swaElemsPerToken = 0;
   for (let layer = 0; layer < cacheLayerCount; layer++) {
     const heads = perLayerHeads?.[layer] ?? input.headCountKv;
     if (!heads) return undefined;
-    if (slidingWindowPattern[layer]) swaElemsPerToken += heads * (kDimSwa + vDimSwa);
-    else globalElemsPerToken += heads * (kDim + vDim);
+    if (slidingWindowPattern[layer])
+      swaElemsPerToken += heads * (kDimSwa + vDimSwa) * passes(layer);
+    else globalElemsPerToken += heads * (kDim + vDim) * passes(layer);
   }
   return {
-    bytesPerToken: globalElemsPerToken * bytesPerElement * loops,
+    bytesPerToken: globalElemsPerToken * bytesPerElement,
     fixedBytes: Math.round(
-      swaElemsPerToken * bytesPerElement * (slidingWindow + SWA_UBATCH_MARGIN_TOKENS) * loops,
+      swaElemsPerToken * bytesPerElement * (slidingWindow + SWA_UBATCH_MARGIN_TOKENS),
     ),
   };
 }
