@@ -10,6 +10,13 @@ const log = createLogger('terminal/persistent-shell');
 const OUTPUT_CAP_BYTES = 200_000;
 const DEFAULT_COMMAND_TIMEOUT_MS = 5 * 60_000;
 /**
+ * The least a shell gets to start, whatever the per-command budget. Startup
+ * is not a command: a cold Windows PowerShell took 4.5-6 s to its first
+ * prompt on hosted CI and once passed 10 s (2026-11-28), so a caller's short
+ * command budget killed shells that were only slow to start.
+ */
+const MIN_INIT_TIMEOUT_MS = 30_000;
+/**
  * How long a POSIX shell gets to die from `kill()`'s SIGHUP before it
  * is sent SIGKILL. bash with a DEBUG trap set can swallow a SIGHUP that
  * lands as it returns to its prompt: it defers the signal, then blocks
@@ -147,7 +154,10 @@ export interface PersistentShellOptions {
   cwd: string;
   /** Initial PTY width. Defaults to the desktop terminal surface's legacy width. */
   columns?: number;
-  /** Per-command wall-clock timeout. Default 5 min. */
+  /**
+   * Per-command wall-clock timeout. Default 5 min. Shell startup gets this
+   * or 30 s, whichever is longer.
+   */
   commandTimeoutMs?: number;
   /** Test seam: override the platform shell selection. */
   shell?: { file: string; args: string[]; initLines: string[]; platform: 'posix' | 'win32' };
@@ -441,7 +451,10 @@ export class PersistentShell {
     // sentinel-gated readiness with no extra special-casing. The
     // banner + echoback noise from spawn lands in the ring and is
     // discarded when the sentinel fires.
-    await shell.runInternal(initLine, { discardOutput: true });
+    await shell.runInternal(initLine, {
+      discardOutput: true,
+      timeoutMs: Math.max(shell.commandTimeoutMs, MIN_INIT_TIMEOUT_MS),
+    });
     return shell;
   }
 
@@ -613,6 +626,7 @@ export class PersistentShell {
     command: string,
     opts: {
       discardOutput: boolean;
+      timeoutMs?: number;
       onChunk?: (chunk: string) => void;
       onPromptDetected?: (info: {
         promptLine: string;
@@ -620,6 +634,7 @@ export class PersistentShell {
       }) => void;
     },
   ): Promise<PersistentShellRunResult> {
+    const timeoutMs = opts.timeoutMs ?? this.commandTimeoutMs;
     if (this.exited) {
       throw new Error(
         `Shell has exited (code=${this.exitInfo?.exitCode ?? -1}); the pool should respawn.`,
@@ -654,14 +669,20 @@ export class PersistentShell {
           text.length > 600 ? ` First output: ${JSON.stringify(text.slice(0, 200))}.` : '';
         log.warn(
           `${opts.discardOutput ? 'shell initialization' : 'command'} timed out after ${
-            this.commandTimeoutMs
+            timeoutMs
           }ms; killing shell.${head} Last output (${text.length} chars): ${JSON.stringify(
             text.slice(-400),
           )}`,
         );
         this.kill();
-        reject(new Error(`Command exceeded ${this.commandTimeoutMs}ms and the shell was killed.`));
-      }, this.commandTimeoutMs);
+        reject(
+          new Error(
+            opts.discardOutput
+              ? `The shell did not start within ${timeoutMs}ms and was killed.`
+              : `Command exceeded ${timeoutMs}ms and the shell was killed.`,
+          ),
+        );
+      }, timeoutMs);
       timer.unref?.();
 
       this.currentRun = {

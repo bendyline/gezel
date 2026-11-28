@@ -187,6 +187,31 @@ describe('PersistentShell (POSIX)', () => {
     }
   });
 
+  itPosix(
+    'gives a slow shell start its own budget, not the command budget',
+    async () => {
+      // The shell takes ~1 s to reach its first prompt, five times the command
+      // budget. Startup must still succeed, and commands keep the short budget.
+      const shell = await PersistentShell.start({
+        cwd: tmpdir(),
+        commandTimeoutMs: 200,
+        shell: {
+          file: '/bin/sh',
+          args: ['-c', 'sleep 1; exec /bin/bash --norc --noprofile -i'],
+          initLines: [],
+          platform: 'posix',
+        },
+      });
+      try {
+        await expect(shell.run('sleep 30')).rejects.toThrow(/timed out|killed/i);
+      } finally {
+        shell.kill();
+        await shell.whenExited();
+      }
+    },
+    40_000,
+  );
+
   itPosix('run() rejects after the shell has been killed', async () => {
     const shell = await PersistentShell.start({ cwd: tmpdir() });
     shell.kill();
@@ -324,8 +349,10 @@ describe('PersistentShell (Windows)', () => {
   // Both Windows CI runners hung here at every cap (5 s, then 10 s) from
   // 2026-11-24. The init line ran; the first prompt then stalled in
   // `Get-Location` autoloading across the image's large module set.
-  // Init and the command each have the 10 s command timeout below, so a
-  // real hang fails with its own message and logs what the PTY printed.
+  // After that fix a cold start still took 4.5-6 s and once passed 10 s
+  // (2026-11-28), so init now has its own 30 s floor and the command keeps
+  // the 10 s timeout below. A real hang still fails with its own message and
+  // logs what the PTY printed.
   itWindows(
     'finishes initialization before accepting and streaming the first command',
     async () => {
@@ -365,6 +392,7 @@ describe('PersistentShell (Windows)', () => {
         await shell.whenExited();
       }
     },
-    30_000,
+    // Startup's own 30 s budget plus the command's 10 s.
+    60_000,
   );
 });
