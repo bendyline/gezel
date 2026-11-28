@@ -1,6 +1,6 @@
 {
   "package": "@bendyline/gilde",
-  "version": "0.3.14",
+  "version": "0.3.15",
   "models": [
     {
       "name": "Qwen 3.5 (0.8B, Q4)",
